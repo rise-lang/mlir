@@ -38,7 +38,7 @@ set(LIBS
   MLIRPass
   MLIRQuantizerTransforms
   MLIRQuantOps
-  RISE
+  MLIRRise
   MLIRROCDLIR
   MLIRSPIRV
   MLIRStandardToSPIRVTransforms
