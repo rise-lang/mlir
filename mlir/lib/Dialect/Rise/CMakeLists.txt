@@ -1,4 +1,4 @@
-add_llvm_library(RISE
+add_llvm_library(MLIRRise
         RiseRegistration.cpp
         IR/Attributes.cpp
         IR/Ops.cpp
@@ -8,5 +8,5 @@ add_llvm_library(RISE
         ADDITIONAL_HEADER_DIRS
         ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Rise
         )
-add_dependencies(RISE MLIRRiseOpsIncGen MLIRCallOpInterfacesIncGen LLVMSupport)
-target_link_libraries(RISE LLVMSupport)
+add_dependencies(MLIRRise MLIRRiseOpsIncGen MLIRCallOpInterfacesIncGen LLVMSupport)
+target_link_libraries(MLIRRise LLVMSupport)
