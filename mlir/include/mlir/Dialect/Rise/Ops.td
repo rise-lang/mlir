@@ -73,6 +73,12 @@ def NatAttr : Attr<CPred<"$_self.isa<NatAttr>()">,
 // Rise Operations
 //===----------------------------------------------------------------------===//
 
+def RiseModuleOp : Rise_Op<"module", [SingleBlockImplicitTerminator<"ReturnOp">]> {
+let summary = "rise module";
+let regions = (region SizedRegion<1>:$region);
+let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
     let summary = "literal";
     let arguments = (ins AnyAttr:$literal);

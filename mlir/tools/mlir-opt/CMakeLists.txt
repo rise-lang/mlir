@@ -40,6 +40,7 @@ set(LIBS
   MLIRQuantOps
   MLIRRise
   MLIRRiseToStandard
+  MLIRRiseToImperative
   MLIRROCDLIR
   MLIRSPIRV
   MLIRStandardToSPIRVTransforms

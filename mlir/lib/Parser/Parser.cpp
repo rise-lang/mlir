@@ -3137,6 +3137,10 @@ public:
   /// returns null on failure.
   Value resolveSSAUse(SSAUseInfo useInfo, Type type);
 
+  /// Given a reference to an SSA value, return a reference. This
+  /// returns null on failure.
+  Value resolveSSAUseUnsafe(SSAUseInfo useInfo);
+
   ParseResult parseSSADefOrUseAndType(
       const std::function<ParseResult(SSAUseInfo, Type)> &action);
 
@@ -3482,6 +3486,20 @@ Value OperationParser::resolveSSAUse(SSAUseInfo useInfo, Type type) {
   entries[useInfo.number].second = useInfo.loc;
   return result;
 }
+
+
+/// Given an unbound reference to an SSA value and its type, return the value
+/// it specifies.  This returns null on failure.
+Value OperationParser::resolveSSAUseUnsafe(SSAUseInfo useInfo) {
+    auto &entries = getSSAValueEntry(useInfo.name);
+
+    // If we have already seen a value of this name, return it.
+    if (useInfo.number < entries.size() && entries[useInfo.number].first) {
+        auto result = entries[useInfo.number].first;
+        return result;
+    }
+}
+
 
 /// Parse an SSA use with an associated type.
 ///
@@ -4178,6 +4196,19 @@ public:
     }
     return failure();
   }
+
+  /// Resolve an operand to an SSA value, emitting an error on failure.
+  ParseResult resolveOperandUnsafe(const OperandType &operand,
+                            SmallVectorImpl<Value> &result) override {
+      OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
+                                                   operand.location};
+      if (auto value = parser.resolveSSAUseUnsafe(operandInfo)) {
+          result.push_back(value);
+          return success();
+      }
+      return failure();
+  }
+
 
   /// Parse an AffineMap of SSA ids.
   ParseResult

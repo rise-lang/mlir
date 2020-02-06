@@ -18,13 +18,15 @@ class OwningRewritePatternList;
 ///
 void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
-
+void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
+                                         MLIRContext *ctx);
 namespace rise {
 
 
 
 
 std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToStandardPass();
+std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToImperativePass();
 
 
 

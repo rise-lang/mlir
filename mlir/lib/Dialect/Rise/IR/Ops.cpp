@@ -43,6 +43,24 @@ namespace mlir {
 namespace rise {
 
 //===----------------------------------------------------------------------===//
+// RiseModuleOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseModuleOp(OpAsmParser &parser, OperationState &result) {
+    auto &builder = parser.getBuilder();
+    SmallVector<OpAsmParser::OperandType, 4> arguments;
+    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+
+    // Parse body of lambda
+    Region *body = result.addRegion();
+    if (parser.parseRegion(*body, arguments, argumentTypes))
+        return failure();
+
+    LambdaOp::ensureTerminator(*body, builder, result.location);
+    return success();
+}
+
+
+//===----------------------------------------------------------------------===//
 // LambdaOp
 //===----------------------------------------------------------------------===//
 ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
@@ -86,6 +104,8 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 // ApplyOp
 //===----------------------------------------------------------------------===//
 ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
+    bool simplified = true;
+
     auto &builder = parser.getBuilder();
     OpAsmParser::OperandType funOperand;
     FunType funType;
@@ -96,17 +116,25 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     if (parser.parseOperand(funOperand))
         return failure();
 
-    //parse type of the function
-    if (parser.parseColonType(funType))
-        return failure();
+    if (!simplified) {
+        //parse type of the function
+        if (parser.parseColonType(funType))
+            return failure();
+    }
 
     //TODO: we dont want to have to explicitly give our type
     ///resolve operand adds it to the operands of this operation.
     /// I have not found another way to add it, yet
     /// result.addOperands expects a mlir::Value, which has to contain the Type of the
     /// Operand already, which I don't know here
-    if (parser.resolveOperand(funOperand, funType, result.operands))
-        failure();
+    if (!simplified) {
+        if (parser.resolveOperand(funOperand, funType, result.operands))
+            failure();
+    } else {
+        if (parser.resolveOperandUnsafe(funOperand, result.operands))
+            failure();
+    }
+    funType = result.operands.front().getType().dyn_cast<FunType>();
 
     //parse arguments
     if (parser.parseTrailingOperandList(arguments))

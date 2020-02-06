@@ -466,6 +466,10 @@ public:
   virtual ParseResult resolveOperand(const OperandType &operand, Type type,
                                      SmallVectorImpl<Value> &result) = 0;
 
+  /// Resolve an operand to an SSA value
+  virtual ParseResult resolveOperandUnsafe(const OperandType &operand,
+                                     SmallVectorImpl<Value> &result) = 0;
+
   /// Resolve a list of operands to SSA values, emitting an error on failure, or
   /// appending the results to the list on success. This method should be used
   /// when all operands have the same type.

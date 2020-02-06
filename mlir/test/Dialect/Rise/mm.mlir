@@ -29,7 +29,6 @@
             %addFun = rise.add #rise.int
             %initializer = rise.literal #rise.lit<int<0>>
             %reduce10Ints = rise.reduce #rise.nat<4> #rise.int #rise.int
-            %reduce10Ints2 = rise.reduce #rise.nat<4> #rise.int #rise.float
             %result = rise.apply %reduce10Ints : !rise.fun<fun<data<int> -> fun<data<int> -> data<int>>> -> fun<data<int> -> fun<data<array<4, int>> -> data<int>>>>, %addFun, %initializer, %multipliedArray
 
             rise.return %result : !rise.data<int>
