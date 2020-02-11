@@ -8,5 +8,26 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Dialect/Rise/Types.h"
 
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Module.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Support/Functional.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/Passes.h"
+#include "mlir/Transforms/Utils.h"
+
+#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/Rise/Dialect.h"
+#include "mlir/Dialect/Rise/Passes.h"
+
+namespace mlir{
+    namespace rise {
+        Block::OpListType* AccT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter);
+        Block::OpListType* ConT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter);
+        }
+}
+
 
 #endif //MLIR_CONVERTRISETOIMPERATIVE_H

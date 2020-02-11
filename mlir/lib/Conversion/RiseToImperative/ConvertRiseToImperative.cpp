@@ -2,20 +2,25 @@
 // Created by martin on 26/11/2019.
 //
 
-#include "mlir/Conversion/RiseToStandard/ConvertRiseToStandard.h"
+#include "mlir/Conversion/RiseToImperative/ConvertRiseToImperative.h"
 #include "mlir/Dialect/Rise/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
-
+#include "mlir/Dialect/LoopOps/LoopOps.h"
 #include "mlir/IR/Builders.h"
+
+#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/LoopOps/LoopOps.h"
+#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/IR/AffineExprVisitor.h"
+#include "mlir/IR/BlockAndValueMapping.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/Functional.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
 
 #include <iostream>
 
@@ -26,7 +31,7 @@ using namespace mlir::rise;
 namespace {
 struct ConvertRiseToImperativePass : public ModulePass<ConvertRiseToImperativePass> {
     void runOnModule() override;
-};
+    };
 } // namespace
 
 //===----------------------------------------------------------------------===//
@@ -55,7 +60,6 @@ PatternMatchResult ApplyToImpLowering::matchAndRewrite(ApplyOp applyOp,
 
 
 
-///module lowering (to be rise.module)
 struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
     using OpRewritePattern<RiseModuleOp>::OpRewritePattern;
 
@@ -68,7 +72,21 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
     Location loc = moduleOp.getLoc();
     Region &riseRegion = moduleOp.region();
 //    Region::BlockListType &blocklist = riseRegion.getBlocks();
+    Block &block = riseRegion.getBlocks().front();     // A rise region only has one block
 //    Region::BlockListType::reverse_iterator blockIterator = blocklist.rbegin();
+
+    /// For now start at the back and just find the first apply
+    ApplyOp lastApply;
+    for (auto op = block.rbegin(); op != block.rend(); op++) {
+        if (isa<ApplyOp>(*op)) {
+            lastApply = cast<ApplyOp>(*op);
+            emitRemark(loc) << "apply found";
+            break;
+        }
+    }
+    auto operations = &riseRegion.getBlocks().front().getOperations();
+    operations->back().erase(); //removes the reduce
+    auto loweed = AccT(operations, lastApply.getResult(), rewriter);
 
     /// We can get all operations inside this rise module and work on them.
     emitRemark(loc) << "I found the following operations:";
@@ -82,6 +100,68 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
     //TODO: We get an error because this requires us to replace the root op of the rewrite.
     return matchSuccess();
 }
+
+/// Acceptor Translation
+/// expression (List of Operations) for Acceptor Translation    - E in paper
+/// output "pointer" for Acceptor Translation                   - A in paper
+/// returns a (partially) lowered expression (list of operations)
+/// Using the existing OpListType should make things fairly straight forward.
+Block::OpListType* mlir::rise::AccT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter) { //loc not needed here, is carried by the individual ops.
+    emitRemark(expression->back().getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << expression->back().getName();
+    ApplyOp apply = cast<ApplyOp>(&expression->back());
+    expression->removeNodeFromList(apply);
+
+    /// find applied function
+    Operation* appliedFun; //= &expression->back(); //must not be undefined. Just initialized with the last one. Prob wrong approach
+    for (auto &op : *expression) {
+        if (op.getResult(0) == apply.fun()) {
+            emitRemark(op.getLoc()) << "found the applied function";
+            appliedFun = &op;
+
+            break;
+        }
+    }
+    expression->removeNodeFromList(appliedFun);
+    emitRemark(appliedFun->getLoc()) << "The applied fun is " << appliedFun->getName();
+
+    if (isa<ReduceOp>(appliedFun)) {
+        auto n = appliedFun->getAttrOfType<NatAttr>("n");
+        auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
+        auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
+        auto reductionFun = apply.getOperand(1);
+        auto initializer = apply.getOperand(2);
+        auto array = apply.getOperand(3);
+        emitRemark(appliedFun->getLoc()) << "Attributes: n:" << n.getValue().getIntValue() << " s: " << s.getValue().getKind() << " t: " << t.getValue().getKind() << " initializer: " << initializer.getType();
+
+        /// Here I know what to do with the reduce and where to find the information for its codegen. -> look up in apply
+
+        /// The lower upper bounds and the step also have to be Values.
+        Location loc = apply.getLoc();
+        auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
+        auto upperBound = rewriter.create<ConstantIndexOp>(loc, 3);
+        auto step = rewriter.create<ConstantIndexOp>(loc, 1);
+        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
+        /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
+//        expression->push_back(forLoop);
+
+    } else if (isa<MapOp>(appliedFun)){
+
+    } else {
+        emitRemark(appliedFun->getLoc()) << "lowering op: " << appliedFun->getName() << " not yet supported.";
+    }
+
+
+
+    return expression;
+}
+
+
+/// Continuation Translation
+Block::OpListType* mlir::rise::ConT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter) {
+//    emitRemark(loc) << "starting Continuation Translation";
+    return expression;
+}
+
 
 
 ///gather all patterns
