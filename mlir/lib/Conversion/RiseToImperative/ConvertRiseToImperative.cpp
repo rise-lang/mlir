@@ -69,6 +69,8 @@ struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
 };
 
 PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRewriter &rewriter) const {
+    rewriter.startRootUpdate(moduleOp);
+
     MLIRContext *context = rewriter.getContext();
     Location loc = moduleOp.getLoc();
     Region &riseRegion = moduleOp.region();
@@ -86,8 +88,8 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
         }
     }
     auto operations = &riseRegion.getBlocks().front().getOperations();
-    operations->back().erase(); //removes the reduce
-    auto lowered = AccT(&block, lastApply.getResult(), rewriter);
+//    operations->back().erase(); //removes the return - do I even want this?
+    AccT(&block, lastApply.getResult(), rewriter);
 
 
     /// We want to take the last operation (before the return?) and start translation from there.
@@ -99,16 +101,16 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 //    moduleOp.region().cloneInto(&newModule.getBodyRegion());
 //    rewriter.replaceOp(moduleOp, newModul);
 
-    /// Im sure this is not the correct thing to do. However this way I can debug my stuff now.
 //    auto loc2 = mlir::edsc::ScopedContext::getLocation(); //Not sure how to use this
+
+    rewriter.setInsertionPointToEnd(&moduleOp.region().front());
     rewriter.create<mlir::rise::ReturnOp>(moduleOp.getLoc());
     /// What is even happening here, do I have to insert this op now into the block op list?
     /// How can I get a handle to it then?
 
 
-
+    /// Im sure this is not the correct thing to do. However this way I can debug my stuff now.
     moduleOp.ensureTerminator(moduleOp.region(), rewriter, rewriter.getUnknownLoc()); //The location here is wrong.
-    rewriter.startRootUpdate(moduleOp);
     rewriter.finalizeRootUpdate(moduleOp);
 
 
@@ -131,10 +133,13 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a (partially) lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-Block::OpListType* mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
+void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
     Block::OpListType &operations = expression->getOperations();
-    emitRemark(operations.back().getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << expression->back().getName();
-    ApplyOp apply = cast<ApplyOp>(&operations.back());
+    emitRemark((++operations.rbegin())->getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << (++operations.rbegin())->getName();
+
+
+
+    ApplyOp apply = cast<ApplyOp>(*(++operations.rbegin()));
 //    operations.removeNodeFromList(apply);
 
     /// find applied function
@@ -165,16 +170,16 @@ Block::OpListType* mlir::rise::AccT(Block *expression, mlir::Value output, Patte
         Location loc = apply.getLoc();
         rewriter.eraseOp(apply);
 
-
+        rewriter.setInsertionPointToEnd(expression);
         auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
         auto upperBound = rewriter.create<ConstantIndexOp>(loc, 3);
         auto step = rewriter.create<ConstantIndexOp>(loc, 1);
-        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
+//        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
         /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
-        forLoop.region().getBlocks().clear();
+//        forLoop.region().getBlocks().clear();
 //        rewriter.inlineRegionBefore(expression->getParent(), forLoop.region(), forLoop.region().end());
 //        rewriter.inlineRegionBefore(forLoop.region(), expression);
-        rewriter.inlineRegionBefore(forLoop.region(), *expression->getParent(), expression->getParent()->end());
+//        rewriter.inlineRegionBefore(forLoop.region(), *expression->getParent(), expression->getParent()->end());
 //        expression->push_back(forLoop);
 //        expression->push_back(forLoop);
     } else if (isa<MapOp>(appliedFun)){
@@ -183,9 +188,29 @@ Block::OpListType* mlir::rise::AccT(Block *expression, mlir::Value output, Patte
         emitRemark(appliedFun->getLoc()) << "lowering op: " << appliedFun->getName() << " not yet supported.";
     }
 
+    //FIXME: This seems to work the way I want it, at least when looking at my emitted remarks. However, my IR is not changed.
+
+    //goal:
+    //func @main() {
+    //  %array = alloc() : memref<4xf32>
+    //  %init = alloc() : memref<1xf32>
+    //  %cst_0 = constant 0 : index
+    //
+    //  %lb = constant 0 : index
+    //  %ub = constant 4 : index //half open index, so 4 iterations
+    //  %step = constant 1 : index
+    //  loop.for %i = %lb to %ub step %step {
+    //    %elem = load %array[%i] : memref<4xf32>
+    //    %acc = load %init[%cst_0] : memref<1xf32>
+    //    %res = addf %acc, %elem : f32
+    //    store %res, %init[%cst_0] : memref<1xf32>
+    //  }
+    //  return
+    //
 
 
-    return &operations;
+
+
 }
 
 
