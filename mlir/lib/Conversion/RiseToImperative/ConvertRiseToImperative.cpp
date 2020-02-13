@@ -23,6 +23,7 @@
 #include "mlir/Transforms/Passes.h"
 
 #include <iostream>
+#include <mlir/EDSC/Builders.h>
 
 using namespace mlir;
 using namespace mlir::rise;
@@ -80,13 +81,39 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
     for (auto op = block.rbegin(); op != block.rend(); op++) {
         if (isa<ApplyOp>(*op)) {
             lastApply = cast<ApplyOp>(*op);
-            emitRemark(loc) << "apply found";
+            emitRemark(lastApply.getLoc()) << "apply found";
             break;
         }
     }
     auto operations = &riseRegion.getBlocks().front().getOperations();
     operations->back().erase(); //removes the reduce
-    auto loweed = AccT(operations, lastApply.getResult(), rewriter);
+    auto lowered = AccT(&block, lastApply.getResult(), rewriter);
+
+
+    /// We want to take the last operation (before the return?) and start translation from there.
+
+    //TODO: We get an error because this requires us to replace the root op of the rewrite.
+
+//    auto newModule = rewriter.create<ModuleOp>(moduleOp.getLoc());
+//    BlockAndValueMapping *mapping;
+//    moduleOp.region().cloneInto(&newModule.getBodyRegion());
+//    rewriter.replaceOp(moduleOp, newModul);
+
+    /// Im sure this is not the correct thing to do. However this way I can debug my stuff now.
+//    auto loc2 = mlir::edsc::ScopedContext::getLocation(); //Not sure how to use this
+    rewriter.create<mlir::rise::ReturnOp>(moduleOp.getLoc());
+    /// What is even happening here, do I have to insert this op now into the block op list?
+    /// How can I get a handle to it then?
+
+
+
+    moduleOp.ensureTerminator(moduleOp.region(), rewriter, rewriter.getUnknownLoc()); //The location here is wrong.
+    rewriter.startRootUpdate(moduleOp);
+    rewriter.finalizeRootUpdate(moduleOp);
+
+
+
+
 
     /// We can get all operations inside this rise module and work on them.
     emitRemark(loc) << "I found the following operations:";
@@ -95,9 +122,7 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
             emitRemark(operation.getLoc()) << "op: " << operation.getName().getStringRef();
         }
     }
-    /// We want to take the last operation (before the return?) and start translation from there.
 
-    //TODO: We get an error because this requires us to replace the root op of the rewrite.
     return matchSuccess();
 }
 
@@ -106,14 +131,15 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a (partially) lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-Block::OpListType* mlir::rise::AccT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter) { //loc not needed here, is carried by the individual ops.
-    emitRemark(expression->back().getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << expression->back().getName();
-    ApplyOp apply = cast<ApplyOp>(&expression->back());
-    expression->removeNodeFromList(apply);
+Block::OpListType* mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
+    Block::OpListType &operations = expression->getOperations();
+    emitRemark(operations.back().getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << expression->back().getName();
+    ApplyOp apply = cast<ApplyOp>(&operations.back());
+//    operations.removeNodeFromList(apply);
 
     /// find applied function
     Operation* appliedFun; //= &expression->back(); //must not be undefined. Just initialized with the last one. Prob wrong approach
-    for (auto &op : *expression) {
+    for (auto &op : operations) {
         if (op.getResult(0) == apply.fun()) {
             emitRemark(op.getLoc()) << "found the applied function";
             appliedFun = &op;
@@ -121,7 +147,7 @@ Block::OpListType* mlir::rise::AccT(Block::OpListType *expression, mlir::Value o
             break;
         }
     }
-    expression->removeNodeFromList(appliedFun);
+//    operations.removeNodeFromList(appliedFun);
     emitRemark(appliedFun->getLoc()) << "The applied fun is " << appliedFun->getName();
 
     if (isa<ReduceOp>(appliedFun)) {
@@ -137,13 +163,20 @@ Block::OpListType* mlir::rise::AccT(Block::OpListType *expression, mlir::Value o
 
         /// The lower upper bounds and the step also have to be Values.
         Location loc = apply.getLoc();
+        rewriter.eraseOp(apply);
+
+
         auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
         auto upperBound = rewriter.create<ConstantIndexOp>(loc, 3);
         auto step = rewriter.create<ConstantIndexOp>(loc, 1);
         auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
         /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
+        forLoop.region().getBlocks().clear();
+//        rewriter.inlineRegionBefore(expression->getParent(), forLoop.region(), forLoop.region().end());
+//        rewriter.inlineRegionBefore(forLoop.region(), expression);
+        rewriter.inlineRegionBefore(forLoop.region(), *expression->getParent(), expression->getParent()->end());
 //        expression->push_back(forLoop);
-
+//        expression->push_back(forLoop);
     } else if (isa<MapOp>(appliedFun)){
 
     } else {
@@ -152,14 +185,14 @@ Block::OpListType* mlir::rise::AccT(Block::OpListType *expression, mlir::Value o
 
 
 
-    return expression;
+    return &operations;
 }
 
 
 /// Continuation Translation
-Block::OpListType* mlir::rise::ConT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter) {
+Block::OpListType* mlir::rise::ConT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
 //    emitRemark(loc) << "starting Continuation Translation";
-    return expression;
+    return &expression->getOperations();
 }
 
 

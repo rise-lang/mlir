@@ -24,8 +24,8 @@
 
 namespace mlir{
     namespace rise {
-        Block::OpListType* AccT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter);
-        Block::OpListType* ConT(Block::OpListType *expression, mlir::Value output, PatternRewriter &rewriter);
+        Block::OpListType* AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter);
+        Block::OpListType* ConT(Block *expression, mlir::Value output, PatternRewriter &rewriter);
         }
 }
 
