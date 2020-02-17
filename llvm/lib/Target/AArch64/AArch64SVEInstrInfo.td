@@ -96,6 +96,12 @@ def AArch64rev       : SDNode<"AArch64ISD::REV", SDT_AArch64Rev>;
 def SDT_AArch64PTest : SDTypeProfile<0, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>]>;
 def AArch64ptest     : SDNode<"AArch64ISD::PTEST", SDT_AArch64PTest>;
 
+def SDT_AArch64DUP_PRED  : SDTypeProfile<1, 3, [SDTCisVec<0>, SDTCisSameAs<0,1>, SDTCisVec<2>, SDTCVecEltisVT<2,i1>]>;
+def AArch64dup_pred : SDNode<"AArch64ISD::DUP_PRED", SDT_AArch64DUP_PRED>;
+
+def SDT_IndexVector : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<1, 2>, SDTCisInt<2>]>;
+def index_vector : SDNode<"AArch64ISD::INDEX_VECTOR", SDT_IndexVector, []>;
+
 let Predicates = [HasSVE] in {
 
   defm RDFFR_PPz  : sve_int_rdffr_pred<0b0, "rdffr", int_aarch64_sve_rdffr_z>;
@@ -287,8 +293,8 @@ let Predicates = [HasSVE] in {
   defm DUP_ZZI : sve_int_perm_dup_i<"dup">;
 
   // Splat scalar register (predicated)
-  defm CPY_ZPmR : sve_int_perm_cpy_r<"cpy">;
-  defm CPY_ZPmV : sve_int_perm_cpy_v<"cpy">;
+  defm CPY_ZPmR : sve_int_perm_cpy_r<"cpy", AArch64dup_pred>;
+  defm CPY_ZPmV : sve_int_perm_cpy_v<"cpy", AArch64dup_pred>;
 
   // Select elements from either vector (predicated)
   defm SEL_ZPZZ    : sve_int_sel_vvv<"sel", vselect>;
@@ -958,10 +964,10 @@ let Predicates = [HasSVE] in {
   defm INCP_ZP     : sve_int_count_v<0b10000, "incp">;
   defm DECP_ZP     : sve_int_count_v<0b10100, "decp">;
 
-  defm INDEX_RR : sve_int_index_rr<"index">;
-  defm INDEX_IR : sve_int_index_ir<"index">;
-  defm INDEX_RI : sve_int_index_ri<"index">;
-  defm INDEX_II : sve_int_index_ii<"index">;
+  defm INDEX_RR : sve_int_index_rr<"index", index_vector>;
+  defm INDEX_IR : sve_int_index_ir<"index", index_vector>;
+  defm INDEX_RI : sve_int_index_ri<"index", index_vector>;
+  defm INDEX_II : sve_int_index_ii<"index", index_vector>;
 
   // Unpredicated shifts
   defm ASR_ZZI : sve_int_bin_cons_shift_imm_right<0b00, "asr">;
@@ -1396,23 +1402,23 @@ let Predicates = [HasSVE] in {
 
 let Predicates = [HasSVE2] in {
   // SVE2 integer multiply-add (indexed)
-  defm MLA_ZZZI : sve2_int_mla_by_indexed_elem<0b01, 0b0, "mla">;
-  defm MLS_ZZZI : sve2_int_mla_by_indexed_elem<0b01, 0b1, "mls">;
+  defm MLA_ZZZI : sve2_int_mla_by_indexed_elem<0b01, 0b0, "mla", int_aarch64_sve_mla_lane>;
+  defm MLS_ZZZI : sve2_int_mla_by_indexed_elem<0b01, 0b1, "mls", int_aarch64_sve_mls_lane>;
 
   // SVE2 saturating multiply-add high (indexed)
-  defm SQRDMLAH_ZZZI : sve2_int_mla_by_indexed_elem<0b10, 0b0, "sqrdmlah">;
-  defm SQRDMLSH_ZZZI : sve2_int_mla_by_indexed_elem<0b10, 0b1, "sqrdmlsh">;
+  defm SQRDMLAH_ZZZI : sve2_int_mla_by_indexed_elem<0b10, 0b0, "sqrdmlah", int_aarch64_sve_sqrdmlah_lane>;
+  defm SQRDMLSH_ZZZI : sve2_int_mla_by_indexed_elem<0b10, 0b1, "sqrdmlsh", int_aarch64_sve_sqrdmlsh_lane>;
 
   // SVE2 saturating multiply-add high (vectors, unpredicated)
-  defm SQRDMLAH_ZZZ : sve2_int_mla<0b0, "sqrdmlah">;
-  defm SQRDMLSH_ZZZ : sve2_int_mla<0b1, "sqrdmlsh">;
+  defm SQRDMLAH_ZZZ : sve2_int_mla<0b0, "sqrdmlah", int_aarch64_sve_sqrdmlah>;
+  defm SQRDMLSH_ZZZ : sve2_int_mla<0b1, "sqrdmlsh", int_aarch64_sve_sqrdmlsh>;
 
   // SVE2 integer multiply (indexed)
-  defm MUL_ZZZI : sve2_int_mul_by_indexed_elem<0b1110, "mul">;
+  defm MUL_ZZZI : sve2_int_mul_by_indexed_elem<0b1110, "mul", int_aarch64_sve_mul_lane>;
 
   // SVE2 saturating multiply high (indexed)
-  defm SQDMULH_ZZZI  : sve2_int_mul_by_indexed_elem<0b1100, "sqdmulh">;
-  defm SQRDMULH_ZZZI : sve2_int_mul_by_indexed_elem<0b1101, "sqrdmulh">;
+  defm SQDMULH_ZZZI  : sve2_int_mul_by_indexed_elem<0b1100, "sqdmulh",  int_aarch64_sve_sqdmulh_lane>;
+  defm SQRDMULH_ZZZI : sve2_int_mul_by_indexed_elem<0b1101, "sqrdmulh", int_aarch64_sve_sqrdmulh_lane>;
 
   // SVE2 signed saturating doubling multiply high (unpredicated)
   defm SQDMULH_ZZZ  : sve2_int_mul<0b100, "sqdmulh",  int_aarch64_sve_sqdmulh>;
@@ -1442,19 +1448,19 @@ let Predicates = [HasSVE2] in {
   def : Pat<(nxv2i64 (int_aarch64_sve_umulh (nxv2i1 (AArch64ptrue 31)), nxv2i64:$Op1, nxv2i64:$Op2)),
             (UMULH_ZZZ_D $Op1, $Op2)>;
   // SVE2 complex integer dot product (indexed)
-  defm CDOT_ZZZI : sve2_cintx_dot_by_indexed_elem<"cdot">;
+  defm CDOT_ZZZI : sve2_cintx_dot_by_indexed_elem<"cdot", int_aarch64_sve_cdot_lane>;
 
   // SVE2 complex integer dot product
-  defm CDOT_ZZZ : sve2_cintx_dot<"cdot">;
+  defm CDOT_ZZZ : sve2_cintx_dot<"cdot", int_aarch64_sve_cdot>;
 
   // SVE2 complex integer multiply-add (indexed)
-  defm CMLA_ZZZI      : sve2_cmla_by_indexed_elem<0b0, "cmla">;
+  defm CMLA_ZZZI      : sve2_cmla_by_indexed_elem<0b0, "cmla", int_aarch64_sve_cmla_lane_x>;
   // SVE2 complex saturating multiply-add (indexed)
-  defm SQRDCMLAH_ZZZI : sve2_cmla_by_indexed_elem<0b1, "sqrdcmlah">;
+  defm SQRDCMLAH_ZZZI : sve2_cmla_by_indexed_elem<0b1, "sqrdcmlah", int_aarch64_sve_sqrdcmlah_lane_x>;
 
   // SVE2 complex integer multiply-add
-  defm CMLA_ZZZ      : sve2_int_cmla<0b0, "cmla">;
-  defm SQRDCMLAH_ZZZ : sve2_int_cmla<0b1, "sqrdcmlah">;
+  defm CMLA_ZZZ      : sve2_int_cmla<0b0, "cmla",      int_aarch64_sve_cmla_x>;
+  defm SQRDCMLAH_ZZZ : sve2_int_cmla<0b1, "sqrdcmlah", int_aarch64_sve_sqrdcmlah_x>;
 
   // SVE2 integer multiply long (indexed)
   defm SMULLB_ZZZI : sve2_int_mul_long_by_indexed_elem<0b000, "smullb">;
@@ -1467,112 +1473,112 @@ let Predicates = [HasSVE2] in {
   defm SQDMULLT_ZZZI : sve2_int_mul_long_by_indexed_elem<0b101, "sqdmullt">;
 
   // SVE2 integer multiply-add long (indexed)
-  defm SMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1000, "smlalb">;
-  defm SMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1001, "smlalt">;
-  defm UMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1010, "umlalb">;
-  defm UMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1011, "umlalt">;
-  defm SMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1100, "smlslb">;
-  defm SMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1101, "smlslt">;
-  defm UMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1110, "umlslb">;
-  defm UMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1111, "umlslt">;
+  defm SMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1000, "smlalb", int_aarch64_sve_smlalb_lane>;
+  defm SMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1001, "smlalt", int_aarch64_sve_smlalt_lane>;
+  defm UMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1010, "umlalb", int_aarch64_sve_umlalb_lane>;
+  defm UMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1011, "umlalt", int_aarch64_sve_umlalt_lane>;
+  defm SMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1100, "smlslb", int_aarch64_sve_smlslb_lane>;
+  defm SMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1101, "smlslt", int_aarch64_sve_smlslt_lane>;
+  defm UMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1110, "umlslb", int_aarch64_sve_umlslb_lane>;
+  defm UMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b1111, "umlslt", int_aarch64_sve_umlslt_lane>;
 
   // SVE2 integer multiply-add long (vectors, unpredicated)
-  defm SMLALB_ZZZ : sve2_int_mla_long<0b10000, "smlalb">;
-  defm SMLALT_ZZZ : sve2_int_mla_long<0b10001, "smlalt">;
-  defm UMLALB_ZZZ : sve2_int_mla_long<0b10010, "umlalb">;
-  defm UMLALT_ZZZ : sve2_int_mla_long<0b10011, "umlalt">;
-  defm SMLSLB_ZZZ : sve2_int_mla_long<0b10100, "smlslb">;
-  defm SMLSLT_ZZZ : sve2_int_mla_long<0b10101, "smlslt">;
-  defm UMLSLB_ZZZ : sve2_int_mla_long<0b10110, "umlslb">;
-  defm UMLSLT_ZZZ : sve2_int_mla_long<0b10111, "umlslt">;
+  defm SMLALB_ZZZ : sve2_int_mla_long<0b10000, "smlalb", int_aarch64_sve_smlalb>;
+  defm SMLALT_ZZZ : sve2_int_mla_long<0b10001, "smlalt", int_aarch64_sve_smlalt>;
+  defm UMLALB_ZZZ : sve2_int_mla_long<0b10010, "umlalb", int_aarch64_sve_umlalb>;
+  defm UMLALT_ZZZ : sve2_int_mla_long<0b10011, "umlalt", int_aarch64_sve_umlalt>;
+  defm SMLSLB_ZZZ : sve2_int_mla_long<0b10100, "smlslb", int_aarch64_sve_smlslb>;
+  defm SMLSLT_ZZZ : sve2_int_mla_long<0b10101, "smlslt", int_aarch64_sve_smlslt>;
+  defm UMLSLB_ZZZ : sve2_int_mla_long<0b10110, "umlslb", int_aarch64_sve_umlslb>;
+  defm UMLSLT_ZZZ : sve2_int_mla_long<0b10111, "umlslt", int_aarch64_sve_umlslt>;
 
   // SVE2 saturating multiply-add long (indexed)
-  defm SQDMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0100, "sqdmlalb">;
-  defm SQDMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0101, "sqdmlalt">;
-  defm SQDMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0110, "sqdmlslb">;
-  defm SQDMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0111, "sqdmlslt">;
+  defm SQDMLALB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0100, "sqdmlalb", int_aarch64_sve_sqdmlalb_lane>;
+  defm SQDMLALT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0101, "sqdmlalt", int_aarch64_sve_sqdmlalt_lane>;
+  defm SQDMLSLB_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0110, "sqdmlslb", int_aarch64_sve_sqdmlslb_lane>;
+  defm SQDMLSLT_ZZZI : sve2_int_mla_long_by_indexed_elem<0b0111, "sqdmlslt", int_aarch64_sve_sqdmlslt_lane>;
 
   // SVE2 saturating multiply-add long (vectors, unpredicated)
-  defm SQDMLALB_ZZZ : sve2_int_mla_long<0b11000, "sqdmlalb">;
-  defm SQDMLALT_ZZZ : sve2_int_mla_long<0b11001, "sqdmlalt">;
-  defm SQDMLSLB_ZZZ : sve2_int_mla_long<0b11010, "sqdmlslb">;
-  defm SQDMLSLT_ZZZ : sve2_int_mla_long<0b11011, "sqdmlslt">;
+  defm SQDMLALB_ZZZ : sve2_int_mla_long<0b11000, "sqdmlalb", int_aarch64_sve_sqdmlalb>;
+  defm SQDMLALT_ZZZ : sve2_int_mla_long<0b11001, "sqdmlalt", int_aarch64_sve_sqdmlalt>;
+  defm SQDMLSLB_ZZZ : sve2_int_mla_long<0b11010, "sqdmlslb", int_aarch64_sve_sqdmlslb>;
+  defm SQDMLSLT_ZZZ : sve2_int_mla_long<0b11011, "sqdmlslt", int_aarch64_sve_sqdmlslt>;
 
   // SVE2 saturating multiply-add interleaved long
-  defm SQDMLALBT_ZZZ : sve2_int_mla_long<0b00010, "sqdmlalbt">;
-  defm SQDMLSLBT_ZZZ : sve2_int_mla_long<0b00011, "sqdmlslbt">;
+  defm SQDMLALBT_ZZZ : sve2_int_mla_long<0b00010, "sqdmlalbt", int_aarch64_sve_sqdmlalbt>;
+  defm SQDMLSLBT_ZZZ : sve2_int_mla_long<0b00011, "sqdmlslbt", int_aarch64_sve_sqdmlslbt>;
 
   // SVE2 integer halving add/subtract (predicated)
-  defm SHADD_ZPmZ  : sve2_int_arith_pred<0b100000, "shadd">;
-  defm UHADD_ZPmZ  : sve2_int_arith_pred<0b100010, "uhadd">;
-  defm SHSUB_ZPmZ  : sve2_int_arith_pred<0b100100, "shsub">;
-  defm UHSUB_ZPmZ  : sve2_int_arith_pred<0b100110, "uhsub">;
-  defm SRHADD_ZPmZ : sve2_int_arith_pred<0b101000, "srhadd">;
-  defm URHADD_ZPmZ : sve2_int_arith_pred<0b101010, "urhadd">;
-  defm SHSUBR_ZPmZ : sve2_int_arith_pred<0b101100, "shsubr">;
-  defm UHSUBR_ZPmZ : sve2_int_arith_pred<0b101110, "uhsubr">;
+  defm SHADD_ZPmZ  : sve2_int_arith_pred<0b100000, "shadd",  int_aarch64_sve_shadd>;
+  defm UHADD_ZPmZ  : sve2_int_arith_pred<0b100010, "uhadd",  int_aarch64_sve_uhadd>;
+  defm SHSUB_ZPmZ  : sve2_int_arith_pred<0b100100, "shsub",  int_aarch64_sve_shsub>;
+  defm UHSUB_ZPmZ  : sve2_int_arith_pred<0b100110, "uhsub",  int_aarch64_sve_uhsub>;
+  defm SRHADD_ZPmZ : sve2_int_arith_pred<0b101000, "srhadd", int_aarch64_sve_srhadd>;
+  defm URHADD_ZPmZ : sve2_int_arith_pred<0b101010, "urhadd", int_aarch64_sve_urhadd>;
+  defm SHSUBR_ZPmZ : sve2_int_arith_pred<0b101100, "shsubr", int_aarch64_sve_shsubr>;
+  defm UHSUBR_ZPmZ : sve2_int_arith_pred<0b101110, "uhsubr", int_aarch64_sve_uhsubr>;
 
   // SVE2 integer pairwise add and accumulate long
-  defm SADALP_ZPmZ : sve2_int_sadd_long_accum_pairwise<0, "sadalp">;
-  defm UADALP_ZPmZ : sve2_int_sadd_long_accum_pairwise<1, "uadalp">;
+  defm SADALP_ZPmZ : sve2_int_sadd_long_accum_pairwise<0, "sadalp", int_aarch64_sve_sadalp>;
+  defm UADALP_ZPmZ : sve2_int_sadd_long_accum_pairwise<1, "uadalp", int_aarch64_sve_uadalp>;
 
   // SVE2 integer pairwise arithmetic
-  defm ADDP_ZPmZ  : sve2_int_arith_pred<0b100011, "addp">;
-  defm SMAXP_ZPmZ : sve2_int_arith_pred<0b101001, "smaxp">;
-  defm UMAXP_ZPmZ : sve2_int_arith_pred<0b101011, "umaxp">;
-  defm SMINP_ZPmZ : sve2_int_arith_pred<0b101101, "sminp">;
-  defm UMINP_ZPmZ : sve2_int_arith_pred<0b101111, "uminp">;
+  defm ADDP_ZPmZ  : sve2_int_arith_pred<0b100011, "addp",  int_aarch64_sve_addp>;
+  defm SMAXP_ZPmZ : sve2_int_arith_pred<0b101001, "smaxp", int_aarch64_sve_smaxp>;
+  defm UMAXP_ZPmZ : sve2_int_arith_pred<0b101011, "umaxp", int_aarch64_sve_umaxp>;
+  defm SMINP_ZPmZ : sve2_int_arith_pred<0b101101, "sminp", int_aarch64_sve_sminp>;
+  defm UMINP_ZPmZ : sve2_int_arith_pred<0b101111, "uminp", int_aarch64_sve_uminp>;
 
   // SVE2 integer unary operations (predicated)
-  defm URECPE_ZPmZ  : sve2_int_un_pred_arit_s<0b000, "urecpe">;
-  defm URSQRTE_ZPmZ : sve2_int_un_pred_arit_s<0b001, "ursqrte">;
-  defm SQABS_ZPmZ   : sve2_int_un_pred_arit<0b100, "sqabs">;
-  defm SQNEG_ZPmZ   : sve2_int_un_pred_arit<0b101, "sqneg">;
+  defm URECPE_ZPmZ  : sve2_int_un_pred_arit_s<0b000, "urecpe",  int_aarch64_sve_urecpe>;
+  defm URSQRTE_ZPmZ : sve2_int_un_pred_arit_s<0b001, "ursqrte", int_aarch64_sve_ursqrte>;
+  defm SQABS_ZPmZ   : sve2_int_un_pred_arit<0b100,   "sqabs",   int_aarch64_sve_sqabs>;
+  defm SQNEG_ZPmZ   : sve2_int_un_pred_arit<0b101,   "sqneg",   int_aarch64_sve_sqneg>;
 
   // SVE2 saturating add/subtract
-  defm SQADD_ZPmZ  : sve2_int_arith_pred<0b110000, "sqadd">;
-  defm UQADD_ZPmZ  : sve2_int_arith_pred<0b110010, "uqadd">;
-  defm SQSUB_ZPmZ  : sve2_int_arith_pred<0b110100, "sqsub">;
-  defm UQSUB_ZPmZ  : sve2_int_arith_pred<0b110110, "uqsub">;
-  defm SUQADD_ZPmZ : sve2_int_arith_pred<0b111000, "suqadd">;
-  defm USQADD_ZPmZ : sve2_int_arith_pred<0b111010, "usqadd">;
-  defm SQSUBR_ZPmZ : sve2_int_arith_pred<0b111100, "sqsubr">;
-  defm UQSUBR_ZPmZ : sve2_int_arith_pred<0b111110, "uqsubr">;
+  defm SQADD_ZPmZ  : sve2_int_arith_pred<0b110000, "sqadd",  int_aarch64_sve_sqadd>;
+  defm UQADD_ZPmZ  : sve2_int_arith_pred<0b110010, "uqadd",  int_aarch64_sve_uqadd>;
+  defm SQSUB_ZPmZ  : sve2_int_arith_pred<0b110100, "sqsub",  int_aarch64_sve_sqsub>;
+  defm UQSUB_ZPmZ  : sve2_int_arith_pred<0b110110, "uqsub",  int_aarch64_sve_uqsub>;
+  defm SUQADD_ZPmZ : sve2_int_arith_pred<0b111000, "suqadd", int_aarch64_sve_suqadd>;
+  defm USQADD_ZPmZ : sve2_int_arith_pred<0b111010, "usqadd", int_aarch64_sve_usqadd>;
+  defm SQSUBR_ZPmZ : sve2_int_arith_pred<0b111100, "sqsubr", int_aarch64_sve_sqsubr>;
+  defm UQSUBR_ZPmZ : sve2_int_arith_pred<0b111110, "uqsubr", int_aarch64_sve_uqsubr>;
 
   // SVE2 saturating/rounding bitwise shift left (predicated)
-  defm SRSHL_ZPmZ   : sve2_int_arith_pred<0b000100, "srshl">;
-  defm URSHL_ZPmZ   : sve2_int_arith_pred<0b000110, "urshl">;
-  defm SRSHLR_ZPmZ  : sve2_int_arith_pred<0b001100, "srshlr">;
-  defm URSHLR_ZPmZ  : sve2_int_arith_pred<0b001110, "urshlr">;
-  defm SQSHL_ZPmZ   : sve2_int_arith_pred<0b010000, "sqshl">;
-  defm UQSHL_ZPmZ   : sve2_int_arith_pred<0b010010, "uqshl">;
-  defm SQRSHL_ZPmZ  : sve2_int_arith_pred<0b010100, "sqrshl">;
-  defm UQRSHL_ZPmZ  : sve2_int_arith_pred<0b010110, "uqrshl">;
-  defm SQSHLR_ZPmZ  : sve2_int_arith_pred<0b011000, "sqshlr">;
-  defm UQSHLR_ZPmZ  : sve2_int_arith_pred<0b011010, "uqshlr">;
-  defm SQRSHLR_ZPmZ : sve2_int_arith_pred<0b011100, "sqrshlr">;
-  defm UQRSHLR_ZPmZ : sve2_int_arith_pred<0b011110, "uqrshlr">;
+  defm SRSHL_ZPmZ   : sve2_int_arith_pred<0b000100, "srshl",   int_aarch64_sve_srshl>;
+  defm URSHL_ZPmZ   : sve2_int_arith_pred<0b000110, "urshl",   int_aarch64_sve_urshl>;
+  defm SRSHLR_ZPmZ  : sve2_int_arith_pred<0b001100, "srshlr",  null_frag>;
+  defm URSHLR_ZPmZ  : sve2_int_arith_pred<0b001110, "urshlr",  null_frag>;
+  defm SQSHL_ZPmZ   : sve2_int_arith_pred<0b010000, "sqshl",   int_aarch64_sve_sqshl>;
+  defm UQSHL_ZPmZ   : sve2_int_arith_pred<0b010010, "uqshl",   int_aarch64_sve_uqshl>;
+  defm SQRSHL_ZPmZ  : sve2_int_arith_pred<0b010100, "sqrshl",  int_aarch64_sve_sqrshl>;
+  defm UQRSHL_ZPmZ  : sve2_int_arith_pred<0b010110, "uqrshl",  int_aarch64_sve_uqrshl>;
+  defm SQSHLR_ZPmZ  : sve2_int_arith_pred<0b011000, "sqshlr",  null_frag>;
+  defm UQSHLR_ZPmZ  : sve2_int_arith_pred<0b011010, "uqshlr",  null_frag>;
+  defm SQRSHLR_ZPmZ : sve2_int_arith_pred<0b011100, "sqrshlr", null_frag>;
+  defm UQRSHLR_ZPmZ : sve2_int_arith_pred<0b011110, "uqrshlr", null_frag>;
 
   // SVE2 predicated shifts
-  defm SQSHL_ZPmI  : sve_int_bin_pred_shift_imm_left< 0b0110, "sqshl">;
-  defm UQSHL_ZPmI  : sve_int_bin_pred_shift_imm_left< 0b0111, "uqshl">;
-  defm SRSHR_ZPmI  : sve_int_bin_pred_shift_imm_right<0b1100, "srshr">;
-  defm URSHR_ZPmI  : sve_int_bin_pred_shift_imm_right<0b1101, "urshr">;
-  defm SQSHLU_ZPmI : sve_int_bin_pred_shift_imm_left< 0b1111, "sqshlu">;
+  defm SQSHL_ZPmI  : sve_int_bin_pred_shift_imm_left< 0b0110,  "sqshl">;
+  defm UQSHL_ZPmI  : sve_int_bin_pred_shift_imm_left< 0b0111,  "uqshl">;
+  defm SRSHR_ZPmI  : sve_int_bin_pred_shift_imm_right<0b1100,  "srshr",  int_aarch64_sve_srshr>;
+  defm URSHR_ZPmI  : sve_int_bin_pred_shift_imm_right<0b1101,  "urshr",  int_aarch64_sve_urshr>;
+  defm SQSHLU_ZPmI : sve2_int_bin_pred_shift_imm_left< 0b1111, "sqshlu", int_aarch64_sve_sqshlu>;
 
   // SVE2 integer add/subtract long
-  defm SADDLB_ZZZ : sve2_wide_int_arith_long<0b00000, "saddlb">;
-  defm SADDLT_ZZZ : sve2_wide_int_arith_long<0b00001, "saddlt">;
-  defm UADDLB_ZZZ : sve2_wide_int_arith_long<0b00010, "uaddlb">;
-  defm UADDLT_ZZZ : sve2_wide_int_arith_long<0b00011, "uaddlt">;
-  defm SSUBLB_ZZZ : sve2_wide_int_arith_long<0b00100, "ssublb">;
-  defm SSUBLT_ZZZ : sve2_wide_int_arith_long<0b00101, "ssublt">;
-  defm USUBLB_ZZZ : sve2_wide_int_arith_long<0b00110, "usublb">;
-  defm USUBLT_ZZZ : sve2_wide_int_arith_long<0b00111, "usublt">;
-  defm SABDLB_ZZZ : sve2_wide_int_arith_long<0b01100, "sabdlb">;
-  defm SABDLT_ZZZ : sve2_wide_int_arith_long<0b01101, "sabdlt">;
-  defm UABDLB_ZZZ : sve2_wide_int_arith_long<0b01110, "uabdlb">;
-  defm UABDLT_ZZZ : sve2_wide_int_arith_long<0b01111, "uabdlt">;
+  defm SADDLB_ZZZ : sve2_wide_int_arith_long<0b00000, "saddlb", int_aarch64_sve_saddlb>;
+  defm SADDLT_ZZZ : sve2_wide_int_arith_long<0b00001, "saddlt", int_aarch64_sve_saddlt>;
+  defm UADDLB_ZZZ : sve2_wide_int_arith_long<0b00010, "uaddlb", int_aarch64_sve_uaddlb>;
+  defm UADDLT_ZZZ : sve2_wide_int_arith_long<0b00011, "uaddlt", int_aarch64_sve_uaddlt>;
+  defm SSUBLB_ZZZ : sve2_wide_int_arith_long<0b00100, "ssublb", int_aarch64_sve_ssublb>;
+  defm SSUBLT_ZZZ : sve2_wide_int_arith_long<0b00101, "ssublt", int_aarch64_sve_ssublt>;
+  defm USUBLB_ZZZ : sve2_wide_int_arith_long<0b00110, "usublb", int_aarch64_sve_usublb>;
+  defm USUBLT_ZZZ : sve2_wide_int_arith_long<0b00111, "usublt", int_aarch64_sve_usublt>;
+  defm SABDLB_ZZZ : sve2_wide_int_arith_long<0b01100, "sabdlb", int_aarch64_sve_sabdlb>;
+  defm SABDLT_ZZZ : sve2_wide_int_arith_long<0b01101, "sabdlt", int_aarch64_sve_sabdlt>;
+  defm UABDLB_ZZZ : sve2_wide_int_arith_long<0b01110, "uabdlb", int_aarch64_sve_uabdlb>;
+  defm UABDLT_ZZZ : sve2_wide_int_arith_long<0b01111, "uabdlt", int_aarch64_sve_uabdlt>;
 
   // SVE2 integer add/subtract wide
   defm SADDWB_ZZZ : sve2_wide_int_arith_wide<0b000, "saddwb">;
@@ -1585,44 +1591,44 @@ let Predicates = [HasSVE2] in {
   defm USUBWT_ZZZ : sve2_wide_int_arith_wide<0b111, "usubwt">;
 
   // SVE2 integer multiply long
-  defm SQDMULLB_ZZZ : sve2_wide_int_arith_long<0b11000, "sqdmullb">;
-  defm SQDMULLT_ZZZ : sve2_wide_int_arith_long<0b11001, "sqdmullt">;
-  defm SMULLB_ZZZ   : sve2_wide_int_arith_long<0b11100, "smullb">;
-  defm SMULLT_ZZZ   : sve2_wide_int_arith_long<0b11101, "smullt">;
-  defm UMULLB_ZZZ   : sve2_wide_int_arith_long<0b11110, "umullb">;
-  defm UMULLT_ZZZ   : sve2_wide_int_arith_long<0b11111, "umullt">;
+  defm SQDMULLB_ZZZ : sve2_wide_int_arith_long<0b11000, "sqdmullb", int_aarch64_sve_sqdmullb>;
+  defm SQDMULLT_ZZZ : sve2_wide_int_arith_long<0b11001, "sqdmullt", int_aarch64_sve_sqdmullt>;
+  defm SMULLB_ZZZ   : sve2_wide_int_arith_long<0b11100, "smullb",   int_aarch64_sve_smullb>;
+  defm SMULLT_ZZZ   : sve2_wide_int_arith_long<0b11101, "smullt",   int_aarch64_sve_smullt>;
+  defm UMULLB_ZZZ   : sve2_wide_int_arith_long<0b11110, "umullb",   int_aarch64_sve_umullb>;
+  defm UMULLT_ZZZ   : sve2_wide_int_arith_long<0b11111, "umullt",   int_aarch64_sve_umullt>;
   defm PMULLB_ZZZ   : sve2_pmul_long<0b0, "pmullb">;
   defm PMULLT_ZZZ   : sve2_pmul_long<0b1, "pmullt">;
 
   // SVE2 bitwise shift and insert
-  defm SRI_ZZI : sve2_int_bin_shift_imm_right<0b0, "sri">;
-  defm SLI_ZZI : sve2_int_bin_shift_imm_left< 0b1, "sli">;
+  defm SRI_ZZI : sve2_int_bin_shift_imm_right<0b0, "sri", int_aarch64_sve_sri>;
+  defm SLI_ZZI : sve2_int_bin_shift_imm_left< 0b1, "sli", int_aarch64_sve_sli>;
 
   // SVE2 bitwise shift right and accumulate
-  defm SSRA_ZZI  : sve2_int_bin_accum_shift_imm_right<0b00, "ssra">;
-  defm USRA_ZZI  : sve2_int_bin_accum_shift_imm_right<0b01, "usra">;
-  defm SRSRA_ZZI : sve2_int_bin_accum_shift_imm_right<0b10, "srsra">;
-  defm URSRA_ZZI : sve2_int_bin_accum_shift_imm_right<0b11, "ursra">;
+  defm SSRA_ZZI  : sve2_int_bin_accum_shift_imm_right<0b00, "ssra",  int_aarch64_sve_ssra>;
+  defm USRA_ZZI  : sve2_int_bin_accum_shift_imm_right<0b01, "usra",  int_aarch64_sve_usra>;
+  defm SRSRA_ZZI : sve2_int_bin_accum_shift_imm_right<0b10, "srsra", int_aarch64_sve_srsra>;
+  defm URSRA_ZZI : sve2_int_bin_accum_shift_imm_right<0b11, "ursra", int_aarch64_sve_ursra>;
 
   // SVE2 complex integer add
-  defm CADD_ZZI   : sve2_int_cadd<0b0, "cadd">;
-  defm SQCADD_ZZI : sve2_int_cadd<0b1, "sqcadd">;
+  defm CADD_ZZI   : sve2_int_cadd<0b0, "cadd",   int_aarch64_sve_cadd_x>;
+  defm SQCADD_ZZI : sve2_int_cadd<0b1, "sqcadd", int_aarch64_sve_sqcadd_x>;
 
   // SVE2 integer absolute difference and accumulate
-  defm SABA_ZZZ : sve2_int_absdiff_accum<0b0, "saba">;
-  defm UABA_ZZZ : sve2_int_absdiff_accum<0b1, "uaba">;
+  defm SABA_ZZZ : sve2_int_absdiff_accum<0b0, "saba", int_aarch64_sve_saba>;
+  defm UABA_ZZZ : sve2_int_absdiff_accum<0b1, "uaba", int_aarch64_sve_uaba>;
 
   // SVE2 integer absolute difference and accumulate long
-  defm SABALB_ZZZ : sve2_int_absdiff_accum_long<0b00, "sabalb">;
-  defm SABALT_ZZZ : sve2_int_absdiff_accum_long<0b01, "sabalt">;
-  defm UABALB_ZZZ : sve2_int_absdiff_accum_long<0b10, "uabalb">;
-  defm UABALT_ZZZ : sve2_int_absdiff_accum_long<0b11, "uabalt">;
+  defm SABALB_ZZZ : sve2_int_absdiff_accum_long<0b00, "sabalb", int_aarch64_sve_sabalb>;
+  defm SABALT_ZZZ : sve2_int_absdiff_accum_long<0b01, "sabalt", int_aarch64_sve_sabalt>;
+  defm UABALB_ZZZ : sve2_int_absdiff_accum_long<0b10, "uabalb", int_aarch64_sve_uabalb>;
+  defm UABALT_ZZZ : sve2_int_absdiff_accum_long<0b11, "uabalt", int_aarch64_sve_uabalt>;
 
   // SVE2 integer add/subtract long with carry
-  defm ADCLB_ZZZ : sve2_int_addsub_long_carry<0b00, "adclb">;
-  defm ADCLT_ZZZ : sve2_int_addsub_long_carry<0b01, "adclt">;
-  defm SBCLB_ZZZ : sve2_int_addsub_long_carry<0b10, "sbclb">;
-  defm SBCLT_ZZZ : sve2_int_addsub_long_carry<0b11, "sbclt">;
+  defm ADCLB_ZZZ : sve2_int_addsub_long_carry<0b00, "adclb", int_aarch64_sve_adclb>;
+  defm ADCLT_ZZZ : sve2_int_addsub_long_carry<0b01, "adclt", int_aarch64_sve_adclt>;
+  defm SBCLB_ZZZ : sve2_int_addsub_long_carry<0b10, "sbclb", int_aarch64_sve_sbclb>;
+  defm SBCLT_ZZZ : sve2_int_addsub_long_carry<0b11, "sbclt", int_aarch64_sve_sbclt>;
 
   // SVE2 bitwise shift right narrow (bottom)
   defm SQSHRUNB_ZZI  : sve2_int_bin_shift_imm_right_narrow_bottom<0b000, "sqshrunb",  int_aarch64_sve_sqshrunb>;
@@ -1667,8 +1673,8 @@ let Predicates = [HasSVE2] in {
   defm SQXTUNT_ZZ : sve2_int_sat_extract_narrow_top<0b10, "sqxtunt", int_aarch64_sve_sqxtunt>;
 
   // SVE2 character match
-  defm MATCH_PPzZZ  : sve2_char_match<0b0, "match">;
-  defm NMATCH_PPzZZ : sve2_char_match<0b1, "nmatch">;
+  defm MATCH_PPzZZ  : sve2_char_match<0b0, "match",  int_aarch64_sve_match>;
+  defm NMATCH_PPzZZ : sve2_char_match<0b1, "nmatch", int_aarch64_sve_nmatch>;
 
   // SVE2 bitwise exclusive-or interleaved
   defm EORBT_ZZZ : sve2_bitwise_xor_interleaved<0b0, "eorbt">;
@@ -1681,15 +1687,15 @@ let Predicates = [HasSVE2] in {
   defm USHLLT_ZZI : sve2_bitwise_shift_left_long<0b11, "ushllt">;
 
   // SVE2 integer add/subtract interleaved long
-  defm SADDLBT_ZZZ : sve2_misc_int_addsub_long_interleaved<0b00, "saddlbt">;
-  defm SSUBLBT_ZZZ : sve2_misc_int_addsub_long_interleaved<0b10, "ssublbt">;
-  defm SSUBLTB_ZZZ : sve2_misc_int_addsub_long_interleaved<0b11, "ssubltb">;
+  defm SADDLBT_ZZZ : sve2_misc_int_addsub_long_interleaved<0b00, "saddlbt", int_aarch64_sve_saddlbt>;
+  defm SSUBLBT_ZZZ : sve2_misc_int_addsub_long_interleaved<0b10, "ssublbt", int_aarch64_sve_ssublbt>;
+  defm SSUBLTB_ZZZ : sve2_misc_int_addsub_long_interleaved<0b11, "ssubltb", int_aarch64_sve_ssubltb>;
 
   // SVE2 histogram generation (segment)
-  def HISTSEG_ZZZ : sve2_hist_gen_segment<"histseg">;
+  def HISTSEG_ZZZ : sve2_hist_gen_segment<"histseg", int_aarch64_sve_histseg>;
 
   // SVE2 histogram generation (vector)
-  defm HISTCNT_ZPzZZ : sve2_hist_gen_vector<"histcnt">;
+  defm HISTCNT_ZPzZZ : sve2_hist_gen_vector<"histcnt", int_aarch64_sve_histcnt>;
 
   // SVE2 floating-point base 2 logarithm as integer
   defm FLOGB_ZPmZ : sve2_fp_flogb<"flogb", int_aarch64_sve_flogb>;

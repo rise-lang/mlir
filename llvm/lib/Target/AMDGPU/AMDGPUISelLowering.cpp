@@ -16,7 +16,6 @@
 #include "AMDGPU.h"
 #include "AMDGPUCallLowering.h"
 #include "AMDGPUFrameLowering.h"
-#include "AMDGPURegisterInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "AMDGPUTargetMachine.h"
 #include "Utils/AMDGPUBaseInfo.h"
@@ -734,6 +733,26 @@ bool AMDGPUTargetLowering::isSDNodeAlwaysUniform(const SDNode * N) const {
   }
 }
 
+TargetLowering::NegatibleCost
+AMDGPUTargetLowering::getNegatibleCost(SDValue Op, SelectionDAG &DAG,
+                                       bool LegalOperations, bool ForCodeSize,
+                                       unsigned Depth) const {
+  switch (Op.getOpcode()) {
+  case ISD::FMA:
+  case ISD::FMAD: {
+    // Negating a fma is not free if it has users without source mods.
+    if (!allUsesHaveSourceMods(Op.getNode()))
+      return NegatibleCost::Expensive;
+    break;
+  }
+  default:
+    break;
+  }
+
+  return TargetLowering::getNegatibleCost(Op, DAG, LegalOperations, ForCodeSize,
+                                          Depth);
+}
+
 //===---------------------------------------------------------------------===//
 // Target Properties
 //===---------------------------------------------------------------------===//
@@ -1000,6 +1019,8 @@ void AMDGPUTargetLowering::analyzeFormalArgumentsCompute(
         assert(MemVT.getVectorNumElements() == 3 ||
                MemVT.getVectorNumElements() == 5);
         MemVT = MemVT.getPow2VectorType(State.getContext());
+      } else if (!MemVT.isSimple() && !MemVT.isVector()) {
+        MemVT = MemVT.getRoundIntegerType(State.getContext());
       }
 
       unsigned PartOffset = 0;
@@ -1587,7 +1608,7 @@ SDValue AMDGPUTargetLowering::LowerDIVREM24(SDValue Op, SelectionDAG &DAG,
   const AMDGPUMachineFunction *MFI = MF.getInfo<AMDGPUMachineFunction>();
 
   // float fr = mad(fqneg, fb, fa);
-  unsigned OpCode = MFI->getMode().FP32Denormals ?
+  unsigned OpCode = MFI->getMode().allFP32Denormals() ?
                     (unsigned)AMDGPUISD::FMAD_FTZ :
                     (unsigned)ISD::FMAD;
   SDValue fr = DAG.getNode(OpCode, DL, FltVT, fqneg, fb, fa);
@@ -1672,7 +1693,7 @@ void AMDGPUTargetLowering::LowerUDIVREM64(SDValue Op,
     const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
     // Compute denominator reciprocal.
-    unsigned FMAD = MFI->getMode().FP32Denormals ?
+    unsigned FMAD = MFI->getMode().allFP32Denormals() ?
                     (unsigned)AMDGPUISD::FMAD_FTZ :
                     (unsigned)ISD::FMAD;
 
@@ -4320,12 +4341,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(CONST_DATA_PTR)
   NODE_NAME_CASE(PC_ADD_REL_OFFSET)
   NODE_NAME_CASE(LDS)
-  NODE_NAME_CASE(KILL)
   NODE_NAME_CASE(DUMMY_CHAIN)
   case AMDGPUISD::FIRST_MEM_OPCODE_NUMBER: break;
-  NODE_NAME_CASE(INTERP_P1LL_F16)
-  NODE_NAME_CASE(INTERP_P1LV_F16)
-  NODE_NAME_CASE(INTERP_P2_F16)
   NODE_NAME_CASE(LOAD_D16_HI)
   NODE_NAME_CASE(LOAD_D16_LO)
   NODE_NAME_CASE(LOAD_D16_HI_I8)

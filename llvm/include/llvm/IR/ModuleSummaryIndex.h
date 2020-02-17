@@ -833,7 +833,8 @@ struct TypeTestResolution {
     Single,    ///< Single element (last example in "Short Inline Bit Vectors")
     AllOnes,   ///< All-ones bit vector ("Eliminating Bit Vector Checks for
                ///  All-Ones Bit Vectors")
-  } TheKind = Unsat;
+    Unknown,   ///< Unknown (analysis not performed, don't lower)
+  } TheKind = Unknown;
 
   /// Range of size-1 expressed as a bit width. For example, if the size is in
   /// range [1,256], this number will be 8. This helps generate the most compact
@@ -959,7 +960,8 @@ private:
   /// with that type identifier's metadata. Produced by per module summary
   /// analysis and consumed by thin link. For more information, see description
   /// above where TypeIdCompatibleVtableInfo is defined.
-  std::map<std::string, TypeIdCompatibleVtableInfo> TypeIdCompatibleVtableMap;
+  std::map<std::string, TypeIdCompatibleVtableInfo, std::less<>>
+      TypeIdCompatibleVtableMap;
 
   /// Mapping from original ID to GUID. If original ID can map to multiple
   /// GUIDs, it will be mapped to 0.
@@ -1026,7 +1028,7 @@ public:
   // in the way some record are interpreted, like flags for instance.
   // Note that incrementing this may require changes in both BitcodeReader.cpp
   // and BitcodeWriter.cpp.
-  static constexpr uint64_t BitcodeSummaryVersion = 8;
+  static constexpr uint64_t BitcodeSummaryVersion = 9;
 
   // Regular LTO module name for ASM writer
   static constexpr const char *getRegularLTOModuleName() {
@@ -1295,7 +1297,7 @@ public:
     NewName += ".llvm.";
     NewName += utostr((uint64_t(ModHash[0]) << 32) |
                       ModHash[1]); // Take the first 64 bits
-    return NewName.str();
+    return std::string(NewName.str());
   }
 
   /// Helper to obtain the unpromoted name for a global value (or the original
@@ -1341,7 +1343,7 @@ public:
       if (It->second.first == TypeId)
         return It->second.second;
     auto It = TypeIdMap.insert(
-        {GlobalValue::getGUID(TypeId), {TypeId, TypeIdSummary()}});
+        {GlobalValue::getGUID(TypeId), {std::string(TypeId), TypeIdSummary()}});
     return It->second.second;
   }
 
@@ -1361,8 +1363,7 @@ public:
             TypeId));
   }
 
-  const std::map<std::string, TypeIdCompatibleVtableInfo> &
-  typeIdCompatibleVtableMap() const {
+  const auto &typeIdCompatibleVtableMap() const {
     return TypeIdCompatibleVtableMap;
   }
 
@@ -1371,7 +1372,7 @@ public:
   /// the ThinLTO backends.
   TypeIdCompatibleVtableInfo &
   getOrInsertTypeIdCompatibleVtableSummary(StringRef TypeId) {
-    return TypeIdCompatibleVtableMap[TypeId];
+    return TypeIdCompatibleVtableMap[std::string(TypeId)];
   }
 
   /// For the given \p TypeId, this returns the TypeIdCompatibleVtableMap

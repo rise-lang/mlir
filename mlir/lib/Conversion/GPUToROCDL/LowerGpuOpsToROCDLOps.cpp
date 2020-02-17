@@ -50,23 +50,24 @@ public:
         GPUIndexIntrinsicOpLowering<gpu::GridDimOp, ROCDL::GridDimXOp,
                                     ROCDL::GridDimYOp, ROCDL::GridDimZOp>>(
         converter);
-    patterns.insert<OpToFuncCallLowering<AbsFOp>>(converter, "_ocml_fabs_f32",
-                                                 "_ocml_fabs_f64");
-    patterns.insert<OpToFuncCallLowering<CeilFOp>>(converter, "_ocml_ceil_f32",
-                                                 "_ocml_ceil_f64");
-    patterns.insert<OpToFuncCallLowering<CosOp>>(converter, "_ocml_cos_f32",
-                                                 "_ocml_cos_f64");
-    patterns.insert<OpToFuncCallLowering<ExpOp>>(converter, "_ocml_exp_f32",
-                                                 "_ocml_exp_f64");
-    patterns.insert<OpToFuncCallLowering<TanhOp>>(converter, "_ocml_tanh_f32",
-                                                  "_ocml_tanh_f64");
+    patterns.insert<OpToFuncCallLowering<AbsFOp>>(converter, "__ocml_fabs_f32",
+                                                  "__ocml_fabs_f64");
+    patterns.insert<OpToFuncCallLowering<CeilFOp>>(converter, "__ocml_ceil_f32",
+                                                   "__ocml_ceil_f64");
+    patterns.insert<OpToFuncCallLowering<CosOp>>(converter, "__ocml_cos_f32",
+                                                 "__ocml_cos_f64");
+    patterns.insert<OpToFuncCallLowering<ExpOp>>(converter, "__ocml_exp_f32",
+                                                 "__ocml_exp_f64");
+    patterns.insert<OpToFuncCallLowering<TanhOp>>(converter, "__ocml_tanh_f32",
+                                                  "__ocml_tanh_f64");
 
     ConversionTarget target(getContext());
     target.addLegalDialect<LLVM::LLVMDialect, ROCDL::ROCDLDialect>();
     target.addIllegalOp<LLVM::FAbsOp, LLVM::FCeilOp, LLVM::CosOp,
                         LLVM::ExpOp>();
-    target.addDynamicallyLegalOp<FuncOp>(
-        [&](FuncOp op) { return converter.isSignatureLegal(op.getType()); });
+    target.addDynamicallyLegalOp<LLVM::CallOp>(
+        gpu::filterIllegalLLVMIntrinsics({"tanh", "tanhf"}, m.getContext()));
+    target.addIllegalOp<FuncOp>();
     if (failed(applyPartialConversion(m, target, patterns, &converter)))
       signalPassFailure();
   }

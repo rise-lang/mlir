@@ -101,6 +101,10 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
                     options::OPT_fnoxray_link_deps, true))
     XRayRT = false;
 
+  if (Args.hasFlag(options::OPT_fxray_ignore_loops,
+                   options::OPT_fno_xray_ignore_loops, false))
+    XRayIgnoreLoops = true;
+
   auto Bundles =
       Args.getAllArgValues(options::OPT_fxray_instrumentation_bundle);
   if (Bundles.empty())
@@ -176,7 +180,7 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
         else if (M == "all")
           llvm::copy(XRaySupportedModes, std::back_inserter(Modes));
         else
-          Modes.push_back(M);
+          Modes.push_back(std::string(M));
     }
 
   // Then we want to sort and unique the modes we've collected.
@@ -196,6 +200,9 @@ void XRayArgs::addArgs(const ToolChain &TC, const ArgList &Args,
 
   if (XRayAlwaysEmitTypedEvents)
     CmdArgs.push_back("-fxray-always-emit-typedevents");
+
+  if (XRayIgnoreLoops)
+    CmdArgs.push_back("-fxray-ignore-loops");
 
   CmdArgs.push_back(Args.MakeArgString(Twine(XRayInstructionThresholdOption) +
                                        Twine(InstructionThreshold)));

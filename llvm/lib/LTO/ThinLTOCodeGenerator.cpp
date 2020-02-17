@@ -27,10 +27,10 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/PassTimingInfo.h"
-#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/LTO/LTO.h"
@@ -80,8 +80,8 @@ extern cl::opt<std::string> RemarksFormat;
 
 namespace {
 
-static cl::opt<int>
-    ThreadCount("threads", cl::init(llvm::heavyweight_hardware_concurrency()));
+// Default to using one job per hardware core in the system
+static cl::opt<int> ThreadCount("threads", cl::init(0));
 
 // Simple helper to save temporary files for debug.
 static void saveTempBitcode(const Module &TheModule, StringRef TempDir,
@@ -870,11 +870,11 @@ ThinLTOCodeGenerator::writeGeneratedObject(int count, StringRef CacheEntryPath,
     // Cache is enabled, hard-link the entry (or copy if hard-link fails).
     auto Err = sys::fs::create_hard_link(CacheEntryPath, OutputPath);
     if (!Err)
-      return OutputPath.str();
+      return std::string(OutputPath.str());
     // Hard linking failed, try to copy.
     Err = sys::fs::copy_file(CacheEntryPath, OutputPath);
     if (!Err)
-      return OutputPath.str();
+      return std::string(OutputPath.str());
     // Copy failed (could be because the CacheEntry was removed from the cache
     // in the meantime by another process), fall back and try to write down the
     // buffer to the output.
@@ -887,7 +887,7 @@ ThinLTOCodeGenerator::writeGeneratedObject(int count, StringRef CacheEntryPath,
   if (Err)
     report_fatal_error("Can't open output '" + OutputPath + "'\n");
   OS << OutputBuffer.getBuffer();
-  return OutputPath.str();
+  return std::string(OutputPath.str());
 }
 
 // Main entry point for the ThinLTO processing
@@ -1042,7 +1042,7 @@ void ThinLTOCodeGenerator::run() {
 
   // Parallel optimizer + codegen
   {
-    ThreadPool Pool(ThreadCount);
+    ThreadPool Pool(heavyweight_hardware_concurrency(ThreadCount));
     for (auto IndexCount : ModulesOrdering) {
       auto &Mod = Modules[IndexCount];
       Pool.async([&](int count) {
@@ -1079,7 +1079,7 @@ void ThinLTOCodeGenerator::run() {
         LLVMContext Context;
         Context.setDiscardValueNames(LTODiscardValueNames);
         Context.enableDebugTypeODRUniquing();
-        auto DiagFileOrErr = lto::setupOptimizationRemarks(
+        auto DiagFileOrErr = lto::setupLLVMOptimizationRemarks(
             Context, RemarksFilename, RemarksPasses, RemarksFormat,
             RemarksWithHotness, count);
         if (!DiagFileOrErr) {

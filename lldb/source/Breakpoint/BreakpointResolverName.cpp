@@ -173,7 +173,7 @@ BreakpointResolver *BreakpointResolverName::CreateFromStructuredData(
         error.SetErrorString("BRN::CFSD: name mask entry is not an integer.");
         return nullptr;
       }
-      names.push_back(name);
+      names.push_back(std::string(name));
       name_masks.push_back(static_cast<FunctionNameType>(fnt));
     }
 
@@ -199,7 +199,7 @@ StructuredData::ObjectSP BreakpointResolverName::SerializeToStructuredData() {
     StructuredData::ArraySP name_masks_sp(new StructuredData::Array());
     for (auto lookup : m_lookups) {
       names_sp->AddItem(StructuredData::StringSP(
-          new StructuredData::String(lookup.GetName().AsCString())));
+          new StructuredData::String(lookup.GetName().GetStringRef())));
       name_masks_sp->AddItem(StructuredData::IntegerSP(
           new StructuredData::Integer(lookup.GetNameTypeMask())));
     }

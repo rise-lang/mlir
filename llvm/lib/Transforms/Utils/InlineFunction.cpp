@@ -925,7 +925,7 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
   SmallVector<const Argument *, 4> NoAliasArgs;
 
   for (const Argument &Arg : CalledFunc->args())
-    if (Arg.hasNoAliasAttr() && !Arg.use_empty())
+    if (CS.paramHasAttr(Arg.getArgNo(), Attribute::NoAlias) && !Arg.use_empty())
       NoAliasArgs.push_back(&Arg);
 
   if (NoAliasArgs.empty())
@@ -951,7 +951,7 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
   for (unsigned i = 0, e = NoAliasArgs.size(); i != e; ++i) {
     const Argument *A = NoAliasArgs[i];
 
-    std::string Name = CalledFunc->getName();
+    std::string Name = std::string(CalledFunc->getName());
     if (A->hasName()) {
       Name += ": %";
       Name += A->getName();
@@ -1002,8 +1002,7 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
         IsFuncCall = true;
         if (CalleeAAR) {
           FunctionModRefBehavior MRB = CalleeAAR->getModRefBehavior(Call);
-          if (MRB == FMRB_OnlyAccessesArgumentPointees ||
-              MRB == FMRB_OnlyReadsArgumentPointees)
+          if (AAResults::onlyAccessesArgPointees(MRB))
             IsArgMemOnlyCall = true;
         }
 
@@ -1059,7 +1058,7 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
         // completely describe the aliasing properties using alias.scope
         // metadata (and, thus, won't add any).
         if (const Argument *A = dyn_cast<Argument>(V)) {
-          if (!A->hasNoAliasAttr())
+          if (!CS.paramHasAttr(A->getArgNo(), Attribute::NoAlias))
             UsesAliasingPtr = true;
         } else {
           UsesAliasingPtr = true;
@@ -1849,10 +1848,6 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       Caller->getEntryBlock().getInstList().splice(
           InsertPoint, FirstNewBlock->getInstList(), AI->getIterator(), I);
     }
-    // Move any dbg.declares describing the allocas into the entry basic block.
-    DIBuilder DIB(*Caller->getParent());
-    for (auto &AI : IFI.StaticAllocas)
-      replaceDbgDeclareForAlloca(AI, AI, DIB, DIExpression::ApplyOffset, 0);
   }
 
   SmallVector<Value*,4> VarArgsToForward;

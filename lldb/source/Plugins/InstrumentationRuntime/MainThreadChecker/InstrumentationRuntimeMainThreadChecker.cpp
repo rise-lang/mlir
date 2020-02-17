@@ -29,6 +29,8 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(InstrumentationRuntimeMainThreadChecker)
+
 InstrumentationRuntimeMainThreadChecker::
     ~InstrumentationRuntimeMainThreadChecker() {
   Deactivate();
@@ -178,10 +180,10 @@ bool InstrumentationRuntimeMainThreadChecker::NotifyBreakpointHit(
       instance->RetrieveReportData(context->exe_ctx_ref);
 
   if (report) {
-    std::string description = report->GetAsDictionary()
-                                  ->GetValueForKey("description")
-                                  ->GetAsString()
-                                  ->GetValue();
+    std::string description = std::string(report->GetAsDictionary()
+                                              ->GetValueForKey("description")
+                                              ->GetAsString()
+                                              ->GetValue());
     thread_sp->SetStopInfo(
         InstrumentationRuntimeStopInfo::CreateStopReasonWithInstrumentationData(
             *thread_sp, description, report));

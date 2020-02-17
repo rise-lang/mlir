@@ -136,7 +136,7 @@ static bool isAtLeastOneCondVarChanged(const FunctionDecl *Func,
 static std::string getCondVarNames(const Stmt *Cond) {
   if (const auto *DRE = dyn_cast<DeclRefExpr>(Cond)) {
     if (const auto *Var = dyn_cast<VarDecl>(DRE->getDecl()))
-      return Var->getName();
+      return std::string(Var->getName());
   }
 
   std::string Result;
@@ -150,6 +150,15 @@ static std::string getCondVarNames(const Stmt *Cond) {
     Result += NewNames;
   }
   return Result;
+}
+
+static bool isKnownFalse(const Expr &Cond, const ASTContext &Ctx) {
+  if (Cond.isValueDependent())
+    return false;
+  bool Result = false;
+  if (Cond.EvaluateAsBooleanCondition(Result, Ctx))
+    return !Result;
+  return false;
 }
 
 void InfiniteLoopCheck::registerMatchers(MatchFinder *Finder) {
@@ -169,6 +178,9 @@ void InfiniteLoopCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Cond = Result.Nodes.getNodeAs<Expr>("condition");
   const auto *LoopStmt = Result.Nodes.getNodeAs<Stmt>("loop-stmt");
   const auto *Func = Result.Nodes.getNodeAs<FunctionDecl>("func");
+
+  if (isKnownFalse(*Cond, *Result.Context))
+    return;
 
   bool ShouldHaveConditionVariables = true;
   if (const auto *While = dyn_cast<WhileStmt>(LoopStmt)) {

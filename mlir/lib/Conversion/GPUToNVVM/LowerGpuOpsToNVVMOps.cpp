@@ -41,8 +41,7 @@ public:
     auto memref = type.dyn_cast<MemRefType>();
     if (memref &&
         memref.getMemorySpace() == gpu::GPUDialect::getPrivateAddressSpace()) {
-      type = MemRefType::get(memref.getShape(), memref.getElementType(),
-                             memref.getAffineMaps());
+      type = MemRefType::Builder(memref).setMemorySpace(0);
     }
 
     return LLVMTypeConverter::convertType(type);
@@ -548,8 +547,8 @@ struct GPUFuncOpLowering : LLVMOpLowering {
       auto elementType =
           lowering.convertType(type.getElementType()).cast<LLVM::LLVMType>();
       auto arrayType = LLVM::LLVMType::getArrayTy(elementType, numElements);
-      std::string name =
-          llvm::formatv("__wg_{0}_{1}", gpuFuncOp.getName(), en.index());
+      std::string name = std::string(
+          llvm::formatv("__wg_{0}_{1}", gpuFuncOp.getName(), en.index()));
       auto globalOp = rewriter.create<LLVM::GlobalOp>(
           gpuFuncOp.getLoc(), arrayType, /*isConstant=*/false,
           LLVM::Linkage::Internal, name, /*value=*/Attribute(),
@@ -565,8 +564,8 @@ struct GPUFuncOpLowering : LLVMOpLowering {
     // Remap proper input types.
     TypeConverter::SignatureConversion signatureConversion(
         gpuFuncOp.front().getNumArguments());
-    for (unsigned i = 0, e = funcType.getFunctionNumParams(); i < e; ++i)
-      signatureConversion.addInputs(i, funcType.getFunctionParamType(i));
+    lowering.convertFunctionSignature(gpuFuncOp.getType(), /*isVariadic=*/false,
+                                      signatureConversion);
 
     // Create the new function operation. Only copy those attributes that are
     // not specific to function modeling.
@@ -652,25 +651,6 @@ struct GPUFuncOpLowering : LLVMOpLowering {
     rewriter.applySignatureConversion(&llvmFuncOp.getBody(),
                                       signatureConversion);
 
-    {
-      // For memref-typed arguments, insert the relevant loads in the beginning
-      // of the block to comply with the LLVM dialect calling convention. This
-      // needs to be done after signature conversion to get the right types.
-      OpBuilder::InsertionGuard guard(rewriter);
-      Block &block = llvmFuncOp.front();
-      rewriter.setInsertionPointToStart(&block);
-
-      for (auto en : llvm::enumerate(gpuFuncOp.getType().getInputs())) {
-        if (!en.value().isa<MemRefType>() &&
-            !en.value().isa<UnrankedMemRefType>())
-          continue;
-
-        BlockArgument arg = block.getArgument(en.index());
-        Value loaded = rewriter.create<LLVM::LoadOp>(loc, arg);
-        rewriter.replaceUsesOfBlockArgument(arg, loaded);
-      }
-    }
-
     rewriter.eraseOp(gpuFuncOp);
     return matchSuccess();
   }
@@ -715,6 +695,8 @@ public:
     target.addIllegalOp<FuncOp>();
     target.addLegalDialect<LLVM::LLVMDialect>();
     target.addLegalDialect<NVVM::NVVMDialect>();
+    target.addDynamicallyLegalOp<mlir::LLVM::CallOp>(
+        gpu::filterIllegalLLVMIntrinsics({"tanh", "tanhf"}, m.getContext()));
     // TODO(csigg): Remove once we support replacing non-root ops.
     target.addLegalOp<gpu::YieldOp, gpu::GPUModuleOp, gpu::ModuleEndOp>();
     if (failed(applyPartialConversion(m, target, patterns, &converter)))

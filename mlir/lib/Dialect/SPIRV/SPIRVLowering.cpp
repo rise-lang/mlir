@@ -191,6 +191,7 @@ PatternMatchResult
 FuncOpConversion::matchAndRewrite(FuncOp funcOp, ArrayRef<Value> operands,
                                   ConversionPatternRewriter &rewriter) const {
   auto fnType = funcOp.getType();
+  // TODO(antiagainst): support converting functions with one result.
   if (fnType.getNumResults())
     return matchFailure();
 
@@ -202,12 +203,23 @@ FuncOpConversion::matchAndRewrite(FuncOp funcOp, ArrayRef<Value> operands,
     signatureConverter.addInputs(argType.index(), convertedType);
   }
 
-  rewriter.updateRootInPlace(funcOp, [&] {
-    funcOp.setType(rewriter.getFunctionType(
-        signatureConverter.getConvertedTypes(), llvm::None));
-    rewriter.applySignatureConversion(&funcOp.getBody(), signatureConverter);
-  });
+  // Create the converted spv.func op.
+  auto newFuncOp = rewriter.create<spirv::FuncOp>(
+      funcOp.getLoc(), funcOp.getName(),
+      rewriter.getFunctionType(signatureConverter.getConvertedTypes(),
+                               llvm::None));
 
+  // Copy over all attributes other than the function name and type.
+  for (const auto &namedAttr : funcOp.getAttrs()) {
+    if (!namedAttr.first.is(impl::getTypeAttrName()) &&
+        !namedAttr.first.is(SymbolTable::getSymbolAttrName()))
+      newFuncOp.setAttr(namedAttr.first, namedAttr.second);
+  }
+
+  rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
+                              newFuncOp.end());
+  rewriter.applySignatureConversion(&newFuncOp.getBody(), signatureConverter);
+  rewriter.eraseOp(funcOp);
   return matchSuccess();
 }
 
@@ -291,11 +303,48 @@ Value mlir::spirv::getBuiltinVariableValue(Operation *op,
 }
 
 //===----------------------------------------------------------------------===//
+// Index calculation
+//===----------------------------------------------------------------------===//
+
+spirv::AccessChainOp mlir::spirv::getElementPtr(
+    SPIRVTypeConverter &typeConverter, MemRefType baseType, Value basePtr,
+    ArrayRef<Value> indices, Location loc, OpBuilder &builder) {
+  // Get base and offset of the MemRefType and verify they are static.
+  int64_t offset;
+  SmallVector<int64_t, 4> strides;
+  if (failed(getStridesAndOffset(baseType, strides, offset)) ||
+      llvm::is_contained(strides, MemRefType::getDynamicStrideOrOffset())) {
+    return nullptr;
+  }
+
+  auto indexType = typeConverter.getIndexType(builder.getContext());
+
+  Value ptrLoc = nullptr;
+  assert(indices.size() == strides.size() &&
+         "must provide indices for all dimensions");
+  for (auto index : enumerate(indices)) {
+    Value strideVal = builder.create<spirv::ConstantOp>(
+        loc, indexType, IntegerAttr::get(indexType, strides[index.index()]));
+    Value update = builder.create<spirv::IMulOp>(loc, strideVal, index.value());
+    ptrLoc =
+        (ptrLoc ? builder.create<spirv::IAddOp>(loc, ptrLoc, update).getResult()
+                : update);
+  }
+  SmallVector<Value, 2> linearizedIndices;
+  // Add a '0' at the start to index into the struct.
+  linearizedIndices.push_back(builder.create<spirv::ConstantOp>(
+      loc, indexType, IntegerAttr::get(indexType, 0)));
+  linearizedIndices.push_back(ptrLoc);
+  return builder.create<spirv::AccessChainOp>(loc, basePtr, linearizedIndices);
+}
+
+//===----------------------------------------------------------------------===//
 // Set ABI attributes for lowering entry functions.
 //===----------------------------------------------------------------------===//
 
 LogicalResult
-mlir::spirv::setABIAttrs(FuncOp funcOp, spirv::EntryPointABIAttr entryPointInfo,
+mlir::spirv::setABIAttrs(spirv::FuncOp funcOp,
+                         spirv::EntryPointABIAttr entryPointInfo,
                          ArrayRef<spirv::InterfaceVarABIAttr> argABIInfo) {
   // Set the attributes for argument and the function.
   StringRef argABIAttrName = spirv::getInterfaceVarABIAttrName();
@@ -327,19 +376,15 @@ spirv::SPIRVConversionTarget::get(spirv::TargetEnvAttr targetEnv,
 
 spirv::SPIRVConversionTarget::SPIRVConversionTarget(
     spirv::TargetEnvAttr targetEnv, MLIRContext *context)
-    : ConversionTarget(*context),
-      givenVersion(static_cast<spirv::Version>(targetEnv.version().getInt())) {
-  for (Attribute extAttr : targetEnv.extensions())
-    givenExtensions.insert(
-        *spirv::symbolizeExtension(extAttr.cast<StringAttr>().getValue()));
+    : ConversionTarget(*context), givenVersion(targetEnv.getVersion()) {
+  for (spirv::Extension ext : targetEnv.getExtensions())
+    givenExtensions.insert(ext);
 
   // Add extensions implied by the current version.
   for (spirv::Extension ext : spirv::getImpliedExtensions(givenVersion))
     givenExtensions.insert(ext);
 
-  for (Attribute capAttr : targetEnv.capabilities()) {
-    auto cap =
-        static_cast<spirv::Capability>(capAttr.cast<IntegerAttr>().getInt());
+  for (spirv::Capability cap : targetEnv.getCapabilities()) {
     givenCapabilities.insert(cap);
 
     // Add capabilities implied by the current capability.

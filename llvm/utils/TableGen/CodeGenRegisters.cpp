@@ -52,18 +52,18 @@ using namespace llvm;
 
 CodeGenSubRegIndex::CodeGenSubRegIndex(Record *R, unsigned Enum)
   : TheDef(R), EnumValue(Enum), AllSuperRegsCovered(true), Artificial(true) {
-  Name = R->getName();
+  Name = std::string(R->getName());
   if (R->getValue("Namespace"))
-    Namespace = R->getValueAsString("Namespace");
+    Namespace = std::string(R->getValueAsString("Namespace"));
   Size = R->getValueAsInt("Size");
   Offset = R->getValueAsInt("Offset");
 }
 
 CodeGenSubRegIndex::CodeGenSubRegIndex(StringRef N, StringRef Nspace,
                                        unsigned Enum)
-  : TheDef(nullptr), Name(N), Namespace(Nspace), Size(-1), Offset(-1),
-    EnumValue(Enum), AllSuperRegsCovered(true), Artificial(true) {
-}
+    : TheDef(nullptr), Name(std::string(N)), Namespace(std::string(Nspace)),
+      Size(-1), Offset(-1), EnumValue(Enum), AllSuperRegsCovered(true),
+      Artificial(true) {}
 
 std::string CodeGenSubRegIndex::getQualifiedName() const {
   std::string N = getNamespace();
@@ -739,11 +739,8 @@ static void sortAndUniqueRegisters(CodeGenRegister::Vec &M) {
 }
 
 CodeGenRegisterClass::CodeGenRegisterClass(CodeGenRegBank &RegBank, Record *R)
-  : TheDef(R),
-    Name(R->getName()),
-    TopoSigs(RegBank.getNumTopoSigs()),
-    EnumValue(-1) {
-
+    : TheDef(R), Name(std::string(R->getName())),
+      TopoSigs(RegBank.getNumTopoSigs()), EnumValue(-1) {
   std::vector<Record*> TypeList = R->getValueAsListOfDefs("RegTypes");
   for (unsigned i = 0, e = TypeList.size(); i != e; ++i) {
     Record *Type = TypeList[i];
@@ -816,15 +813,9 @@ CodeGenRegisterClass::CodeGenRegisterClass(CodeGenRegBank &RegBank, Record *R)
 // class structure has been computed.
 CodeGenRegisterClass::CodeGenRegisterClass(CodeGenRegBank &RegBank,
                                            StringRef Name, Key Props)
-  : Members(*Props.Members),
-    TheDef(nullptr),
-    Name(Name),
-    TopoSigs(RegBank.getNumTopoSigs()),
-    EnumValue(-1),
-    RSI(Props.RSI),
-    CopyCost(0),
-    Allocatable(true),
-    AllocationPriority(0) {
+    : Members(*Props.Members), TheDef(nullptr), Name(std::string(Name)),
+      TopoSigs(RegBank.getNumTopoSigs()), EnumValue(-1), RSI(Props.RSI),
+      CopyCost(0), Allocatable(true), AllocationPriority(0) {
   Artificial = true;
   for (const auto R : Members) {
     TopoSigs.set(R->getTopoSig());
@@ -861,6 +852,16 @@ void CodeGenRegisterClass::inheritProperties(CodeGenRegBank &RegBank) {
 bool CodeGenRegisterClass::contains(const CodeGenRegister *Reg) const {
   return std::binary_search(Members.begin(), Members.end(), Reg,
                             deref<std::less<>>());
+}
+
+unsigned CodeGenRegisterClass::getWeight(const CodeGenRegBank& RegBank) const {
+  if (TheDef && !TheDef->isValueUnset("Weight"))
+    return TheDef->getValueAsInt("Weight");
+
+  if (Members.empty() || Artificial)
+    return 0;
+
+  return (*Members.begin())->getWeight(RegBank);
 }
 
 namespace llvm {
@@ -1227,6 +1228,12 @@ CodeGenSubRegIndex *CodeGenRegBank::getSubRegIdx(Record *Def) {
   SubRegIndices.emplace_back(Def, SubRegIndices.size() + 1);
   Idx = &SubRegIndices.back();
   return Idx;
+}
+
+const CodeGenSubRegIndex *
+CodeGenRegBank::findSubRegIdx(const Record* Def) const {
+  auto I = Def2SubRegIdx.find(Def);
+  return (I == Def2SubRegIdx.end()) ? nullptr : I->second;
 }
 
 CodeGenRegister *CodeGenRegBank::getReg(Record *Def) {

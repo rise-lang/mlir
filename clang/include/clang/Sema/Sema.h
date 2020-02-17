@@ -377,7 +377,7 @@ public:
   /// The maximum alignment, same as in llvm::Value. We duplicate them here
   /// because that allows us not to duplicate the constants in clang code,
   /// which we must to since we can't directly use the llvm constants.
-  /// The value is verified against llvm here: lib/CodeGen/CGValue.h
+  /// The value is verified against llvm here: lib/CodeGen/CGDecl.cpp
   ///
   /// This is the greatest alignment value supported by load, store, and alloca
   /// instructions, and global values.
@@ -837,6 +837,11 @@ public:
     }
   };
 
+  /// Whether the AST is currently being rebuilt to correct immediate
+  /// invocations. Immediate invocation candidates and references to consteval
+  /// functions aren't tracked when this is set.
+  bool RebuildingImmediateInvocation = false;
+
   /// Used to change context to isConstantEvaluated without pushing a heavy
   /// ExpressionEvaluationContextRecord object.
   bool isConstantEvaluatedOverride;
@@ -1048,6 +1053,8 @@ public:
     PotentiallyEvaluatedIfUsed
   };
 
+  using ImmediateInvocationCandidate = llvm::PointerIntPair<ConstantExpr *, 1>;
+
   /// Data structure used to record current or nested
   /// expression evaluation contexts.
   struct ExpressionEvaluationContextRecord {
@@ -1093,6 +1100,13 @@ public:
     /// context. We produce a warning for these when popping the context if
     /// they are not discarded-value expressions nor unevaluated operands.
     SmallVector<Expr*, 2> VolatileAssignmentLHSs;
+
+    /// Set of candidates for starting an immediate invocation.
+    llvm::SmallVector<ImmediateInvocationCandidate, 4> ImmediateInvocationCandidates;
+
+    /// Set of DeclRefExprs referencing a consteval function when used in a
+    /// context not already known to be immediately invoked.
+    llvm::SmallPtrSet<DeclRefExpr *, 4> ReferenceToConsteval;
 
     /// \brief Describes whether we are in an expression constext which we have
     /// to handle differently.
@@ -1449,6 +1463,12 @@ public:
                                              unsigned Index);
 
   void emitAndClearUnusedLocalTypedefWarnings();
+
+  // Emit all deferred diagnostics.
+  void emitDeferredDiags();
+  // Emit any deferred diagnostics for FD and erase them from the map in which
+  // they're stored.
+  void emitDeferredDiags(FunctionDecl *FD, bool ShowCallStack);
 
   enum TUFragmentKind {
     /// The global module fragment, between 'module;' and a module-declaration.
@@ -2936,10 +2956,19 @@ public:
                   bool ConsiderCudaAttrs = true,
                   bool ConsiderRequiresClauses = true);
 
+  enum class AllowedExplicit {
+    /// Allow no explicit functions to be used.
+    None,
+    /// Allow explicit conversion functions but not explicit constructors.
+    Conversions,
+    /// Allow both explicit conversion functions and explicit constructors.
+    All
+  };
+
   ImplicitConversionSequence
   TryImplicitConversion(Expr *From, QualType ToType,
                         bool SuppressUserConversions,
-                        bool AllowExplicit,
+                        AllowedExplicit AllowExplicit,
                         bool InOverloadResolution,
                         bool CStyle,
                         bool AllowObjCWritebackConversion);
@@ -3456,6 +3485,9 @@ public:
     /// operator overloading. This lookup is similar to ordinary name
     /// lookup, but will ignore any declarations that are class members.
     LookupOperatorName,
+    /// Look up a name following ~ in a destructor name. This is an ordinary
+    /// lookup, but prefers tags to typedefs.
+    LookupDestructorName,
     /// Look up of a name that precedes the '::' scope resolution
     /// operator in C++. This lookup completely ignores operator, object,
     /// function, and enumerator names (C++ [basic.lookup.qual]p1).
@@ -3657,7 +3689,8 @@ public:
     TemplateDiscarded, // Discarded due to uninstantiated templates
     Unknown,
   };
-  FunctionEmissionStatus getEmissionStatus(FunctionDecl *Decl);
+  FunctionEmissionStatus getEmissionStatus(FunctionDecl *Decl,
+                                           bool Final = false);
 
   // Whether the callee should be ignored in CUDA/HIP/OpenMP host/device check.
   bool shouldIgnoreInHostDeviceCheck(FunctionDecl *Callee);
@@ -5513,6 +5546,10 @@ public:
   /// it simply returns the passed in expression.
   ExprResult MaybeBindToTemporary(Expr *E);
 
+  /// Wrap the expression in a ConstantExpr if it is a potential immediate
+  /// invocation.
+  ExprResult CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl);
+
   bool CompleteConstructorCall(CXXConstructorDecl *Constructor,
                                MultiExprArg ArgsPtr,
                                SourceLocation Loc,
@@ -7010,7 +7047,7 @@ public:
   /// Get a template argument mapping the given template parameter to itself,
   /// e.g. for X in \c template<int X>, this would return an expression template
   /// argument referencing X.
-  TemplateArgumentLoc getIdentityTemplateArgumentLoc(Decl *Param,
+  TemplateArgumentLoc getIdentityTemplateArgumentLoc(NamedDecl *Param,
                                                      SourceLocation Location);
 
   void translateTemplateArguments(const ASTTemplateArgsPtr &In,
@@ -7934,12 +7971,10 @@ public:
                                         SourceLocation ReturnLoc,
                                         Expr *&RetExpr, AutoType *AT);
 
-  FunctionTemplateDecl *getMoreSpecializedTemplate(FunctionTemplateDecl *FT1,
-                                                   FunctionTemplateDecl *FT2,
-                                                   SourceLocation Loc,
-                                           TemplatePartialOrderingContext TPOC,
-                                                   unsigned NumCallArguments1,
-                                                   unsigned NumCallArguments2);
+  FunctionTemplateDecl *getMoreSpecializedTemplate(
+      FunctionTemplateDecl *FT1, FunctionTemplateDecl *FT2, SourceLocation Loc,
+      TemplatePartialOrderingContext TPOC, unsigned NumCallArguments1,
+      unsigned NumCallArguments2, bool Reversed = false);
   UnresolvedSetIterator
   getMostSpecialized(UnresolvedSetIterator SBegin, UnresolvedSetIterator SEnd,
                      TemplateSpecCandidateSet &FailedCandidates,
@@ -9581,7 +9616,7 @@ public:
   std::string getOpenCLExtensionsFromExtMap(T* FT, MapT &Map);
 
   void setCurrentOpenCLExtension(llvm::StringRef Ext) {
-    CurrOpenCLExtension = Ext;
+    CurrOpenCLExtension = std::string(Ext);
   }
 
   /// Set OpenCL extensions for a type which can only be used when these
@@ -9649,21 +9684,9 @@ private:
   /// Pop OpenMP function region for non-capturing function.
   void popOpenMPFunctionRegion(const sema::FunctionScopeInfo *OldFSI);
 
-  /// Check whether we're allowed to call Callee from the current function.
-  void checkOpenMPDeviceFunction(SourceLocation Loc, FunctionDecl *Callee,
-                                 bool CheckForDelayedContext = true);
-
-  /// Check whether we're allowed to call Callee from the current function.
-  void checkOpenMPHostFunction(SourceLocation Loc, FunctionDecl *Callee,
-                               bool CheckCaller = true);
-
   /// Check if the expression is allowed to be used in expressions for the
   /// OpenMP devices.
   void checkOpenMPDeviceExpr(const Expr *E);
-
-  /// Finishes analysis of the deferred functions calls that may be declared as
-  /// host/nohost during device/host compilation.
-  void finalizeOpenMPDelayedAnalysis();
 
   /// Checks if a type or a declaration is disabled due to the owning extension
   /// being disabled, and emits diagnostic messages if it is disabled.
@@ -9688,9 +9711,6 @@ private:
 
 public:
   /// Struct to store the context selectors info for declare variant directive.
-  using OMPCtxStringType = SmallString<8>;
-  using OMPCtxSelectorData =
-      OpenMPCtxSelectorData<SmallVector<OMPCtxStringType, 4>, ExprResult>;
 
   /// Checks if the variant/multiversion functions are compatible.
   bool areMultiversionVariantFunctionsCompatible(
@@ -9850,6 +9870,11 @@ public:
   void
   checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D,
                                    SourceLocation IdLoc = SourceLocation());
+  /// Finishes analysis of the deferred functions calls that may be declared as
+  /// host/nohost during device/host compilation.
+  void finalizeOpenMPDelayedAnalysis(const FunctionDecl *Caller,
+                                     const FunctionDecl *Callee,
+                                     SourceLocation Loc);
   /// Return true inside OpenMP declare target region.
   bool isInOpenMPDeclareTargetContext() const {
     return DeclareTargetNestingLevel > 0;
@@ -10162,10 +10187,12 @@ public:
   /// applied to.
   /// \param VariantRef Expression that references the variant function, which
   /// must be used instead of the original one, specified in \p DG.
+  /// \param TI The trait info object representing the match clause.
   /// \returns None, if the function/variant function are not compatible with
   /// the pragma, pair of original function/variant ref expression otherwise.
-  Optional<std::pair<FunctionDecl *, Expr *>> checkOpenMPDeclareVariantFunction(
-      DeclGroupPtrTy DG, Expr *VariantRef, SourceRange SR);
+  Optional<std::pair<FunctionDecl *, Expr *>>
+  checkOpenMPDeclareVariantFunction(DeclGroupPtrTy DG, Expr *VariantRef,
+                                    OMPTraitInfo &TI, SourceRange SR);
 
   /// Called on well-formed '\#pragma omp declare variant' after parsing of
   /// the associated method/function.
@@ -10173,11 +10200,9 @@ public:
   /// applied to.
   /// \param VariantRef Expression that references the variant function, which
   /// must be used instead of the original one, specified in \p DG.
-  /// \param Data Set of context-specific data for the specified context
-  /// selector.
+  /// \param TI The context traits associated with the function variant.
   void ActOnOpenMPDeclareVariantDirective(FunctionDecl *FD, Expr *VariantRef,
-                                          SourceRange SR,
-                                          ArrayRef<OMPCtxSelectorData> Data);
+                                          OMPTraitInfo &TI, SourceRange SR);
 
   OMPClause *ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind,
                                          Expr *Expr,
@@ -10244,7 +10269,7 @@ public:
                                      SourceLocation LParenLoc,
                                      SourceLocation EndLoc);
   /// Called on well-formed 'default' clause.
-  OMPClause *ActOnOpenMPDefaultClause(OpenMPDefaultClauseKind Kind,
+  OMPClause *ActOnOpenMPDefaultClause(llvm::omp::DefaultKind Kind,
                                       SourceLocation KindLoc,
                                       SourceLocation StartLoc,
                                       SourceLocation LParenLoc,
@@ -10255,6 +10280,12 @@ public:
                                        SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
                                        SourceLocation EndLoc);
+  /// Called on well-formed 'order' clause.
+  OMPClause *ActOnOpenMPOrderClause(OpenMPOrderClauseKind Kind,
+                                    SourceLocation KindLoc,
+                                    SourceLocation StartLoc,
+                                    SourceLocation LParenLoc,
+                                    SourceLocation EndLoc);
 
   OMPClause *ActOnOpenMPSingleExprWithArgClause(
       OpenMPClauseKind Kind, ArrayRef<unsigned> Arguments, Expr *Expr,
@@ -10294,6 +10325,18 @@ public:
   /// Called on well-formed 'seq_cst' clause.
   OMPClause *ActOnOpenMPSeqCstClause(SourceLocation StartLoc,
                                      SourceLocation EndLoc);
+  /// Called on well-formed 'acq_rel' clause.
+  OMPClause *ActOnOpenMPAcqRelClause(SourceLocation StartLoc,
+                                     SourceLocation EndLoc);
+  /// Called on well-formed 'acquire' clause.
+  OMPClause *ActOnOpenMPAcquireClause(SourceLocation StartLoc,
+                                      SourceLocation EndLoc);
+  /// Called on well-formed 'release' clause.
+  OMPClause *ActOnOpenMPReleaseClause(SourceLocation StartLoc,
+                                      SourceLocation EndLoc);
+  /// Called on well-formed 'relaxed' clause.
+  OMPClause *ActOnOpenMPRelaxedClause(SourceLocation StartLoc,
+                                      SourceLocation EndLoc);
   /// Called on well-formed 'threads' clause.
   OMPClause *ActOnOpenMPThreadsClause(SourceLocation StartLoc,
                                       SourceLocation EndLoc);
@@ -11180,18 +11223,6 @@ public:
                  /* Caller = */ FunctionDeclAndLoc>
       DeviceKnownEmittedFns;
 
-  /// A partial call graph maintained during CUDA/OpenMP device code compilation
-  /// to support deferred diagnostics.
-  ///
-  /// Functions are only added here if, at the time they're considered, they are
-  /// not known-emitted.  As soon as we discover that a function is
-  /// known-emitted, we remove it and everything it transitively calls from this
-  /// set and add those functions to DeviceKnownEmittedFns.
-  llvm::DenseMap</* Caller = */ CanonicalDeclPtr<FunctionDecl>,
-                 /* Callees = */ llvm::MapVector<CanonicalDeclPtr<FunctionDecl>,
-                                                 SourceLocation>>
-      DeviceCallGraph;
-
   /// Diagnostic builder for CUDA/OpenMP devices errors which may or may not be
   /// deferred.
   ///
@@ -11265,14 +11296,6 @@ public:
     llvm::Optional<SemaDiagnosticBuilder> ImmediateDiag;
     llvm::Optional<unsigned> PartialDiagId;
   };
-
-  /// Indicate that this function (and thus everything it transtively calls)
-  /// will be codegen'ed, and emit any deferred diagnostics on this function and
-  /// its (transitive) callees.
-  void markKnownEmitted(
-      Sema &S, FunctionDecl *OrigCaller, FunctionDecl *OrigCallee,
-      SourceLocation OrigLoc,
-      const llvm::function_ref<bool(Sema &, FunctionDecl *)> IsKnownEmitted);
 
   /// Creates a DeviceDiagBuilder that emits the diagnostic if the current context
   /// is "used as device code".
@@ -11555,6 +11578,12 @@ public:
                                               IdentifierInfo *II,
                                               SourceLocation OpenParLoc);
   void CodeCompleteInitializer(Scope *S, Decl *D);
+  /// Trigger code completion for a record of \p BaseType. \p InitExprs are
+  /// expressions in the initializer list seen so far and \p D is the current
+  /// Designation being parsed.
+  void CodeCompleteDesignator(const QualType BaseType,
+                              llvm::ArrayRef<Expr *> InitExprs,
+                              const Designation &D);
   void CodeCompleteAfterIf(Scope *S);
 
   void CodeCompleteQualifiedId(Scope *S, CXXScopeSpec &SS, bool EnteringContext,

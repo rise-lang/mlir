@@ -30,6 +30,8 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(InstrumentationRuntimeASan)
+
 lldb::InstrumentationRuntimeSP
 InstrumentationRuntimeASan::CreateInstance(const lldb::ProcessSP &process_sp) {
   return InstrumentationRuntimeSP(new InstrumentationRuntimeASan(process_sp));
@@ -190,10 +192,10 @@ StructuredData::ObjectSP InstrumentationRuntimeASan::RetrieveReportData() {
 
 std::string
 InstrumentationRuntimeASan::FormatDescription(StructuredData::ObjectSP report) {
-  std::string description = report->GetAsDictionary()
-                                ->GetValueForKey("description")
-                                ->GetAsString()
-                                ->GetValue();
+  std::string description = std::string(report->GetAsDictionary()
+                                            ->GetValueForKey("description")
+                                            ->GetAsString()
+                                            ->GetValue());
   return llvm::StringSwitch<std::string>(description)
       .Case("heap-use-after-free", "Use of deallocated memory")
       .Case("heap-buffer-overflow", "Heap buffer overflow")

@@ -46,14 +46,6 @@ public:
     return BO;
   }
 
-  Instruction *CreateNSWAdd(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNSWAdd(LHS, RHS);
-  }
-
-  Instruction *CreateNUWAdd(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNUWAdd(LHS, RHS);
-  }
-
   Instruction *CreateFAdd(Constant *LHS, Constant *RHS) const {
     return BinaryOperator::CreateFAdd(LHS, RHS);
   }
@@ -64,14 +56,6 @@ public:
     if (HasNUW) BO->setHasNoUnsignedWrap();
     if (HasNSW) BO->setHasNoSignedWrap();
     return BO;
-  }
-
-  Instruction *CreateNSWSub(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNSWSub(LHS, RHS);
-  }
-
-  Instruction *CreateNUWSub(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNUWSub(LHS, RHS);
   }
 
   Instruction *CreateFSub(Constant *LHS, Constant *RHS) const {
@@ -86,14 +70,6 @@ public:
     return BO;
   }
 
-  Instruction *CreateNSWMul(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNSWMul(LHS, RHS);
-  }
-
-  Instruction *CreateNUWMul(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateNUWMul(LHS, RHS);
-  }
-
   Instruction *CreateFMul(Constant *LHS, Constant *RHS) const {
     return BinaryOperator::CreateFMul(LHS, RHS);
   }
@@ -105,18 +81,10 @@ public:
     return BinaryOperator::CreateExactUDiv(LHS, RHS);
   }
 
-  Instruction *CreateExactUDiv(Constant *LHS, Constant *RHS) const {
-    return BinaryOperator::CreateExactUDiv(LHS, RHS);
-  }
-
   Instruction *CreateSDiv(Constant *LHS, Constant *RHS,
                           bool isExact = false) const {
     if (!isExact)
       return BinaryOperator::CreateSDiv(LHS, RHS);
-    return BinaryOperator::CreateExactSDiv(LHS, RHS);
-  }
-
-  Instruction *CreateExactSDiv(Constant *LHS, Constant *RHS) const {
     return BinaryOperator::CreateExactSDiv(LHS, RHS);
   }
 
@@ -187,14 +155,6 @@ public:
     return BO;
   }
 
-  Instruction *CreateNSWNeg(Constant *C) const {
-    return BinaryOperator::CreateNSWNeg(C);
-  }
-
-  Instruction *CreateNUWNeg(Constant *C) const {
-    return BinaryOperator::CreateNUWNeg(C);
-  }
-
   Instruction *CreateFNeg(Constant *C) const {
     return UnaryOperator::CreateFNeg(C);
   }
@@ -257,6 +217,11 @@ public:
 
   Instruction *CreatePointerCast(Constant *C, Type *DestTy) const {
     return CastInst::CreatePointerCast(C, DestTy);
+  }
+
+  Instruction *CreatePointerBitCastOrAddrSpaceCast(
+      Constant *C, Type *DestTy) const {
+    return CastInst::CreatePointerBitCastOrAddrSpaceCast(C, DestTy);
   }
 
   Instruction *CreateIntCast(Constant *C, Type *DestTy,

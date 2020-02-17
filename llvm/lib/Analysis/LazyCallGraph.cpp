@@ -1566,6 +1566,15 @@ void LazyCallGraph::removeDeadFunction(Function &F) {
   // allocators.
 }
 
+void LazyCallGraph::addNewFunctionIntoSCC(Function &NewF, SCC &C) {
+  Node &CGNode = get(NewF);
+  CGNode.DFSNumber = CGNode.LowLink = -1;
+  CGNode.populate();
+  C.Nodes.push_back(&CGNode);
+  SCCMap[&CGNode] = &C;
+  NodeMap[&NewF] = &CGNode;
+}
+
 LazyCallGraph::Node &LazyCallGraph::insertInto(Function &F, Node *&MappedN) {
   return *new (MappedN = BPA.Allocate()) Node(*this, F);
 }
@@ -1801,11 +1810,12 @@ LazyCallGraphDOTPrinterPass::LazyCallGraphDOTPrinterPass(raw_ostream &OS)
     : OS(OS) {}
 
 static void printNodeDOT(raw_ostream &OS, LazyCallGraph::Node &N) {
-  std::string Name = "\"" + DOT::EscapeString(N.getFunction().getName()) + "\"";
+  std::string Name =
+      "\"" + DOT::EscapeString(std::string(N.getFunction().getName())) + "\"";
 
   for (LazyCallGraph::Edge &E : N.populate()) {
     OS << "  " << Name << " -> \""
-       << DOT::EscapeString(E.getFunction().getName()) << "\"";
+       << DOT::EscapeString(std::string(E.getFunction().getName())) << "\"";
     if (!E.isCall()) // It is a ref edge.
       OS << " [style=dashed,label=\"ref\"]";
     OS << ";\n";

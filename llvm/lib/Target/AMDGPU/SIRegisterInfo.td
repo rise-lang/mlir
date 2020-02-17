@@ -7,6 +7,16 @@
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
+//  Subregister declarations
+//===----------------------------------------------------------------------===//
+
+let Namespace = "AMDGPU" in {
+foreach Index = 0-31 in {
+  def sub#Index : SubRegIndex<32, !shl(Index, 5)>;
+}
+}
+
+//===----------------------------------------------------------------------===//
 //  Helpers
 //===----------------------------------------------------------------------===//
 
@@ -131,7 +141,12 @@ def SRC_PRIVATE_BASE : SIReg<"src_private_base", 237>;
 def SRC_PRIVATE_LIMIT : SIReg<"src_private_limit", 238>;
 def SRC_POPS_EXITING_WAVE_ID : SIReg<"src_pops_exiting_wave_id", 239>;
 
-def LDS_DIRECT : SIReg <"src_lds_direct", 254>;
+def LDS_DIRECT : SIReg <"src_lds_direct", 254> {
+  // There is no physical register corresponding to this. This is an
+  // encoding value in a source field, which will ultimately trigger a
+  // read from m0.
+  let isArtificial = 1;
+}
 
 def XNACK_MASK_LO : SIReg<"xnack_mask_lo", 104>;
 def XNACK_MASK_HI : SIReg<"xnack_mask_hi", 105>;
@@ -422,7 +437,7 @@ def Pseudo_SReg_128 : RegisterClass<"AMDGPU", [v4i32, v2i64, v2f64], 32,
   let CopyCost = -1;
 }
 
-def LDS_DIRECT_CLASS : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16], 32,
+def LDS_DIRECT_CLASS : RegisterClass<"AMDGPU", [i32], 32,
   (add LDS_DIRECT)> {
   let isAllocatable = 0;
   let CopyCost = -1;
@@ -454,8 +469,8 @@ def SReg_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16, i1], 32
   let AllocationPriority = 10;
 }
 
-def SRegOrLds_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16, i1], 32,
-  (add SReg_32_XM0, M0_CLASS, EXEC_LO, EXEC_HI, SReg_32_XEXEC_HI, LDS_DIRECT_CLASS)> {
+def SRegOrLds_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16], 32,
+  (add SReg_32, LDS_DIRECT_CLASS)> {
   let isAllocatable = 0;
 }
 
@@ -612,7 +627,7 @@ def VReg_96 : RegisterClass<"AMDGPU", [v3i32, v3f32], 32, (add VGPR_96)> {
   let AllocationPriority = 3;
 }
 
-def VReg_128 : RegisterClass<"AMDGPU", [v4i32, v4f32, v2i64, v2f64], 32,
+def VReg_128 : RegisterClass<"AMDGPU", [v4i32, v4f32, v2i64, v2f64, i128], 32,
                              (add VGPR_128)> {
   let Size = 128;
 

@@ -46,6 +46,8 @@ using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_renderscript;
 
+LLDB_PLUGIN_DEFINE(RenderScriptRuntime)
+
 #define FMT_COORD "(%" PRIu32 ", %" PRIu32 ", %" PRIu32 ")"
 
 char RenderScriptRuntime::ID = 0;
@@ -1513,7 +1515,7 @@ void RenderScriptRuntime::CaptureScriptInit(RuntimeHook *hook,
       script->type = ScriptDetails::eScriptC;
       script->cache_dir = cache_dir;
       script->res_name = res_name;
-      script->shared_lib = strm.GetString();
+      script->shared_lib = std::string(strm.GetString());
       script->context = addr_t(args[eRsContext]);
     }
 
@@ -3129,7 +3131,7 @@ void RenderScriptRuntime::DumpKernels(Stream &strm) const {
     strm.Printf("Resource '%s':", module->m_resname.c_str());
     strm.EOL();
     for (const auto &kernel : module->m_kernels) {
-      strm.Indent(kernel.m_name.AsCString());
+      strm.Indent(kernel.m_name.GetStringRef());
       strm.EOL();
     }
   }
@@ -3939,7 +3941,7 @@ void RSModuleDescriptor::Dump(Stream &strm) const {
 }
 
 void RSGlobalDescriptor::Dump(Stream &strm) const {
-  strm.Indent(m_name.AsCString());
+  strm.Indent(m_name.GetStringRef());
   VariableList var_list;
   m_module->m_module->FindGlobalVariables(m_name, nullptr, 1U, var_list);
   if (var_list.GetSize() == 1) {
@@ -3964,12 +3966,12 @@ void RSGlobalDescriptor::Dump(Stream &strm) const {
 }
 
 void RSKernelDescriptor::Dump(Stream &strm) const {
-  strm.Indent(m_name.AsCString());
+  strm.Indent(m_name.GetStringRef());
   strm.EOL();
 }
 
 void RSReductionDescriptor::Dump(lldb_private::Stream &stream) const {
-  stream.Indent(m_reduce_name.AsCString());
+  stream.Indent(m_reduce_name.GetStringRef());
   stream.IndentMore();
   stream.EOL();
   stream.Indent();

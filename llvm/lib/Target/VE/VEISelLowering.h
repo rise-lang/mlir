@@ -27,8 +27,10 @@ enum NodeType : unsigned {
   Hi,
   Lo, // Hi/Lo operations, typically on a global address.
 
+  GETFUNPLT,       // load function address through %plt insturction
   CALL,            // A call instruction.
-  RET_FLAG, // Return with a flag operand.
+  RET_FLAG,        // Return with a flag operand.
+  GLOBAL_BASE_REG, // Global base reg for PIC.
 };
 }
 
@@ -71,6 +73,9 @@ public:
   /// Custom Lower {
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
+  SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   /// } Custom Lower
 
@@ -86,6 +91,9 @@ public:
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS, unsigned Align,
                                       MachineMemOperand::Flags Flags,
                                       bool *Fast) const override;
+
+  // Block s/udiv lowering for now
+  bool isIntDivCheap(EVT VT, AttributeList Attr) const override { return true; }
 };
 } // namespace llvm
 

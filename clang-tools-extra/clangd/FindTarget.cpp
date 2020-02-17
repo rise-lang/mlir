@@ -46,7 +46,7 @@ using ast_type_traits::DynTypedNode;
 
 LLVM_ATTRIBUTE_UNUSED std::string
 nodeToString(const ast_type_traits::DynTypedNode &N) {
-  std::string S = N.getNodeKind().asStringRef();
+  std::string S = std::string(N.getNodeKind().asStringRef());
   {
     llvm::raw_string_ostream OS(S);
     OS << ": ";
@@ -231,7 +231,7 @@ public:
   }
 
   void add(const Decl *Dcl, RelSet Flags) {
-    const NamedDecl *D = llvm::dyn_cast<NamedDecl>(Dcl);
+    const NamedDecl *D = llvm::dyn_cast_or_null<NamedDecl>(Dcl);
     if (!D)
       return;
     debug(*D, Flags);
@@ -377,6 +377,10 @@ public:
 
       void VisitTagType(const TagType *TT) {
         Outer.add(TT->getAsTagDecl(), Flags);
+      }
+
+      void VisitElaboratedType(const ElaboratedType *ET) {
+        Outer.add(ET->desugar(), Flags);
       }
 
       void VisitInjectedClassNameType(const InjectedClassNameType *ICNT) {
@@ -667,6 +671,17 @@ llvm::SmallVector<ReferenceLoc, 2> refInExpr(const Expr *E) {
           /*IsDecl=*/false,
           // Select the getter, setter, or @property depending on the call.
           explicitReferenceTargets(DynTypedNode::create(*E), {})});
+    }
+
+    void VisitDesignatedInitExpr(const DesignatedInitExpr *DIE) {
+      for (const DesignatedInitExpr::Designator &D : DIE->designators()) {
+        if (!D.isFieldDesignator())
+          continue;
+        Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
+                                    D.getFieldLoc(),
+                                    /*IsDecl=*/false,
+                                    {D.getField()}});
+      }
     }
   };
 

@@ -43,6 +43,8 @@ using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
 
+LLDB_PLUGIN_DEFINE(CPlusPlusLanguage)
+
 void CPlusPlusLanguage::Initialize() {
   PluginManager::RegisterPlugin(GetPluginNameStatic(), "C++ Language",
                                 CreateInstance);
@@ -230,7 +232,7 @@ std::string CPlusPlusLanguage::MethodName::GetScopeQualifiedName() {
   if (!m_parsed)
     Parse();
   if (m_context.empty())
-    return m_basename;
+    return std::string(m_basename);
 
   std::string res;
   res += m_context;

@@ -204,6 +204,7 @@ public:
   static ArrayAttr get(ArrayRef<Attribute> value, MLIRContext *context);
 
   ArrayRef<Attribute> getValue() const;
+  Attribute operator[](unsigned idx) const;
 
   /// Support range iteration.
   using iterator = llvm::ArrayRef<Attribute>::iterator;
@@ -359,6 +360,13 @@ public:
   static bool kindof(unsigned kind) {
     return kind == StandardAttributes::Integer;
   }
+
+  static LogicalResult verifyConstructionInvariants(Optional<Location> loc,
+                                                    MLIRContext *ctx, Type type,
+                                                    int64_t value);
+  static LogicalResult verifyConstructionInvariants(Optional<Location> loc,
+                                                    MLIRContext *ctx, Type type,
+                                                    const APInt &value);
 };
 
 //===----------------------------------------------------------------------===//
