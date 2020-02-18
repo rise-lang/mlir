@@ -71,6 +71,12 @@ struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
 PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRewriter &rewriter) const {
     rewriter.startRootUpdate(moduleOp);
 
+    /// Try Next: dont do the startRootUpdate stuff. But look at in ConvertLoopToStandard how a loop is transformed into several branching operations etc.
+    /// Look at how they work with blocks and build a new rise.moduleOp for us and give it the block of the current one.
+    /// at the end explicitly erase the old moduleOp and hope that this yields actual IR.
+    /// reduce size of the example and just get some transformation going.
+
+
     MLIRContext *context = rewriter.getContext();
     Location loc = moduleOp.getLoc();
     Region &riseRegion = moduleOp.region();
@@ -174,6 +180,8 @@ void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &re
         auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
         auto upperBound = rewriter.create<ConstantIndexOp>(loc, 3);
         auto step = rewriter.create<ConstantIndexOp>(loc, 1);
+        if (!lowerBound || !upperBound || !step)
+           emitError(appliedFun->getLoc()) << "operations not constructed";
 //        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
         /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
 //        forLoop.region().getBlocks().clear();
