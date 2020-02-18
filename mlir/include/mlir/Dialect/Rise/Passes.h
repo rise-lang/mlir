@@ -14,12 +14,7 @@ template <typename T> class OpPassBase;
 class OwningRewritePatternList;
 
 
-
-
-
 namespace rise {
-
-
 
 } //namespace rise
 } //namespace mlir
