@@ -165,7 +165,8 @@ DataType RiseDialect::parseDataType(StringRef typeString, mlir::Location loc) co
         sizeString = sizeString.trim();
         elementTypeString = elementTypeString.trim();
 
-        int size = std::stoi(sizeString);
+
+        int size = std::stoi(sizeString.str());
         Nat natSize = Nat::get(getContext(), size);
 
         if (elementTypeString.startswith("!rise."))
@@ -213,7 +214,7 @@ Nat RiseDialect::parseNat(StringRef typeString, mlir::Location loc) const {
             emitError(loc, "rise.nat delimiter <...> mismatch");
             return nullptr;
         }
-        int size = std::stoi(typeString);
+        int size = std::stoi(typeString.str());
         return Nat::get(getContext(), size);
     }
     emitError(loc, "parsing of Rise nat failed.");
@@ -295,7 +296,7 @@ NatAttr RiseDialect::parseNatAttribute(StringRef attrString,
         emitError(loc, "#rise.nat delimiter <...> mismatch");
         return nullptr;
     }
-    int natValue = std::stoi(attrString);
+    int natValue = std::stoi(attrString.str());
     return NatAttr::get(getContext(), Nat::get(getContext(), natValue));
 }
 
@@ -307,9 +308,9 @@ DataType static getArrayStructure(mlir::MLIRContext *context, StringRef structur
     std::tie(currentDim, restStructure) = structureString.split('.');
 
     if (restStructure == "") {
-        return ArrayType::get(context, Nat::get(context, std::stoi(currentDim)), elementType);
+        return ArrayType::get(context, Nat::get(context, std::stoi(currentDim.str())), elementType);
     } else {
-        return ArrayType::get(context, Nat::get(context, std::stoi(currentDim)),
+        return ArrayType::get(context, Nat::get(context, std::stoi(currentDim.str())),
                 getArrayStructure(context, restStructure, elementType, loc));
     }
 }
@@ -335,14 +336,14 @@ LiteralAttr RiseDialect::parseLiteralAttribute(StringRef attrString, mlir::Locat
             emitError(loc, "#rise.int delimiter <...> mismatch");
             return nullptr;
         }
-        return LiteralAttr::get(getContext(), Int::get(getContext()), attrString);
+        return LiteralAttr::get(getContext(), Int::get(getContext()), attrString.str());
     }
     if (attrString.startswith("float")) {
         if (!attrString.consume_front("float<") || !attrString.consume_back(">")) {
             emitError(loc, "#rise.float delimiter <...> mismatch");
             return nullptr;
         }
-        return LiteralAttr::get(getContext(), Float::get(getContext()), attrString);
+        return LiteralAttr::get(getContext(), Float::get(getContext()), attrString.str());
     }
     ///format
     ///     #rise.lit<array<array_structure, element_type, values>
@@ -374,7 +375,7 @@ LiteralAttr RiseDialect::parseLiteralAttribute(StringRef attrString, mlir::Locat
 
         return LiteralAttr::get(getContext(),
                                  getArrayStructure(getContext(), structureString, elementType, loc),
-                valueString);
+                valueString.str());
     }
     emitError(loc, "parsing of LiteralAttr failed");
     return nullptr;

@@ -31,7 +31,7 @@ struct LiteralAttributeStorage : public mlir::AttributeStorage {
     LiteralAttributeStorage(DataType type, std::string value) : type(type), value(value) {}
 
     //This is intentionally a StringRef, hashing does not work with std::string for some reason
-    using KeyTy = std::pair<DataType, llvm::StringRef>;
+    using KeyTy = std::pair<DataType, std::string>;
 
     /// Key equality function.
     bool operator==(const KeyTy &key) const { return key == KeyTy(type, value); }
