@@ -10,28 +10,20 @@
 namespace mlir {
 class ModuleOp;
 template <typename T> class OpPassBase;
-
-
-// Owning list of rewriting patterns.
 class OwningRewritePatternList;
 
-///
+    std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToStandardPass();
+    std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToImperativePass();
+
 void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
 void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
-namespace rise {
 
 
 
 
-std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToStandardPass();
-std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToImperativePass();
-
-
-
-
-} //namespace rise
+//} //namespace rise
 } //namespace mlir
 
 
