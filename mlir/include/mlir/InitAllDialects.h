@@ -14,6 +14,7 @@
 #ifndef MLIR_INITALLDIALECTS_H_
 #define MLIR_INITALLDIALECTS_H_
 
+#include <mlir/Dialect/Rise/IR/Dialect.h>
 #include "mlir/Dialect/AffineOps/AffineOps.h"
 #include "mlir/Dialect/FxpMathOps/FxpMathOps.h"
 #include "mlir/Dialect/GPU/GPUDialect.h"
@@ -44,6 +45,7 @@ inline void registerAllDialects() {
     registerDialect<loop::LoopOpsDialect>();
     registerDialect<omp::OpenMPDialect>();
     registerDialect<quant::QuantizationDialect>();
+    registerDialect<rise::RiseDialect>();
     registerDialect<spirv::SPIRVDialect>();
     registerDialect<StandardOpsDialect>();
     registerDialect<vector::VectorOpsDialect>();

@@ -14,8 +14,8 @@
 // limitations under the License.
 // =============================================================================
 
-#include "mlir/Dialect/Rise/Attributes.h"
-#include "mlir/Dialect/Rise/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Attributes.h"
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Builders.h"
