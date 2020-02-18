@@ -14,7 +14,7 @@
 // limitations under the License.
 // =============================================================================
 
-#include "mlir/Dialect/Rise/Ops.h"
+#include "mlir/Dialect/Rise/IR/Ops.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/StandardTypes.h"

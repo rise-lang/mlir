@@ -26,8 +26,8 @@
 #include "mlir/IR/Types.h"
 #include "mlir/Parser.h"
 
-#include "mlir/Dialect/Rise/Types.h"
-#include "mlir/Dialect/Rise/Ops.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
+#include "mlir/Dialect/Rise/IR/Ops.h"
 
 
 namespace mlir {

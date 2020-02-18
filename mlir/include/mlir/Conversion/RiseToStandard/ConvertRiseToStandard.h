@@ -6,7 +6,7 @@
 #define MLIR_CONVERTRISETOSTANDARD_H
 
 #include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Dialect/Rise/Types.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
 
 namespace mlir {
 class RiseTypeConverter : public TypeConverter {

@@ -3,7 +3,7 @@
 //
 
 #include "mlir/Conversion/RiseToImperative/ConvertRiseToImperative.h"
-#include "mlir/Dialect/Rise/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
 #include "mlir/Dialect/LoopOps/LoopOps.h"

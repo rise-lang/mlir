@@ -6,7 +6,7 @@
 #define MLIR_CONVERTRISETOIMPERATIVE_H
 
 #include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Dialect/Rise/Types.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"
@@ -19,7 +19,7 @@
 #include "mlir/Transforms/Utils.h"
 
 #include "mlir/Dialect/StandardOps/Ops.h"
-#include "mlir/Dialect/Rise/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
 
 namespace mlir{

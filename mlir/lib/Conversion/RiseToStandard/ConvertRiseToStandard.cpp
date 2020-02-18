@@ -3,7 +3,7 @@
 //
 
 #include "mlir/Conversion/RiseToStandard/ConvertRiseToStandard.h"
-#include "mlir/Dialect/Rise/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
 

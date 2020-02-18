@@ -28,6 +28,7 @@
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/QuantOps/Passes.h"
+#include "mlir/Dialect/Rise/Passes.h"
 #include "mlir/Dialect/SPIRV/Passes.h"
 #include "mlir/Quantizer/Transforms/Passes.h"
 #include "mlir/Transforms/LocationSnapshot.h"
@@ -112,6 +113,10 @@ inline void registerAllPasses() {
   quantizer::createAddDefaultStatsPass();
   quantizer::createRemoveInstrumentationPass();
   quantizer::registerInferQuantizedTypesPass();
+
+  // Rise
+  rise::createConvertRiseToImperativePass();
+  rise::createConvertRiseToStandardPass();
 
   // SPIR-V
   spirv::createDecorateSPIRVCompositeTypeLayoutPass();
