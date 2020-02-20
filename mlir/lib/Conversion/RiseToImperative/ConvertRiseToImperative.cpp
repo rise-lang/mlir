@@ -69,21 +69,27 @@ struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
 };
 
 PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRewriter &rewriter) const {
-    rewriter.startRootUpdate(moduleOp);
-
     /// Try Next: dont do the startRootUpdate stuff. But look at in ConvertLoopToStandard how a loop is transformed into several branching operations etc.
     /// Look at how they work with blocks and build a new rise.moduleOp for us and give it the block of the current one.
     /// at the end explicitly erase the old moduleOp and hope that this yields actual IR.
     /// reduce size of the example and just get some transformation going.
 
+//    Region::BlockListType &blocklist = riseRegion.getBlocks();
+//    Region::BlockListType::reverse_iterator blockIterator = blocklist.rbegin();
 
     MLIRContext *context = rewriter.getContext();
     Location loc = moduleOp.getLoc();
     Region &riseRegion = moduleOp.region();
-//    Region::BlockListType &blocklist = riseRegion.getBlocks();
-    Block &block = riseRegion.getBlocks().front();     // A rise region only has one block
-//    Region::BlockListType::reverse_iterator blockIterator = blocklist.rbegin();
 
+
+    Block &block = riseRegion.getBlocks().front();     // A rise region only has one block
+    auto newModule = rewriter.create<RiseModuleOp>(loc);
+    rewriter.eraseOp(moduleOp);
+
+//    rewriter.setInsertionPointToStart(&newModule.region().front());
+//    if (cst) {
+//        emitRemark(loc)<<"there is a cst"<<cst.getType();
+//    }
     /// For now start at the back and just find the first apply
     ApplyOp lastApply;
     for (auto op = block.rbegin(); op != block.rend(); op++) {
@@ -93,9 +99,17 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
             break;
         }
     }
-    auto operations = &riseRegion.getBlocks().front().getOperations();
+
+
+    rewriter.setInsertionPoint(lastApply); //insertions now happen before this op
+    auto cst = rewriter.create<ConstantIndexOp>(loc, 0);
+
+//    lastApply.setOperand(4, cst);
+
+//    auto operations = &riseRegion.getBlocks().front().getOperations();
 //    operations->back().erase(); //removes the return - do I even want this?
-    AccT(&block, lastApply.getResult(), rewriter);
+//    AccT(&block, lastApply.getResult(), rewriter);
+
 
 
     /// We want to take the last operation (before the return?) and start translation from there.
@@ -109,20 +123,19 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 
 //    auto loc2 = mlir::edsc::ScopedContext::getLocation(); //Not sure how to use this
 
-    rewriter.setInsertionPointToEnd(&moduleOp.region().front());
-    rewriter.create<mlir::rise::ReturnOp>(moduleOp.getLoc());
+//    rewriter.setInsertionPointToEnd(&moduleOp.region().front());
+//    rewriter.create<mlir::rise::ReturnOp>(moduleOp.getLoc());
     /// What is even happening here, do I have to insert this op now into the block op list?
     /// How can I get a handle to it then?
 
 
     /// Im sure this is not the correct thing to do. However this way I can debug my stuff now.
-    moduleOp.ensureTerminator(moduleOp.region(), rewriter, rewriter.getUnknownLoc()); //The location here is wrong.
-    rewriter.finalizeRootUpdate(moduleOp);
+//    moduleOp.ensureTerminator(moduleOp.region(), rewriter, rewriter.getUnknownLoc()); //The location here is wrong.
 
 
 
 
-
+    std::cout << "\n test me \n";
     /// We can get all operations inside this rise module and work on them.
     emitRemark(loc) << "I found the following operations:";
     for (auto &block : riseRegion.getBlocks()) {
