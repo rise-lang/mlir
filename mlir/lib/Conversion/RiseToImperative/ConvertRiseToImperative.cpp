@@ -24,6 +24,7 @@
 
 #include <iostream>
 #include <mlir/EDSC/Builders.h>
+#include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 
 using namespace mlir;
 using namespace mlir::rise;
@@ -52,7 +53,7 @@ PatternMatchResult ApplyToImpLowering::matchAndRewrite(ApplyOp applyOp,
     MLIRContext *context = rewriter.getContext();
     Location loc = applyOp.getLoc();
     //TODO: do
-    emitError(loc) << "yoyoyo";
+//    emitError(loc) << "yoyoyo";
     return matchSuccess();
 
 }
@@ -95,20 +96,30 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
     for (auto op = block.rbegin(); op != block.rend(); op++) {
         if (isa<ApplyOp>(*op)) {
             lastApply = cast<ApplyOp>(*op);
-            emitRemark(lastApply.getLoc()) << "apply found";
+//            emitRemark(lastApply.getLoc()) << "apply found";
+            break;
+        }
+    }
+    /// For now start at the back and just find the first apply
+    rise::ReturnOp returnOp;
+    for (auto op = block.rbegin(); op != block.rend(); op++) {
+        if (isa<rise::ReturnOp>(*op)) {
+            returnOp = cast<rise::ReturnOp>(*op);
+//            emitRemark(returnOp.getLoc()) << "return found";
             break;
         }
     }
 
 
-    rewriter.setInsertionPoint(lastApply); //insertions now happen before this op
-    auto cst = rewriter.create<ConstantIndexOp>(loc, 0);
+//    rewriter.setInsertionPoint(lastApply); //insertions now happen before this op
+//    auto cst = rewriter.create<ConstantIndexOp>(loc, 0);
 
 //    lastApply.setOperand(4, cst);
 
 //    auto operations = &riseRegion.getBlocks().front().getOperations();
 //    operations->back().erase(); //removes the return - do I even want this?
-//    AccT(&block, lastApply.getResult(), rewriter);
+    AccT(&block, lastApply.getResult(), rewriter);
+//    rewriter.eraseOp(returnOp);
 
 
 
@@ -137,7 +148,7 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 
     std::cout << "\n test me \n";
     /// We can get all operations inside this rise module and work on them.
-    emitRemark(loc) << "I found the following operations:";
+//    emitRemark(loc) << "I found the following operations:";
     for (auto &block : riseRegion.getBlocks()) {
         for (auto &operation : block.getOperations()) {
             emitRemark(operation.getLoc()) << "op: " << operation.getName().getStringRef();
@@ -154,18 +165,18 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 /// Using the existing OpListType should make things fairly straight forward.
 void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
     Block::OpListType &operations = expression->getOperations();
-    emitRemark((++operations.rbegin())->getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << (++operations.rbegin())->getName();
+//    emitRemark((++operations.rbegin())->getLoc()) << "starting Acceptor Translation. Output: " << output.getLoc() << " last op: " << (++operations.rbegin())->getName();
 
 
 
     ApplyOp apply = cast<ApplyOp>(*(++operations.rbegin()));
 //    operations.removeNodeFromList(apply);
-
+    rewriter.setInsertionPoint(apply);
     /// find applied function
     Operation* appliedFun; //= &expression->back(); //must not be undefined. Just initialized with the last one. Prob wrong approach
     for (auto &op : operations) {
         if (op.getResult(0) == apply.fun()) {
-            emitRemark(op.getLoc()) << "found the applied function";
+//            emitRemark(op.getLoc()) << "found the applied function";
             appliedFun = &op;
 
             break;
@@ -181,21 +192,31 @@ void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &re
         auto reductionFun = apply.getOperand(1);
         auto initializer = apply.getOperand(2);
         auto array = apply.getOperand(3);
-        emitRemark(appliedFun->getLoc()) << "Attributes: n:" << n.getValue().getIntValue() << " s: " << s.getValue().getKind() << " t: " << t.getValue().getKind() << " initializer: " << initializer.getType();
+//        emitRemark(appliedFun->getLoc()) << "Attributes: n:" << n.getValue().getIntValue() << " s: " << s.getValue().getKind() << " t: " << t.getValue().getKind() << " initializer: " << initializer.getType();
 
         /// Here I know what to do with the reduce and where to find the information for its codegen. -> look up in apply
 
         /// The lower upper bounds and the step also have to be Values.
         Location loc = apply.getLoc();
-        rewriter.eraseOp(apply);
+//        rewriter.eraseOp(apply);
 
-        rewriter.setInsertionPointToEnd(expression);
+//        rewriter.setInsertionPointToEnd(expression);
         auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
         auto upperBound = rewriter.create<ConstantIndexOp>(loc, 3);
         auto step = rewriter.create<ConstantIndexOp>(loc, 1);
-        if (!lowerBound || !upperBound || !step)
-           emitError(appliedFun->getLoc()) << "operations not constructed";
-//        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc , lowerBound, upperBound, step);
+//        if (!lowerBound || !upperBound || !step)
+//           emitError(appliedFun->getLoc()) << "operations not constructed";
+        auto forLoop = rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+        forLoop.getBody()->clear();
+
+
+        rewriter.setInsertionPointToStart(forLoop.getBody());
+
+        auto printfRef = getOrInsertPrintf(rewriter, apply.getParentOfType<ModuleOp>(), rewriter.getContext()->getRegisteredDialect<LLVM::LLVMDialect>());
+
+        auto cst0 = rewriter.create<ConstantIndexOp>(loc, 42);
+        rewriter.create<CallOp>(loc, printfRef, rewriter.getIntegerType(32));
+
         /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
 //        forLoop.region().getBlocks().clear();
 //        rewriter.inlineRegionBefore(expression->getParent(), forLoop.region(), forLoop.region().end());
@@ -206,7 +227,7 @@ void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &re
     } else if (isa<MapOp>(appliedFun)){
 
     } else {
-        emitRemark(appliedFun->getLoc()) << "lowering op: " << appliedFun->getName() << " not yet supported.";
+//        emitRemark(appliedFun->getLoc()) << "lowering op: " << appliedFun->getName() << " not yet supported.";
     }
 
     //FIXME: This seems to work the way I want it, at least when looking at my emitted remarks. However, my IR is not changed.
@@ -234,6 +255,28 @@ void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &re
 
 }
 
+class LLVMFuncOp;
+
+/// Return a symbol reference to the printf function, inserting it into the
+/// module if necessary.
+FlatSymbolRefAttr mlir::getOrInsertPrintf(PatternRewriter &rewriter, ModuleOp module, LLVM::LLVMDialect *llvmDialect) {
+    auto *context = module.getContext();
+    if (module.lookupSymbol<LLVM::LLVMFuncOp>("printf"))
+        return SymbolRefAttr::get("printf", context);
+
+    // Create a function declaration for printf, the signature is:
+    //   * `i32 (i8*, ...)`
+    auto llvmI32Ty = LLVM::LLVMType::getInt32Ty(llvmDialect);
+    auto llvmI8PtrTy = LLVM::LLVMType::getInt8PtrTy(llvmDialect);
+    auto llvmFnType = LLVM::LLVMType::getFunctionTy(llvmI32Ty, llvmI8PtrTy,
+            /*isVarArg=*/true);
+
+    // Insert the printf function into the body of the parent module.
+    PatternRewriter::InsertionGuard insertGuard(rewriter);
+    rewriter.setInsertionPointToStart(module.getBody());
+    rewriter.create<LLVM::LLVMFuncOp>(module.getLoc(), "printf", llvmFnType);
+    return SymbolRefAttr::get("printf", context);
+}
 
 /// Continuation Translation
 Block::OpListType* mlir::rise::ConT(Block *expression, mlir::Value output, PatternRewriter &rewriter) {
@@ -270,13 +313,17 @@ void ConvertRiseToImperativePass::runOnModule() {
     populateRiseToImpConversionPatterns(patterns, &getContext());
 
     ConversionTarget target(getContext());
-    target.addLegalDialect<StandardOpsDialect>();
-    target.addLegalOp<FuncOp, ModuleOp, ModuleTerminatorOp>();
+    /// For some reason these make my pass not run at all.
+//    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect, mlir::loop::LoopOpsDialect, RiseDialect>();
+//    target.addLegalOp<FuncOp, ModuleOp, ModuleTerminatorOp, RiseModuleOp, loop::ForOp, ConstantIndexOp>();
 //    target.addDynamicallyLegalOp<FuncOp>(
 //            [&](FuncOp op) { return converter.isSignatureLegal(op.getType()); });
 //    target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 
     //TODO: Add our TypeConverter as last argument
+//    if (failed(applyPartialConversion(module, target, patterns)))
+//        signalPassFailure();
+//    applyPatternsGreedily(module, patterns);
     if (failed(applyPartialConversion(module, target, patterns)))
         signalPassFailure();
 }

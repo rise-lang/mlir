@@ -5,6 +5,7 @@
 #ifndef MLIR_CONVERTRISETOIMPERATIVE_H
 #define MLIR_CONVERTRISETOIMPERATIVE_H
 
+#include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Dialect/Rise/IR/Types.h"
 
@@ -26,7 +27,10 @@ namespace mlir{
     namespace rise {
         void AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter);
         Block::OpListType* ConT(Block *expression, mlir::Value output, PatternRewriter &rewriter);
-        }
+    }
+    static FlatSymbolRefAttr getOrInsertPrintf(PatternRewriter &rewriter,
+                                               ModuleOp module,
+                                               LLVM::LLVMDialect *llvmDialect);
 }
 
 

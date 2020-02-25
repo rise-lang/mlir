@@ -39,6 +39,7 @@ namespace rise {
 class RiseDialect : public mlir::Dialect {
 public:
     explicit RiseDialect(mlir::MLIRContext *ctx);
+    static StringRef getDialectNamespace() { return "rise"; }
 
     /// Hook for custom parsing of types
     mlir::Type parseType(DialectAsmParser &parser) const override;
