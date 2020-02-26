@@ -67,27 +67,32 @@ def NatAttr : Attr<CPred<"$_self.isa<NatAttr>()">,
     let storageType = [{ NatAttr }];
     let returnType = [{ Nat }];
 }
-
+def LiteralAttr : Attr<CPred<"$_self.isa<LiteralAttr>()">,
+    "nat attribute">{
+let storageType = [{ LiteralAttr }];
+let returnType = [{ std::string }];
+}
 
 //===----------------------------------------------------------------------===//
 // Rise Operations
 //===----------------------------------------------------------------------===//
 
 def RiseModuleOp : Rise_Op<"module", [SingleBlockImplicitTerminator<"ReturnOp">]> {
-let summary = "rise module";
-let regions = (region SizedRegion<1>:$region);
-let parser = [{ return parse$cppClass(parser, result); }];
+    let summary = "rise module";
+    let regions = (region AnyRegion:$region);
+    let arguments = (ins BoolAttr:$lowered);
+    let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
     let summary = "literal";
-    let arguments = (ins AnyAttr:$literal);
+    let arguments = (ins LiteralAttr:$literal);
     let results = (outs RiseType);
-    let extraClassDeclaration = [{Attribute getValue() { return getAttr("value"); }
-        /// Returns true if a constant operation can be built with the given value
-        /// and result type.
-        static bool isBuildableWith(Attribute value, mlir::Type type);
-    }];
+//    let extraClassDeclaration = [{LiteralAttr getValue() { return getAttr("value"); }
+//        /// Returns true if a constant operation can be built with the given value
+//        /// and result type.
+//        static bool isBuildableWith(LiteralAttr value, mlir::Type type);
+//    }];
     let parser = [{ return parse$cppClass(parser, result); }];
 }
 

@@ -42,7 +42,7 @@ namespace rise {
 RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
     addOperations<
 #define GET_OP_LIST
-#include "mlir/Dialect/Rise/Ops.cpp.inc"
+#include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
     >();
     ///      Types:                              Nats:               Datatypes:
     addTypes<RiseType, FunType, DataTypeWrapper, Nat, DataType, Int, Float, Tuple, ArrayType>();

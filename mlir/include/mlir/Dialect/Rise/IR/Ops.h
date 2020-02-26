@@ -44,7 +44,7 @@ namespace rise {
 
 #define GET_OP_CLASSES
 
-#include "mlir/Dialect/Rise/Ops.h.inc"
+#include "mlir/Dialect/Rise/IR/Rise.h.inc"
 
 } //end namespace rise
 } //end namespace mlir

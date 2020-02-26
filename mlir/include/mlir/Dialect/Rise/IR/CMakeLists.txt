@@ -1,5 +1,7 @@
 add_mlir_dialect(Rise Rise)
-set(LLVM_TARGET_DEFINITIONS Ops.td)
-mlir_tablegen(Ops.h.inc -gen-op-decls)
-mlir_tablegen(Ops.cpp.inc -gen-op-defs)
+# usually this should have been sufficient, as the TableGen target is created automatically.
+# However, this does not work correctly
+set(LLVM_TARGET_DEFINITIONS Rise.td)
+mlir_tablegen(Rise.h.inc -gen-op-decls)
+mlir_tablegen(Rise.cpp.inc -gen-op-defs)
 add_public_tablegen_target(MLIRRiseOpsIncGen)

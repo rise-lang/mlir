@@ -38,5 +38,5 @@ add_llvm_library(MLIRRise
   DEPENDS
   intrinsics_gen
   )
-add_dependencies(MLIRRise MLIRIR MLIRRiseOpsIncGen MLIRCallOpInterfacesIncGen LLVMSupport)
+add_dependencies(MLIRRise MLIRRiseIncGen MLIRIR MLIRCallOpInterfacesIncGen LLVMSupport)
 target_link_libraries(MLIRRise MLIRIR LLVMSupport)

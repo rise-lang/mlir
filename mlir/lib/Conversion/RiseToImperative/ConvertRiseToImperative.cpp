@@ -74,6 +74,7 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
     /// Look at how they work with blocks and build a new rise.moduleOp for us and give it the block of the current one.
     /// at the end explicitly erase the old moduleOp and hope that this yields actual IR.
     /// reduce size of the example and just get some transformation going.
+    std::cout << "\n the Imperative pass is up and running \n";
 
 //    Region::BlockListType &blocklist = riseRegion.getBlocks();
 //    Region::BlockListType::reverse_iterator blockIterator = blocklist.rbegin();
@@ -84,8 +85,10 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 
 
     Block &block = riseRegion.getBlocks().front();     // A rise region only has one block
-    auto newModule = rewriter.create<RiseModuleOp>(loc);
-    rewriter.eraseOp(moduleOp);
+    auto newModule = rewriter.create<RiseModuleOp>(loc, true);
+    Region &newRegion = newModule.region();
+
+    rewriter.inlineRegionBefore(moduleOp.region(), newRegion, newRegion.begin());
 
 //    rewriter.setInsertionPointToStart(&newModule.region().front());
 //    if (cst) {
@@ -98,6 +101,9 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
             lastApply = cast<ApplyOp>(*op);
 //            emitRemark(lastApply.getLoc()) << "apply found";
             break;
+        }
+        if (isa<LiteralOp>(*op)) {
+//            std::cout << "value: "  << cast<LiteralOp>(op).. << "\n"
         }
     }
     /// For now start at the back and just find the first apply
@@ -151,9 +157,14 @@ PatternMatchResult ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp, PatternRe
 //    emitRemark(loc) << "I found the following operations:";
     for (auto &block : riseRegion.getBlocks()) {
         for (auto &operation : block.getOperations()) {
-            emitRemark(operation.getLoc()) << "op: " << operation.getName().getStringRef();
+//            emitRemark(operation.getLoc()) << "op: " << operation.getName().getStringRef();
         }
     }
+
+
+    //Here swap the regions
+//    rewriter.inlineRegionBefore(moduleOp.region(), &newModule.region().back());
+    rewriter.eraseOp(moduleOp);
 
     return matchSuccess();
 }
@@ -207,15 +218,15 @@ void mlir::rise::AccT(Block *expression, mlir::Value output, PatternRewriter &re
 //        if (!lowerBound || !upperBound || !step)
 //           emitError(appliedFun->getLoc()) << "operations not constructed";
         auto forLoop = rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
-        forLoop.getBody()->clear();
-
-
-        rewriter.setInsertionPointToStart(forLoop.getBody());
-
-        auto printfRef = getOrInsertPrintf(rewriter, apply.getParentOfType<ModuleOp>(), rewriter.getContext()->getRegisteredDialect<LLVM::LLVMDialect>());
-
-        auto cst0 = rewriter.create<ConstantIndexOp>(loc, 42);
-        rewriter.create<CallOp>(loc, printfRef, rewriter.getIntegerType(32));
+//        forLoop.getBody()->clear();
+//
+//
+//        rewriter.setInsertionPointToStart(forLoop.getBody());
+//
+//        auto printfRef = getOrInsertPrintf(rewriter, apply.getParentOfType<ModuleOp>(), rewriter.getContext()->getRegisteredDialect<LLVM::LLVMDialect>());
+//
+//        auto cst0 = rewriter.create<ConstantIndexOp>(loc, 42);
+//        rewriter.create<CallOp>(loc, printfRef, rewriter.getIntegerType(32));
 
         /// This is not working like this right now. The operation is added to the IR I think, but I can't add it to my list of operations.
 //        forLoop.region().getBlocks().clear();
@@ -314,12 +325,17 @@ void ConvertRiseToImperativePass::runOnModule() {
 
     ConversionTarget target(getContext());
     /// For some reason these make my pass not run at all.
-//    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect, mlir::loop::LoopOpsDialect, RiseDialect>();
-//    target.addLegalOp<FuncOp, ModuleOp, ModuleTerminatorOp, RiseModuleOp, loop::ForOp, ConstantIndexOp>();
+//    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect, mlir::loop::LoopOpsDialect>();
+    target.addLegalOp<FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp, ConstantIndexOp>();
+//    target.addIllegalOp<rise::MultOp>();
 //    target.addDynamicallyLegalOp<FuncOp>(
 //            [&](FuncOp op) { return converter.isSignatureLegal(op.getType()); });
 //    target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+    target.addDynamicallyLegalOp<RiseModuleOp>([](RiseModuleOp op) { return op.lowered(); });
+    target.markOpRecursivelyLegal<RiseModuleOp>();
 
+
+//    target.addLegalOp<rise::RiseModuleOp>();
     //TODO: Add our TypeConverter as last argument
 //    if (failed(applyPartialConversion(module, target, patterns)))
 //        signalPassFailure();

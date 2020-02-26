@@ -14,6 +14,7 @@
 // limitations under the License.
 // =============================================================================
 
+#include <iostream>
 #include "mlir/Dialect/Rise/IR/Ops.h"
 
 #include "mlir/IR/Builders.h"
@@ -49,6 +50,10 @@ ParseResult parseRiseModuleOp(OpAsmParser &parser, OperationState &result) {
     auto &builder = parser.getBuilder();
     SmallVector<OpAsmParser::OperandType, 4> arguments;
     SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+
+    /// Indicate, that this is not lowered
+    //TODO: This is temporary
+    result.addAttribute("lowered", BoolAttr::get(false, builder.getContext()));
 
     // Parse body of lambda
     Region *body = result.addRegion();
@@ -107,6 +112,7 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     bool simplified = true;
 
     auto &builder = parser.getBuilder();
+
     OpAsmParser::OperandType funOperand;
     FunType funType;
     SmallVector<OpAsmParser::OperandType, 4> arguments;
@@ -157,6 +163,7 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
         failure();
 
     result.addTypes(funType.getOutput());
+    result.setOperandListToResizable(true);
     return success();
 }
 
@@ -176,6 +183,8 @@ ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
     //type and value of literal
     if (parser.parseAttribute(attr, "literal",result.attributes))
         return failure();
+
+    std::cout << "\nstill alive in parseLiteral\n";
 
     result.addTypes(DataTypeWrapper::get(builder.getContext(), attr.getType()));
     return success();
@@ -411,7 +420,7 @@ ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
 }
 
 #define GET_OP_CLASSES
-#include "mlir/Dialect/Rise/Ops.cpp.inc"
+#include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
 } //end namespace rise
 } //end namespace mlir
 
