@@ -26,7 +26,7 @@
 namespace mlir {
 namespace rise {
 void AccT(Block *expression, mlir::Value output, PatternRewriter &rewriter);
-Block::OpListType *ConT(Block *expression, mlir::Value output,
+mlir::Value ConT(mlir::Value contValue,
                         PatternRewriter &rewriter);
 } // namespace rise
 static FlatSymbolRefAttr getOrInsertPrintf(PatternRewriter &rewriter,

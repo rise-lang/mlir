@@ -64,6 +64,29 @@ ParseResult parseRiseModuleOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
+// RiseModuleOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseContinuationTranslation(OpAsmParser &parser,
+    OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType contValue;
+
+  if (parser.parseOperand(contValue))
+    return failure();
+
+  if (parser.resolveOperandUnsafe(contValue, result.operands))
+    return failure();
+
+  /// Maybe add the ability to request a result type as in "This will be
+  // translated into a memref
+
+
+  return success();
+}
+
+
+
+//===----------------------------------------------------------------------===//
 // LambdaOp
 //===----------------------------------------------------------------------===//
 ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
