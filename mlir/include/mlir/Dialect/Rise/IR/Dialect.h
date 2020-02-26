@@ -26,9 +26,8 @@
 #include "mlir/IR/Types.h"
 #include "mlir/Parser.h"
 
-#include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/Dialect/Rise/IR/Ops.h"
-
+#include "mlir/Dialect/Rise/IR/Types.h"
 
 namespace mlir {
 class Builder;
@@ -38,35 +37,31 @@ namespace rise {
 /// This is the definition of the Rise dialect.
 class RiseDialect : public mlir::Dialect {
 public:
-    explicit RiseDialect(mlir::MLIRContext *ctx);
-    static StringRef getDialectNamespace() { return "rise"; }
+  explicit RiseDialect(mlir::MLIRContext *ctx);
+  static StringRef getDialectNamespace() { return "rise"; }
 
-    /// Hook for custom parsing of types
-    mlir::Type parseType(DialectAsmParser &parser) const override;
-    RiseType parseRiseType(StringRef typeString,
-            mlir::Location loc) const;
-    DataType parseDataType(StringRef typeString,
-            mlir::Location loc) const;
-    Nat parseNat(StringRef typeString,
-            mlir::Location loc) const;
+  /// Hook for custom parsing of types
+  mlir::Type parseType(DialectAsmParser &parser) const override;
+  RiseType parseRiseType(StringRef typeString, mlir::Location loc) const;
+  DataType parseDataType(StringRef typeString, mlir::Location loc) const;
+  Nat parseNat(StringRef typeString, mlir::Location loc) const;
 
-    /// Hook for custom printing of types
-    void printType(mlir::Type type, DialectAsmPrinter &) const override;
+  /// Hook for custom printing of types
+  void printType(mlir::Type type, DialectAsmPrinter &) const override;
 
+  /// Hook for custom parsing of Attributes
+  mlir::Attribute parseAttribute(DialectAsmParser &parser,
+                                 Type type) const override;
+  LiteralAttr parseLiteralAttribute(StringRef attrString,
+                                    mlir::Location loc) const;
+  DataTypeAttr parseDataTypeAttribute(StringRef attrString,
+                                      mlir::Location loc) const;
+  NatAttr parseNatAttribute(StringRef attrString, mlir::Location loc) const;
 
-    /// Hook for custom parsing of Attributes
-    mlir::Attribute parseAttribute(DialectAsmParser &parser, Type type) const override;
-    LiteralAttr parseLiteralAttribute(StringRef attrString,
-            mlir::Location loc) const;
-    DataTypeAttr parseDataTypeAttribute(StringRef attrString,
-            mlir::Location loc) const;
-    NatAttr parseNatAttribute(StringRef attrString,
-            mlir::Location loc) const;
-
-    /// Hook for custom printing of Attributes
-    void printAttribute(Attribute, DialectAsmPrinter &) const override;
+  /// Hook for custom printing of Attributes
+  void printAttribute(Attribute, DialectAsmPrinter &) const override;
 };
 
-} //end namespace rise
-} //end namespace mlir
+} // end namespace rise
+} // end namespace mlir
 #endif // MLIR_RISE_DIALECT_H_

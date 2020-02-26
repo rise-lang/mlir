@@ -17,10 +17,10 @@
 #ifndef MLIR_RISE_ATTRIBUTES_H
 #define MLIR_RISE_ATTRIBUTES_H
 
-#include "mlir/IR/Dialect.h"
-#include "mlir/IR/AttributeSupport.h"
 #include "AttributeDetail.h"
+#include "mlir/IR/AttributeSupport.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/Dialect.h"
 
 namespace mlir {
 namespace rise {
@@ -29,18 +29,16 @@ namespace detail {
 struct DataTypeAttributeStorage;
 struct NatAttributeStorage;
 struct LiteralAttributeStorage;
-}
-
+} // namespace detail
 
 /// LLVM-style RTTI: one entry per subclass to allow dyn_cast/isa.
 enum RiseAttributeKind {
-    // The enum starts at the range reserved for this dialect.
-    RISE_ATTR = mlir::Attribute::FIRST_RISE_ATTR,
-    NAT_ATTR,
-    LITERAL_ATTR,
-    DATATYPE_ATTR,
+  // The enum starts at the range reserved for this dialect.
+  RISE_ATTR = mlir::Attribute::FIRST_RISE_ATTR,
+  NAT_ATTR,
+  LITERAL_ATTR,
+  DATATYPE_ATTR,
 };
-
 
 /// Rise LiteralAttr is used to pass information about type and value of
 /// a literal to the RISE literal operation.
@@ -50,47 +48,59 @@ enum RiseAttributeKind {
 ///         #rise.int<42>
 ///         #rise.array<2, rise.int, [1,2]>
 ///         #rise.array<2.3, !rise.int, [[1,2,3],[4,5,6]]>
-class LiteralAttr : public Attribute::AttrBase<LiteralAttr, Attribute, detail::LiteralAttributeStorage> {
+class LiteralAttr
+    : public Attribute::AttrBase<LiteralAttr, Attribute,
+                                 detail::LiteralAttributeStorage> {
 public:
-    using Base::Base;
+  using Base::Base;
 
-    static LiteralAttr get(MLIRContext *context, DataType type, std::string value);
+  static LiteralAttr get(MLIRContext *context, DataType type,
+                         std::string value);
 
-    std::string getValue() const;
-    DataType getType() const;
+  std::string getValue() const;
+  DataType getType() const;
 
-    /// Methods for support type inquiry through isa, cast, and dyn_cast.
-    static bool kindof(unsigned kind) { return kind == RiseAttributeKind::LITERAL_ATTR; }
+  /// Methods for support type inquiry through isa, cast, and dyn_cast.
+  static bool kindof(unsigned kind) {
+    return kind == RiseAttributeKind::LITERAL_ATTR;
+  }
 };
 
 /// RISE DataTypeAttr is used to specialize certain functions to a DataType
 /// e.g. rise.add #rise.int returns an addition operation for integers.
-class DataTypeAttr : public Attribute::AttrBase<DataTypeAttr, Attribute, detail::DataTypeAttributeStorage> {
+class DataTypeAttr
+    : public Attribute::AttrBase<DataTypeAttr, Attribute,
+                                 detail::DataTypeAttributeStorage> {
 public:
-    using Base::Base;
+  using Base::Base;
 
-    static DataTypeAttr get(MLIRContext *context, DataType value);
+  static DataTypeAttr get(MLIRContext *context, DataType value);
 
-    DataType getValue() const;
+  DataType getValue() const;
 
-    /// Methods for support type inquiry through isa, cast, and dyn_cast.
-    static bool kindof(unsigned kind) { return kind == RiseAttributeKind::DATATYPE_ATTR; }
+  /// Methods for support type inquiry through isa, cast, and dyn_cast.
+  static bool kindof(unsigned kind) {
+    return kind == RiseAttributeKind::DATATYPE_ATTR;
+  }
 };
 
 /// RISE NatAttr is used to specify the number of elements of Array.
-class NatAttr : public Attribute::AttrBase<NatAttr, Attribute, detail::NatAttributeStorage> {
+class NatAttr : public Attribute::AttrBase<NatAttr, Attribute,
+                                           detail::NatAttributeStorage> {
 public:
-    using Base::Base;
+  using Base::Base;
 
-    static NatAttr get(MLIRContext *context, Nat value);
+  static NatAttr get(MLIRContext *context, Nat value);
 
-    Nat getValue() const;
+  Nat getValue() const;
 
-    /// Methods for support type inquiry through isa, cast, and dyn_cast.
-    static bool kindof(unsigned kind) { return kind == RiseAttributeKind::NAT_ATTR; }
+  /// Methods for support type inquiry through isa, cast, and dyn_cast.
+  static bool kindof(unsigned kind) {
+    return kind == RiseAttributeKind::NAT_ATTR;
+  }
 };
 
+} // namespace rise
 }
-}
-#endif //MLIR_RISE_ATTRIBUTES_H
-;
+#endif // MLIR_RISE_ATTRIBUTES_H
+;      // namespace mlir

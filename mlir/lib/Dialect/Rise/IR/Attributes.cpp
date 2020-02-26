@@ -17,8 +17,8 @@
 #include "mlir/Dialect/Rise/IR/Attributes.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 
-#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/StandardTypes.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
@@ -30,33 +30,31 @@ namespace rise {
 // LiteralAttr
 //===----------------------------------------------------------------------===//
 
-LiteralAttr LiteralAttr::get(MLIRContext *context, DataType type, std::string value) {
-    return Base::get(context, RiseAttributeKind::LITERAL_ATTR, type, value);
+LiteralAttr LiteralAttr::get(MLIRContext *context, DataType type,
+                             std::string value) {
+  return Base::get(context, RiseAttributeKind::LITERAL_ATTR, type, value);
 }
 DataType LiteralAttr::getType() const { return getImpl()->type; }
 
 std::string LiteralAttr::getValue() const { return getImpl()->value; }
-
 
 //===----------------------------------------------------------------------===//
 // DataTypeAttr
 //===----------------------------------------------------------------------===//
 
 DataTypeAttr DataTypeAttr::get(MLIRContext *context, DataType value) {
-    return Base::get(context, RiseAttributeKind::DATATYPE_ATTR, value);
+  return Base::get(context, RiseAttributeKind::DATATYPE_ATTR, value);
 }
 DataType DataTypeAttr::getValue() const { return getImpl()->value; }
-
 
 //===----------------------------------------------------------------------===//
 // NatAttr
 //===----------------------------------------------------------------------===//
 
 NatAttr NatAttr::get(MLIRContext *context, Nat value) {
-    return Base::get(context, RiseAttributeKind::NAT_ATTR, value);
+  return Base::get(context, RiseAttributeKind::NAT_ATTR, value);
 }
 Nat NatAttr::getValue() const { return getImpl()->value; }
 
-
-} //end namespace rise
-} //end namespace mlir
+} // end namespace rise
+} // end namespace mlir

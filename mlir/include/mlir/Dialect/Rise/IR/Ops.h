@@ -17,15 +17,15 @@
 #ifndef MLIR_RISE_OPS_H
 #define MLIR_RISE_OPS_H
 
-#include "Types.h"
 #include "Attributes.h"
-#include "mlir/IR/Function.h"
-#include "mlir/IR/OpDefinition.h"
-#include "mlir/IR/FunctionSupport.h"
-#include "mlir/IR/OpImplementation.h"
+#include "Types.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/Function.h"
+#include "mlir/IR/FunctionSupport.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/OpImplementation.h"
 
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -39,14 +39,14 @@
 //////////////////// Custom Operations for the Dialect /////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-namespace  mlir {
+namespace mlir {
 namespace rise {
 
 #define GET_OP_CLASSES
 
 #include "mlir/Dialect/Rise/IR/Rise.h.inc"
 
-} //end namespace rise
-} //end namespace mlir
+} // end namespace rise
+} // end namespace mlir
 
-#endif //MLIR_RISE_OPS_H
+#endif // MLIR_RISE_OPS_H
