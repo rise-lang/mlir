@@ -209,8 +209,6 @@ ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseAttribute(attr, "literal", result.attributes))
     return failure();
 
-  std::cout << "\nstill alive in parseLiteral\n";
-
   result.addTypes(DataTypeWrapper::get(builder.getContext(), attr.getType()));
   return success();
 }

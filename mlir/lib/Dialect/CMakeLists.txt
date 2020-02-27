@@ -43,6 +43,7 @@ target_link_libraries(MLIRAllDialects
   MLIRROCDLIR
   MLIRLinalgOps
   MLIRLoopOps
+  MLIRRise
   MLIROpenMP
   MLIRQuantOps
   MLIRSDBM

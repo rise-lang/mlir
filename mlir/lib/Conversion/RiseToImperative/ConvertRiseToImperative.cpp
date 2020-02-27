@@ -69,8 +69,6 @@ struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
 PatternMatchResult
 ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
                              PatternRewriter &rewriter) const {
-  std::cout << "\n the Imperative pass is up and running \n";
-
   MLIRContext *context = rewriter.getContext();
   Location loc = moduleOp.getLoc();
   Region &riseRegion = moduleOp.region();
@@ -153,8 +151,8 @@ void mlir::rise::AccT(Block *expression, ApplyOp apply,
     }
   }
 
-  emitRemark(appliedFun->getLoc())
-      << "The applied fun is " << appliedFun->getName();
+//  emitRemark(appliedFun->getLoc())
+//      << "The applied fun is " << appliedFun->getName();
 
   // Check which translation we do. TODO: move this to its own function
   if (isa<ReduceOp>(appliedFun)) {
