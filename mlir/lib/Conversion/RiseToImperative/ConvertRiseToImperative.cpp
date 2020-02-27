@@ -75,15 +75,25 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
   Location loc = moduleOp.getLoc();
   Region &riseRegion = moduleOp.region();
 
+
+  if (!riseRegion.getParentRegion()->getParentRegion())
+    return matchFailure();
+
   // create mlir function for the given rise module and inline all rise
   // operations
+  rewriter.setInsertionPointToStart(
+      &riseRegion.getParentRegion()->getParentRegion()->front());
   auto riseFun = rewriter.create<FuncOp>(loc, StringRef("riseFun"),
                                          FunctionType::get({}, {}, context),
                                          ArrayRef<NamedAttribute>{});
   rewriter.inlineRegionBefore(moduleOp.region(), riseFun.getBody(),
                               riseFun.getBody().begin());
 
+  rewriter.setInsertionPointToStart(&moduleOp.getParentRegion()->front());
+  rewriter.create<CallOp>(moduleOp.getLoc(), riseFun);
   // We don't need the riseModule anymore
+
+  //  moduleOp.region().back().erase();
   rewriter.eraseOp(moduleOp);
 
   // The function has only one block, as a rise module can only have one block.
@@ -105,9 +115,13 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
       break;
     }
   }
+  // Replace rise.return (leaving the rise module) with a return for the funcOp
+  rewriter.setInsertionPoint(returnOp);
+  rewriter.create<mlir::ReturnOp>(returnOp.getLoc());
+  rewriter.eraseOp(returnOp);
 
   // Start translation to imperative
-  AccT(&block, lastApply.getResult(), rewriter);
+  AccT(&block, lastApply, rewriter);
 
   //  // printing all operations inside riseFun
   //  emitRemark(loc) << "I found the following operations:";
@@ -126,13 +140,9 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a (partially) lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-void mlir::rise::AccT(Block *expression, mlir::Value output,
+void mlir::rise::AccT(Block *expression, ApplyOp apply,
                       PatternRewriter &rewriter) {
   Block::OpListType &operations = expression->getOperations();
-
-  // This assumes that apply is the second to last operation
-  ApplyOp apply = cast<ApplyOp>(*(++operations.rbegin()));
-  rewriter.setInsertionPoint(apply);
 
   /// find applied function
   Operation *appliedFun;
@@ -163,22 +173,21 @@ void mlir::rise::AccT(Block *expression, mlir::Value output,
 
     // Add Continuation for array. Initialization of it will also come from
     // this in case of an array literal
-    auto contArray = rewriter.create<RiseContinuationTranslation>(
-        array.getLoc(),
-        MemRefType::get(ArrayRef<int64_t>{32},
-                        FloatType::getF32(rewriter.getContext())),
-        array);
+    auto contArray = ConT(array, rewriter);
 
     // Add Continuation for init
     auto contInit = ConT(initializer, rewriter);
 
+    rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
     auto acc = rewriter.create<AllocOp>(
         appliedFun->getLoc(),
-        MemRefType::get(ArrayRef<int64_t>{0},
+        MemRefType::get(ArrayRef<int64_t>{1},
                         FloatType::getF32(rewriter.getContext())));
 
-    // Add alloc for accumulator
+    rewriter.create<linalg::FillOp>(initializer.getLoc(), acc.getResult(),
+                                    contInit);
+
     // add linalg.fill for input array
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
     auto upperBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 3);
@@ -191,9 +200,8 @@ void mlir::rise::AccT(Block *expression, mlir::Value output,
     rewriter.setInsertionPointToStart(forLoop.getBody());
     auto x1 = rewriter.create<LoadOp>(reductionFun.getLoc(), acc.getResult(),
                                       lowerBound.getResult());
-    auto x2 =
-        rewriter.create<LoadOp>(reductionFun.getLoc(), contArray.getResult(),
-                                forLoop.getInductionVar());
+    auto x2 = rewriter.create<LoadOp>(reductionFun.getLoc(), contArray,
+                                      forLoop.getInductionVar());
     auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
                                             x1.getResult(), x2.getResult());
     auto storing =
@@ -218,35 +226,59 @@ void mlir::rise::AccT(Block *expression, mlir::Value output,
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
   }
-
-  // FIXME: This seems to work the way I want it, at least when looking at my
-  // emitted remarks. However, my IR is not changed.
-
-  // goal:
-  // func @main() {
-  //  %array = alloc() : memref<4xf32>
-  //  %init = alloc() : memref<1xf32>
-  //  %cst_0 = constant 0 : index
-  //
-  //  %lb = constant 0 : index
-  //  %ub = constant 4 : index //half open index, so 4 iterations
-  //  %step = constant 1 : index
-  //  loop.for %i = %lb to %ub step %step {
-  //    %elem = load %array[%i] : memref<4xf32>
-  //    %acc = load %init[%cst_0] : memref<1xf32>
-  //    %res = addf %acc, %elem : f32
-  //    store %res, %init[%cst_0] : memref<1xf32>
-  //  }
-  //  return
-  //
 }
 
 /// Continuation Translation
 mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
-  std::cout << "\n 0\n";
+  Location loc = contValue.getLoc();
   //
-  //  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-  //    std::cout << "\n 1\n" << op.literalAttr().getType().getKind() << " and "
+  StringRef literalValue =
+      dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
+  // This should of course check for an int or float type
+  // However the casting for some reason does not work. I'll hardcode it for now
+  if (literalValue == "0") {
+    rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+
+    // Done. Erase Op and return
+    rewriter.eraseOp(contValue.getDefiningOp());
+    return rewriter.create<ConstantFloatOp>(
+        loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
+
+    //      rewriter.create<RiseContinuationTranslation>(
+    //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
+    //          contValue);
+    // This should check for an array type
+  } else if (literalValue == "[5,5,5,5]") {
+    rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+
+    auto array = rewriter.create<AllocOp>(
+        loc, MemRefType::get(ArrayRef<int64_t>{4},
+                             FloatType::getF32(rewriter.getContext())));
+    // For now just fill the array with one value
+    auto filler = rewriter.create<ConstantFloatOp>(
+        loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+    rewriter.create<linalg::FillOp>(loc, array.getResult(), filler.getResult());
+
+    // Done. erase Op and return
+    rewriter.eraseOp(contValue.getDefiningOp());
+    return array.getResult();
+
+    //    return rewriter.create<RiseContinuationTranslation>(
+    //        contValue.getLoc(),
+    //        MemRefType::get(ArrayRef<int64_t>{32},
+    //                        FloatType::getF32(rewriter.getContext())),
+    //        contValue);
+  } else {
+    emitError(contValue.getLoc())
+        << "can not perform continuation "
+           "translation for "
+        << contValue.getDefiningOp()->getName().getStringRef().str();
+    return contValue;
+  }
+
+  //    std::cout << "\n 1\n" << op.literalAttr().getType().getKind() << " and
+  //    "
   //    << RiseTypeKind::RISE_FLOAT;
   //
   //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_ARRAY)) {
@@ -266,9 +298,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
   //        << " not "
   //           "supported.";
   //  }
-  rewriter.create<RiseContinuationTranslation>(
-      contValue.getLoc(), FloatType::getF32(rewriter.getContext()), contValue);
-  return contValue;
 }
 
 /// gather all patterns
@@ -303,8 +332,9 @@ void ConvertRiseToImperativePass::runOnModule() {
 
   //    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect,
   //    mlir::loop::LoopOpsDialect>();
-  target.addLegalOp<FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
+  target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp,
+                    linalg::FillOp, mlir::ReturnOp,
                     RiseContinuationTranslation>();
   target.addIllegalOp<RiseModuleOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
