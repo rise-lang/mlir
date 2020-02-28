@@ -84,16 +84,16 @@ def RiseContinuationTranslation : Rise_Op<"cont"> {
   let summary = "rise cont";
   let description =
       "A marker where to continue with the lowering to imperative";
-  let arguments = (ins AnyType:$cont);
+  let arguments = (ins AnyType : $cont);
   let results = (outs AnyType);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseModuleOp
-    : Rise_Op<"module", [SingleBlockImplicitTerminator<"ReturnOp">]> {
-  let summary = "rise module";
+def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
+  let summary = "rise fun";
   let regions = (region SizedRegion<1> : $region);
-  //    let arguments = (ins BoolAttr:$lowered);
+  let arguments = (ins Variadic<AnyType>:$inputs);
+  let results = (outs AnyType:$output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

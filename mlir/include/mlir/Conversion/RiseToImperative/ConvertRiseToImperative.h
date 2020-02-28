@@ -25,13 +25,11 @@
 
 namespace mlir {
 namespace rise {
-void AccT(Block *expression, ApplyOp apply, PatternRewriter &rewriter);
+mlir::Value AccT(Block *expression, ApplyOp apply, PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue,
                         PatternRewriter &rewriter);
 } // namespace rise
-static FlatSymbolRefAttr getOrInsertPrintf(PatternRewriter &rewriter,
-                                           ModuleOp module,
-                                           LLVM::LLVMDialect *llvmDialect);
+
 } // namespace mlir
 
 #endif // MLIR_CONVERTRISETOIMPERATIVE_H

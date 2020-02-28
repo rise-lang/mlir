@@ -43,9 +43,9 @@ namespace mlir {
 namespace rise {
 
 //===----------------------------------------------------------------------===//
-// RiseModuleOp
+// RiseFunOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseModuleOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
@@ -59,15 +59,19 @@ ParseResult parseRiseModuleOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseRegion(*body, arguments, argumentTypes))
     return failure();
 
+  result.addTypes(
+      {MemRefType::get(ArrayRef<int64_t>{1},
+                       FloatType::getF32(parser.getBuilder().getContext()))});
+
   LambdaOp::ensureTerminator(*body, builder, result.location);
   return success();
 }
 
 //===----------------------------------------------------------------------===//
-// RiseModuleOp
+// RiseContinuationTranslation
 //===----------------------------------------------------------------------===//
 ParseResult parseRiseContinuationTranslation(OpAsmParser &parser,
-    OperationState &result) {
+                                             OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType contValue;
 
@@ -80,11 +84,8 @@ ParseResult parseRiseContinuationTranslation(OpAsmParser &parser,
   /// Maybe add the ability to request a result type as in "This will be
   // translated into a memref
 
-
   return success();
 }
-
-
 
 //===----------------------------------------------------------------------===//
 // LambdaOp

@@ -59,20 +59,19 @@ ApplyToImpLowering::matchAndRewrite(ApplyOp applyOp,
   return matchSuccess();
 }
 
-struct ModuleToImp : public OpRewritePattern<RiseModuleOp> {
-  using OpRewritePattern<RiseModuleOp>::OpRewritePattern;
+struct ModuleToImp : public OpRewritePattern<RiseFunOp> {
+  using OpRewritePattern<RiseFunOp>::OpRewritePattern;
 
-  PatternMatchResult matchAndRewrite(RiseModuleOp moduleOp,
+  PatternMatchResult matchAndRewrite(RiseFunOp riseFunOp,
                                      PatternRewriter &rewriter) const override;
 };
 
 PatternMatchResult
-ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
+ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
                              PatternRewriter &rewriter) const {
   MLIRContext *context = rewriter.getContext();
-  Location loc = moduleOp.getLoc();
-  Region &riseRegion = moduleOp.region();
-
+  Location loc = riseFunOp.getLoc();
+  Region &riseRegion = riseFunOp.region();
 
   if (!riseRegion.getParentRegion()->getParentRegion())
     return matchFailure();
@@ -81,18 +80,24 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
   // operations
   rewriter.setInsertionPointToStart(
       &riseRegion.getParentRegion()->getParentRegion()->front());
-  auto riseFun = rewriter.create<FuncOp>(loc, StringRef("riseFun"),
-                                         FunctionType::get({}, {}, context),
-                                         ArrayRef<NamedAttribute>{});
-  rewriter.inlineRegionBefore(moduleOp.region(), riseFun.getBody(),
+  auto riseFun = rewriter.create<FuncOp>(
+      loc, StringRef("riseFun"),
+      FunctionType::get({}, riseFunOp.getResult().getType(), context),
+      ArrayRef<NamedAttribute>{});
+  rewriter.inlineRegionBefore(riseFunOp.region(), riseFun.getBody(),
                               riseFun.getBody().begin());
 
-  rewriter.setInsertionPointToStart(&moduleOp.getParentRegion()->front());
-  rewriter.create<CallOp>(moduleOp.getLoc(), riseFun);
-  // We don't need the riseModule anymore
+  rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
+  auto callRiseFunOp = rewriter.create<CallOp>(riseFunOp.getLoc(), riseFun);
 
-  //  moduleOp.region().back().erase();
-  rewriter.eraseOp(moduleOp);
+  // printing
+  auto printFun = dyn_cast<ModuleOp>(riseFun.getParentRegion()->getParentOp())
+                      .lookupSymbol<FuncOp>("_mlir_ciface_print_memref_1d_f32");
+  rewriter.create<CallOp>(riseFunOp.getLoc(), printFun,
+                          callRiseFunOp.getResult(0));
+
+  // We don't need the riseModule anymore
+  rewriter.eraseOp(riseFunOp);
 
   // The function has only one block, as a rise module can only have one block.
   Block &block = riseFun.getBody().front();
@@ -113,13 +118,14 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
       break;
     }
   }
+
+  // Translation to imperative
+  auto result = AccT(&block, lastApply, rewriter);
+
   // Replace rise.return (leaving the rise module) with a return for the funcOp
   rewriter.setInsertionPoint(returnOp);
-  rewriter.create<mlir::ReturnOp>(returnOp.getLoc());
+  auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
   rewriter.eraseOp(returnOp);
-
-  // Start translation to imperative
-  AccT(&block, lastApply, rewriter);
 
   //  // printing all operations inside riseFun
   //  emitRemark(loc) << "I found the following operations:";
@@ -138,8 +144,8 @@ ModuleToImp::matchAndRewrite(RiseModuleOp moduleOp,
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a (partially) lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-void mlir::rise::AccT(Block *expression, ApplyOp apply,
-                      PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
+                             PatternRewriter &rewriter) {
   Block::OpListType &operations = expression->getOperations();
 
   /// find applied function
@@ -151,9 +157,6 @@ void mlir::rise::AccT(Block *expression, ApplyOp apply,
     }
   }
 
-//  emitRemark(appliedFun->getLoc())
-//      << "The applied fun is " << appliedFun->getName();
-
   // Check which translation we do. TODO: move this to its own function
   if (isa<ReduceOp>(appliedFun)) {
     auto n = appliedFun->getAttrOfType<NatAttr>("n");
@@ -164,10 +167,6 @@ void mlir::rise::AccT(Block *expression, ApplyOp apply,
     auto array = apply.getOperand(3);
 
     Location loc = apply.getLoc();
-
-    /// TODO: Think: At the point where we add the continuation we could also
-    // just make a recursive call to the translation.
-    // Leave it like this for now
 
     // Add Continuation for array. Initialization of it will also come from
     // this in case of an array literal
@@ -218,6 +217,8 @@ void mlir::rise::AccT(Block *expression, ApplyOp apply,
     //  cont
     reductionFun.dropAllUses();
     rewriter.eraseOp(reductionFun.getDefiningOp());
+
+    return acc.getResult();
   } else if (isa<MapOp>(appliedFun)) {
 
   } else {
@@ -334,7 +335,7 @@ void ConvertRiseToImperativePass::runOnModule() {
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp,
                     linalg::FillOp, mlir::ReturnOp,
                     RiseContinuationTranslation>();
-  target.addIllegalOp<RiseModuleOp>();
+  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });
   //  target.markOpRecursivelyLegal<RiseModuleOp>();
