@@ -73,10 +73,13 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   Location loc = riseFunOp.getLoc();
   Region &riseRegion = riseFunOp.region();
 
-  if (!riseRegion.getParentRegion()->getParentRegion())
+  if (!riseRegion.getParentRegion()->getParentRegion()) {
+    emitError(loc) << "Rise IR cant be immediately nested into a module. It "
+                      "has to be surrounded by e.g. a FuncOp.";
     return matchFailure();
+  }
 
-  // create mlir function for the given rise module and inline all rise
+  // create mlir function for the given chunk of rise and inline all rise
   // operations
   rewriter.setInsertionPointToStart(
       &riseRegion.getParentRegion()->getParentRegion()->front());
@@ -91,12 +94,14 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   auto callRiseFunOp = rewriter.create<CallOp>(riseFunOp.getLoc(), riseFun);
 
   // printing
-  auto printFun = dyn_cast<ModuleOp>(riseFun.getParentRegion()->getParentOp())
-                      .lookupSymbol<FuncOp>("_mlir_ciface_print_memref_1d_f32");
-  rewriter.create<CallOp>(riseFunOp.getLoc(), printFun,
-                          callRiseFunOp.getResult(0));
+  //  auto printFun =
+  //  dyn_cast<ModuleOp>(riseFun.getParentRegion()->getParentOp())
+  //                      .lookupSymbol<FuncOp>("_mlir_ciface_print_memref_1d_f32");
+  //  rewriter.create<CallOp>(riseFunOp.getLoc(), printFun,
+  //                          callRiseFunOp.getResult(0));
 
   // We don't need the riseModule anymore
+  riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
 
   // The function has only one block, as a rise module can only have one block.

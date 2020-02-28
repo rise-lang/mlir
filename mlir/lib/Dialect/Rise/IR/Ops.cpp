@@ -52,9 +52,8 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 
   /// Indicate, that this is not lowered
   // TODO: This is temporary
-  result.addAttribute("lowered", BoolAttr::get(false, builder.getContext()));
+//  result.addAttribute("lowered", BoolAttr::get(false, builder.getContext()));
 
-  // Parse body of lambda
   Region *body = result.addRegion();
   if (parser.parseRegion(*body, arguments, argumentTypes))
     return failure();

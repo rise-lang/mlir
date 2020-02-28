@@ -1,5 +1,5 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e main -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext
-func @_mlir_ciface_print_memref_1d_f32(memref<1xf32>)
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e main -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_1D_REDUCTION
+func @print_memref_f32(memref<*xf32>)
 func @main() {
 
     %res = rise.fun {
@@ -15,6 +15,11 @@ func @main() {
         rise.return %result : !rise.data<float>
     }
 
+    %print_me = memref_cast %res : memref<1xf32> to memref<*xf32>
+    call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
+
     return
 }
-
+// SIMPLE_1D_REDUCTION: Unranked Memref rank = 1 descriptor@ = {{.*}}
+// SIMPLE_1D_REDUCTION: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [1] strides = [1] data =
+// SIMPLE_1D_REDUCTION: [15]
