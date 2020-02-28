@@ -93,13 +93,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
   auto callRiseFunOp = rewriter.create<CallOp>(riseFunOp.getLoc(), riseFun);
 
-  // printing
-  //  auto printFun =
-  //  dyn_cast<ModuleOp>(riseFun.getParentRegion()->getParentOp())
-  //                      .lookupSymbol<FuncOp>("_mlir_ciface_print_memref_1d_f32");
-  //  rewriter.create<CallOp>(riseFunOp.getLoc(), printFun,
-  //                          callRiseFunOp.getResult(0));
-
   // We don't need the riseModule anymore
   riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
@@ -115,7 +108,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     }
   }
 
-  // Finding the return
+  // Finding the return from the chunk of rise IR
   rise::ReturnOp returnOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
     if (isa<rise::ReturnOp>(*op)) {
@@ -131,15 +124,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPoint(returnOp);
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
   rewriter.eraseOp(returnOp);
-
-  //  // printing all operations inside riseFun
-  //  emitRemark(loc) << "I found the following operations:";
-  //  for (auto &block : riseFun.getBody().getBlocks()) {
-  //    for (auto &operation : block.getOperations()) {
-  //                  emitRemark(operation.getLoc()) << "op: " <<
-  //                  operation.getName().getStringRef();
-  //    }
-  //  }
 
   return matchSuccess();
 }
@@ -173,8 +157,7 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
 
     Location loc = apply.getLoc();
 
-    // Add Continuation for array. Initialization of it will also come from
-    // this in case of an array literal
+    // Add Continuation for array.
     auto contArray = ConT(array, rewriter);
 
     // Add Continuation for init
@@ -192,7 +175,8 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
 
     // add linalg.fill for input array
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
-    auto upperBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 3);
+    auto upperBound = rewriter.create<ConstantIndexOp>(
+        appliedFun->getLoc(), n.getValue().getIntValue());
     auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
     auto forLoop =
@@ -240,6 +224,16 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
       dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
   // This should of course check for an int or float type
   // However the casting for some reason does not work. I'll hardcode it for now
+
+//   I should be doing this. But this does not wor
+   std::cout << "\nTest printing";
+    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+        std::cout << "\nHouston, we have a Float Literal";
+      }
+    }
+
+
   if (literalValue == "0") {
     rewriter.setInsertionPointAfter(contValue.getDefiningOp());
 
