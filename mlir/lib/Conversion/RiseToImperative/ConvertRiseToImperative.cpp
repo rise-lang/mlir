@@ -123,6 +123,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   // Replace rise.return (leaving the rise module) with a return for the funcOp
   rewriter.setInsertionPoint(returnOp);
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
+
   rewriter.eraseOp(returnOp);
 
   return matchSuccess();
@@ -135,27 +136,38 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Using the existing OpListType should make things fairly straight forward.
 mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
                              PatternRewriter &rewriter) {
-  Block::OpListType &operations = expression->getOperations();
+  Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
-  /// find applied function
-  Operation *appliedFun;
-  for (auto &op : operations) {
-    if (op.getResult(0) == apply.fun()) {
-      appliedFun = &op;
-      break;
+  // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
+  // here until we reach a non ApplyOp
+  // We push the operands of the applies into a vector, as only the effectively
+  // applied Op knows what to do with them.
+  // We always leave out operand 0, as this is the applied function
+  SmallVector<Value, 10> applyOperands = SmallVector<Value, 10>();
+  SmallVector<ApplyOp, 10> applyStack = SmallVector<ApplyOp, 10>();
+  applyStack.push_back(apply);
+  for (int i = 1; i < apply.getNumOperands(); i++) {
+    applyOperands.push_back(apply.getOperand(i));
+  }
+  while (auto next_apply = dyn_cast<ApplyOp>(appliedFun)) {
+    apply = next_apply;
+    appliedFun = apply.getOperand(0).getDefiningOp();
+    applyStack.push_back(apply);
+
+    for (int i = 1; i < apply.getNumOperands(); i++) {
+      applyOperands.push_back(apply.getOperand(i));
     }
   }
 
-  // Check which translation we do. TODO: move this to its own function
+  Location loc = apply.getLoc();
   if (isa<ReduceOp>(appliedFun)) {
     auto n = appliedFun->getAttrOfType<NatAttr>("n");
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
-    auto reductionFun = apply.getOperand(1);
-    auto initializer = apply.getOperand(2);
-    auto array = apply.getOperand(3);
 
-    Location loc = apply.getLoc();
+    auto array = applyOperands.pop_back_val();
+    auto initializer = applyOperands.pop_back_val();
+    auto reductionFun = applyOperands.pop_back_val();
 
     // Add Continuation for array.
     auto contArray = ConT(array, rewriter);
@@ -173,7 +185,6 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
     rewriter.create<linalg::FillOp>(initializer.getLoc(), acc.getResult(),
                                     contInit);
 
-    // add linalg.fill for input array
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
     auto upperBound = rewriter.create<ConstantIndexOp>(
         appliedFun->getLoc(), n.getValue().getIntValue());
@@ -188,6 +199,8 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
                                       lowerBound.getResult());
     auto x2 = rewriter.create<LoadOp>(reductionFun.getLoc(), contArray,
                                       forLoop.getInductionVar());
+
+    // TODO: This addition is hardcoded. Add Transl
     auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
                                             x1.getResult(), x2.getResult());
     auto storing =
@@ -208,7 +221,59 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
     rewriter.eraseOp(reductionFun.getDefiningOp());
 
     return acc.getResult();
+
   } else if (isa<MapOp>(appliedFun)) {
+    //     For now we treat all maps as mapSeqs
+    auto n = appliedFun->getAttrOfType<NatAttr>("n");
+    auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
+    auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
+
+    // TODO: LambdaOp not translated yet
+    auto f = applyOperands.pop_back_val();
+    auto array = applyOperands.pop_back_val();
+
+    auto contArray = ConT(array, rewriter);
+
+    rewriter.setInsertionPoint(apply);
+    auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
+    auto upperBound = rewriter.create<ConstantIndexOp>(
+        appliedFun->getLoc(), n.getValue().getIntValue());
+    auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+
+    auto forLoop =
+        rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+
+    // create operations for addition inside the loop
+    rewriter.setInsertionPointToStart(forLoop.getBody());
+    auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
+                                      forLoop.getInductionVar());
+
+    // TODO: This addition is hardcoded. Add Transl
+    auto addition = rewriter.create<AddFOp>(appliedFun->getLoc(),
+                                            x1.getResult(), x1.getResult());
+
+    auto storing =
+        rewriter.create<StoreOp>(appliedFun->getLoc(), addition.getResult(),
+                                 contArray, forLoop.getInductionVar());
+
+    // Finished, erase all applies:
+    while (applyStack.size()) {
+      applyStack.back().getOperation()->dropAllUses();
+      rewriter.eraseOp(applyStack.pop_back_val());
+    }
+    // remove LambdaOp
+    f.getDefiningOp()->dropAllUses();
+    rewriter.eraseOp(f.getDefiningOp());
+
+    // remove MapOp
+    appliedFun->dropAllUses();
+    rewriter.eraseOp(appliedFun);
+
+    return contArray;
+
+  } else if (isa<ApplyOp>(appliedFun)) {
+    emitError(appliedFun->getLoc()) << "We should never get here";
+    //    auto tmp = AccT(expression, cast<ApplyOp>(appliedFun), rewriter);
 
   } else {
     emitRemark(appliedFun->getLoc())
@@ -219,26 +284,27 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
 /// Continuation Translation
 mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
   Location loc = contValue.getLoc();
-  //
+
   StringRef literalValue =
       dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
   // This should of course check for an int or float type
   // However the casting for some reason does not work. I'll hardcode it for now
 
-//   I should be doing this. But this does not wor
-   std::cout << "\nTest printing";
-    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-        std::cout << "\nHouston, we have a Float Literal";
-      }
-    }
-
+  //  TODO: I should be doing this. But this does not work
+//  std::cout << "\nTest printing";
+//  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+//    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+//      std::cout << "\nHouston, we have a Float Literal";
+//    }
+//  }
 
   if (literalValue == "0") {
     rewriter.setInsertionPointAfter(contValue.getDefiningOp());
 
     // Done. Erase Op and return
+    contValue.getDefiningOp()->dropAllUses();
     rewriter.eraseOp(contValue.getDefiningOp());
+
     return rewriter.create<ConstantFloatOp>(
         loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
 
@@ -259,6 +325,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
     rewriter.create<linalg::FillOp>(loc, array.getResult(), filler.getResult());
 
     // Done. erase Op and return
+    contValue.getDefiningOp()->dropAllUses();
     rewriter.eraseOp(contValue.getDefiningOp());
     return array.getResult();
 
@@ -334,7 +401,7 @@ void ConvertRiseToImperativePass::runOnModule() {
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp,
                     linalg::FillOp, mlir::ReturnOp,
                     RiseContinuationTranslation>();
-  target.addIllegalOp<RiseFunOp>();
+  //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });
   //  target.markOpRecursivelyLegal<RiseModuleOp>();

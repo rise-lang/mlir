@@ -13,7 +13,7 @@ func @simple_reduction() {
         %result = rise.apply %reduce4Ints, %addFun, %initializer, %array0
 
         rise.return %result : !rise.data<float>
-    }
+    } : () -> memref<1xf32>
 
     %print_me = memref_cast %res : memref<1xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()

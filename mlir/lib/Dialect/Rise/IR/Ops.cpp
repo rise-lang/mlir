@@ -49,6 +49,7 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+  FunctionType returnType;
 
   /// Indicate, that this is not lowered
   // TODO: This is temporary
@@ -58,9 +59,10 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseRegion(*body, arguments, argumentTypes))
     return failure();
 
-  result.addTypes(
-      {MemRefType::get(ArrayRef<int64_t>{1},
-                       FloatType::getF32(parser.getBuilder().getContext()))});
+  if (parser.parseColonType(returnType))
+    return failure();
+
+  result.addTypes(returnType.getResult(0));
 
   LambdaOp::ensureTerminator(*body, builder, result.location);
   return success();
