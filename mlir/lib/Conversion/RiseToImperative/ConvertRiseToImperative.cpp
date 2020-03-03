@@ -118,7 +118,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   }
 
   // Translation to imperative
-  auto result = AccT(&block, lastApply, rewriter);
+  auto result = AccT(lastApply, rewriter);
 
   // Replace rise.return (leaving the rise module) with a return for the funcOp
   rewriter.setInsertionPoint(returnOp);
@@ -132,10 +132,9 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Acceptor Translation
 /// expression (List of Operations) for Acceptor Translation    - E in paper
 /// output "pointer" for Acceptor Translation                   - A in paper
-/// returns a (partially) lowered expression (list of operations)
+/// returns a lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
-                             PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
   // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
@@ -143,10 +142,14 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
   // We push the operands of the applies into a vector, as only the effectively
   // applied Op knows what to do with them.
   // We always leave out operand 0, as this is the applied function
+  // Operands in the Vector will be ordered such that the top most operand is
+  // the first needed to the applied function. As applies are processed
+  // bottom-up, in the case that an apply has more than 1 operand they have to
+  // be added right to left to keep order.
   SmallVector<Value, 10> applyOperands = SmallVector<Value, 10>();
   SmallVector<ApplyOp, 10> applyStack = SmallVector<ApplyOp, 10>();
   applyStack.push_back(apply);
-  for (int i = 1; i < apply.getNumOperands(); i++) {
+  for (int i = apply.getNumOperands() - 1; i > 0; i--) {
     applyOperands.push_back(apply.getOperand(i));
   }
   while (auto next_apply = dyn_cast<ApplyOp>(appliedFun)) {
@@ -154,7 +157,7 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
     appliedFun = apply.getOperand(0).getDefiningOp();
     applyStack.push_back(apply);
 
-    for (int i = 1; i < apply.getNumOperands(); i++) {
+    for (int i = apply.getNumOperands() - 1; i > 0; i--) {
       applyOperands.push_back(apply.getOperand(i));
     }
   }
@@ -165,9 +168,9 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto array = applyOperands.pop_back_val();
-    auto initializer = applyOperands.pop_back_val();
     auto reductionFun = applyOperands.pop_back_val();
+    auto initializer = applyOperands.pop_back_val();
+    auto array = applyOperands.pop_back_val();
 
     // Add Continuation for array.
     auto contArray = ConT(array, rewriter);
@@ -207,16 +210,17 @@ mlir::Value mlir::rise::AccT(Block *expression, ApplyOp apply,
         rewriter.create<StoreOp>(reductionFun.getLoc(), addition.getResult(),
                                  acc.getResult(), lowerBound.getResult());
 
-    // remomve apply
-    apply.replaceAllUsesWith(acc.getResult());
-    rewriter.eraseOp(apply);
+    // remomve applies
+    while (applyStack.size()) {
+      applyStack.back().getOperation()->dropAllUses();
+      rewriter.eraseOp(applyStack.pop_back_val());
+    }
 
     // remove reduce
     appliedFun->dropAllUses();
     rewriter.eraseOp(appliedFun);
 
     // remove reduction Function TODO: reductionFun is not yet realized with
-    //  cont
     reductionFun.dropAllUses();
     rewriter.eraseOp(reductionFun.getDefiningOp());
 
@@ -291,12 +295,12 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
   // However the casting for some reason does not work. I'll hardcode it for now
 
   //  TODO: I should be doing this. But this does not work
-//  std::cout << "\nTest printing";
-//  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-//    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-//      std::cout << "\nHouston, we have a Float Literal";
-//    }
-//  }
+  //  std::cout << "\nTest printing";
+  //  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+  //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+  //      std::cout << "\nHouston, we have a Float Literal";
+  //    }
+  //  }
 
   if (literalValue == "0") {
     rewriter.setInsertionPointAfter(contValue.getDefiningOp());
