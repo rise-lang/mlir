@@ -22,4 +22,4 @@ func @simple_map_example() {
 }
 // SIMPLE_ARRAY_DOUBLING: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_ARRAY_DOUBLING: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
-// SIMPLE_ARRAY_DOUBLING: [10, 10, 10, 1]
+// SIMPLE_ARRAY_DOUBLING: [10, 10, 10, 10]

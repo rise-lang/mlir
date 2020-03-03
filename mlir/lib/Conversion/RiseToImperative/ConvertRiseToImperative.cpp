@@ -118,7 +118,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   }
 
   // Translation to imperative
-  auto result = AccT(lastApply, rewriter);
+  auto result = AccT(lastApply, &block, rewriter);
 
   // Replace rise.return (leaving the rise module) with a return for the funcOp
   rewriter.setInsertionPoint(returnOp);
@@ -134,7 +134,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewriter) {
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
   // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
@@ -173,10 +173,10 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto array = applyOperands.pop_back_val();
 
     // Add Continuation for array.
-    auto contArray = ConT(array, rewriter);
+    auto contArray = ConT(array, block, Block::iterator(array.getDefiningOp()) , rewriter);
 
     // Add Continuation for init
-    auto contInit = ConT(initializer, rewriter);
+    auto contInit = ConT(initializer, block,  Block::iterator(initializer.getDefiningOp()), rewriter);
 
     rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
@@ -236,7 +236,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto f = applyOperands.pop_back_val();
     auto array = applyOperands.pop_back_val();
 
-    auto contArray = ConT(array, rewriter);
+    auto contArray = ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
 
     rewriter.setInsertionPoint(apply);
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
@@ -253,12 +253,13 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
                                       forLoop.getInductionVar());
 
     // TODO: This addition is hardcoded. Add Transl
-    auto addition = rewriter.create<AddFOp>(appliedFun->getLoc(),
-                                            x1.getResult(), x1.getResult());
+//    auto mappedFun = ConT(f, block, Block::iterator(x1), rewriter);
+    auto addition = rewriter.create<AddFOp>(f.getLoc(),
+                                            x1.getResult(),
+                                            x1.getResult());
 
-    auto storing =
-        rewriter.create<StoreOp>(appliedFun->getLoc(), addition.getResult(),
-                                 contArray, forLoop.getInductionVar());
+    auto storing = rewriter.create<StoreOp>(
+        appliedFun->getLoc(), addition, contArray, forLoop.getInductionVar());
 
     // Finished, erase all applies:
     while (applyStack.size()) {
@@ -286,58 +287,98 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
 }
 
 /// Continuation Translation
-mlir::Value mlir::rise::ConT(mlir::Value contValue, PatternRewriter &rewriter) {
+mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterator contLocation,
+                             PatternRewriter &rewriter) {
   Location loc = contValue.getLoc();
 
-  StringRef literalValue =
-      dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
-  // This should of course check for an int or float type
-  // However the casting for some reason does not work. I'll hardcode it for now
+  if (isa<LiteralOp>(contValue.getDefiningOp())) {
+    StringRef literalValue =
+        dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
-  //  TODO: I should be doing this. But this does not work
-  //  std::cout << "\nTest printing";
-  //  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-  //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-  //      std::cout << "\nHouston, we have a Float Literal";
-  //    }
-  //  }
+    //  TODO: I should be doing this. But this does not work
+    //  std::cout << "\nTest printing";
+    //  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+    //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+    //      std::cout << "\nHouston, we have a Float Literal";
+    //    }
+    //  }
 
-  if (literalValue == "0") {
-    rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+    // This should of course check for an int or float type
+    // However the casting for some reason does not work. I'll hardcode it for
+    // now
+    if (literalValue == "0") {
+//      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+      rewriter.setInsertionPoint(block, contLocation);
 
-    // Done. Erase Op and return
-    contValue.getDefiningOp()->dropAllUses();
-    rewriter.eraseOp(contValue.getDefiningOp());
+      // Done. Erase Op and return
+      contValue.getDefiningOp()->dropAllUses();
+      rewriter.eraseOp(contValue.getDefiningOp());
 
-    return rewriter.create<ConstantFloatOp>(
-        loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
+      return rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
 
-    //      rewriter.create<RiseContinuationTranslation>(
-    //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
-    //          contValue);
-    // This should check for an array type
-  } else if (literalValue == "[5,5,5,5]") {
-    rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+      //      rewriter.create<RiseContinuationTranslation>(
+      //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
+      //          contValue);
+      // This should check for an array type
+    } else if (literalValue == "[5,5,5,5]") {
+//      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+      rewriter.setInsertionPoint(block, contLocation);
 
-    auto array = rewriter.create<AllocOp>(
-        loc, MemRefType::get(ArrayRef<int64_t>{4},
-                             FloatType::getF32(rewriter.getContext())));
-    // For now just fill the array with one value
-    auto filler = rewriter.create<ConstantFloatOp>(
-        loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
 
-    rewriter.create<linalg::FillOp>(loc, array.getResult(), filler.getResult());
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
 
-    // Done. erase Op and return
-    contValue.getDefiningOp()->dropAllUses();
-    rewriter.eraseOp(contValue.getDefiningOp());
-    return array.getResult();
+      // Done. erase Op and return
+      contValue.getDefiningOp()->dropAllUses();
+      rewriter.eraseOp(contValue.getDefiningOp());
+      return array.getResult();
 
-    //    return rewriter.create<RiseContinuationTranslation>(
-    //        contValue.getLoc(),
-    //        MemRefType::get(ArrayRef<int64_t>{32},
-    //                        FloatType::getF32(rewriter.getContext())),
-    //        contValue);
+      //    return rewriter.create<RiseContinuationTranslation>(
+      //        contValue.getLoc(),
+      //        MemRefType::get(ArrayRef<int64_t>{32},
+      //                        FloatType::getF32(rewriter.getContext())),
+      //        contValue);
+    }
+  } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
+    // A Lambda has only one block
+    Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
+    // For now start at the back and just find the first apply
+    ApplyOp lastApply;
+    for (auto op = block.rbegin(); op != block.rend(); op++) {
+      if (isa<ApplyOp>(*op)) {
+        lastApply = cast<ApplyOp>(*op);
+        break;
+      }
+    }
+
+    // Finding the return from the chunk of rise IR
+    rise::ReturnOp returnOp;    //TODO: Do getTerminator instead
+    for (auto op = block.rbegin(); op != block.rend(); op++) {
+      if (isa<rise::ReturnOp>(*op)) {
+        returnOp = cast<rise::ReturnOp>(*op);
+        break;
+      }
+    }
+
+    auto front = block.getIterator();
+    //    block.getOperations().splice()
+
+    // Translate first, inline later
+    // Can I inline the operations of a block into another block?
+
+    //This Lambda has to get its inputs somehow.
+
+
+//    auto addition = rewriter.create<AddFOp>(contValue.getLoc(),
+//                                                x1.getResult(),
+//                                                x1.getResult());
   } else {
     emitError(contValue.getLoc())
         << "can not perform continuation "

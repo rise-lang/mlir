@@ -25,9 +25,9 @@
 
 namespace mlir {
 namespace rise {
-mlir::Value AccT(ApplyOp apply, PatternRewriter &rewriter);
-mlir::Value ConT(mlir::Value contValue,
-                        PatternRewriter &rewriter);
+mlir::Value AccT(ApplyOp apply, Block *block, PatternRewriter &rewriter);
+mlir::Value ConT(mlir::Value contValue, Block *block, Block::iterator contLocation,
+                 PatternRewriter &rewriter);
 } // namespace rise
 
 } // namespace mlir
