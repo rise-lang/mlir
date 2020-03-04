@@ -237,7 +237,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
     // TODO: LambdaOp not translated yet
-    auto f = applyOperands.pop_back_val();
+    auto f = cast<LambdaOp>(applyOperands.pop_back_val().getDefiningOp());
     auto array = applyOperands.pop_back_val();
 
     auto contArray =
@@ -257,31 +257,47 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
                                       forLoop.getInductionVar());
 
-    auto contF =
-        lowerLambda(cast<LambdaOp>(f.getDefiningOp()), Block::iterator(x1),
-                    SmallVector<mlir::Value, 5>{x1}, rewriter);
+    // cast fails
+    auto lambdaResult =
+        lowerLambda(f, x1, Block::iterator(x1),
+                    SmallVector<mlir::Value, 5>{x1.getResult()}, rewriter);
+
     // TODO: This addition is hardcoded. Add Transl
     //    auto mappedFun = ConT(f, block, Block::iterator(x1), rewriter);
-    // The Lambda how to get x1 somehow. Also there could be multiple inputs
+    // The Lambda has to get x1 somehow. Also there could be multiple inputs
     // to a single Lambda
-    auto addition =
-        rewriter.create<AddFOp>(f.getLoc(), x1.getResult(), x1.getResult());
 
-    auto storing = rewriter.create<StoreOp>(
-        appliedFun->getLoc(), addition, contArray, forLoop.getInductionVar());
+    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
+    //    auto addition =
+    //        rewriter.create<AddFOp>(f.getLoc(), x1.getResult(),
+    //        x1.getResult());
+
+    auto storing =
+        rewriter.create<StoreOp>(appliedFun->getLoc(), lambdaResult, contArray,
+                                 forLoop.getInductionVar());
 
     // Finished, erase all applies:
     while (applyStack.size()) {
       applyStack.back().getOperation()->dropAllUses();
       rewriter.eraseOp(applyStack.pop_back_val());
     }
-    // remove LambdaOp
-    f.getDefiningOp()->dropAllUses();
-    rewriter.eraseOp(f.getDefiningOp());
+
+    // TODO: remove LambdaOp. I do not understand why it still has uses
+    //    for (auto operand :
+    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)) {
+    //      operand.dropAllUses();
+    //    }
+    //    auto operand = cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)[0];
+    //    operand.dropAllUses();
+    //    f.region().front().dropAllUses();
+    //    f.
 
     // remove MapOp
     appliedFun->dropAllUses();
     rewriter.eraseOp(appliedFun);
+
+    f.getResult().dropAllUses();
+    rewriter.eraseOp(f);
 
     return contArray;
 
@@ -413,28 +429,73 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
   //  }
 }
 
-mlir::Value mlir::rise::lowerLambda(LambdaOp lambda,
+mlir::Value mlir::rise::lowerLambda(LambdaOp lambda, Operation *tmpOp,
                                     Block::iterator contLocation,
                                     SmallVector<mlir::Value, 5> arguments,
                                     PatternRewriter &rewriter) {
+  // TODO: This whole thing should call to the AccT to be translated, as it
+  // should be basically independent from the stuff above. Translation should
+  // happen using the lambda arguments. During inlining they will be replaced
+  // with the exact applied values.
+
   // A Lambda has only one block
-  Block &block = lambda.region().front();
-  // For now start at the back and just find the first apply
-  ApplyOp lastApply;
-  for (auto op = block.rbegin(); op != block.rend(); op++) {
-    if (isa<ApplyOp>(*op)) {
-      lastApply = cast<ApplyOp>(*op);
-      break;
-    }
-  }
+//  Block &block = lambda.region().front();
+//  // For now start at the back and just find the first apply
+//  ApplyOp lastApply;
+//  for (auto op = block.rbegin(); op != block.rend(); op++) {
+//    if (isa<ApplyOp>(*op)) {
+//      lastApply = cast<ApplyOp>(*op);
+//      break;
+//    }
+//  }
+//
+//  auto appliedFun = lastApply.getOperand(0);
 
   // Finding the return from the chunk of rise IR
-  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
+//  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
 
-  // We have to associate the block arguments of the first block with the
-  // arguments given to this function.
-  // Look in Block merge how two blocks are merged.
-  //  lambda.region().front().getArguments()
+  //  rewriter.setInsertionPoint(&lambda.getParentRegion()->front(),
+  //  contLocation);
+
+  //  rewriter.setInsertionPointToStart(&lambda.region().front());
+  rewriter.setInsertionPointAfter(tmpOp);
+  auto addition =
+      rewriter.create<AddFOp>(lambda.getLoc(), arguments[0], arguments[0]);
+
+  //    appliedFun.dropAllUses();
+  //    rewriter.eraseOp(appliedFun.getDefiningOp());
+  //
+  //    lastApply.getResult().dropAllUses();
+  //    rewriter.eraseOp(lastApply);
+  //
+  //    rewriter.eraseOp(returnOp);
+  //  // Now the Lambda is lowered. Note: We should prob. indicate this somehow
+  //  in
+  //  // the Op. Maybe in an Attribute Next inline the lambda where it is being
+  //  // applied.
+  //  lambda.region().front().getOperations().splice(
+  //      contLocation, lambda.region().front().getOperations());
+
+  // Splice moves operations (from,
+  //    lambda.getParentRegion()->front().getOperations().splice(
+  //        ++contLocation, lambda.region().front().getOperations(), addition);
+  //  std::cout << "\n empty: " << lambda.region().empty() << std::flush;
+  //
+  //    lambda.region().dropAllReferences();
+  //    lambda.region().front().dropAllReferences();
+  //    lambda.region().front().dropAllUses();
+  //    lambda.region().front().getOperations().clear();
+  //    lambda.region().front().eraseArgument(0);
+  //
+  std::cout << "\n empty: " << lambda.region().empty()
+            << " no uses?: " << lambda.region().front().use_empty()
+            << std::flush;
+  //  // We have to associate the block arguments of the first block with the
+  //  // arguments given to this function.
+  //  // Look in Block merge how two blocks are merged.
+  //  //  lambda.region().front().getArguments()
+  //  return lambda.getResult();
+  return addition;
 }
 
 /// gather all patterns

@@ -10,8 +10,9 @@ func @simple_map_example() {
             rise.return %doubled : !rise.data<float>
         }
         %map4IntsToInts = rise.map #rise.nat<4> #rise.float #rise.float
-        %mapDoubleFun = rise.apply %map4IntsToInts, %doubleFun
-        %doubledArray = rise.apply %mapDoubleFun, %array
+//        %mapDoubleFun = rise.apply %map4IntsToInts, %doubleFun
+//        %doubledArray = rise.apply %mapDoubleFun, %array
+        %doubledArray = rise.apply %map4IntsToInts, %doubleFun, %array
 
         rise.return %doubledArray : !rise.data<array<4, float>>
     } : () -> memref<4xf32>
