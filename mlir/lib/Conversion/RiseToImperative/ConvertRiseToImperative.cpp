@@ -134,7 +134,8 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// output "pointer" for Acceptor Translation                   - A in paper
 /// returns a lowered expression (list of operations)
 /// Using the existing OpListType should make things fairly straight forward.
-mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
+                             PatternRewriter &rewriter) {
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
   // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
@@ -173,10 +174,13 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewri
     auto array = applyOperands.pop_back_val();
 
     // Add Continuation for array.
-    auto contArray = ConT(array, block, Block::iterator(array.getDefiningOp()) , rewriter);
+    auto contArray =
+        ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
 
     // Add Continuation for init
-    auto contInit = ConT(initializer, block,  Block::iterator(initializer.getDefiningOp()), rewriter);
+    auto contInit =
+        ConT(initializer, block, Block::iterator(initializer.getDefiningOp()),
+             rewriter);
 
     rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
@@ -236,7 +240,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewri
     auto f = applyOperands.pop_back_val();
     auto array = applyOperands.pop_back_val();
 
-    auto contArray = ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
+    auto contArray =
+        ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
 
     rewriter.setInsertionPoint(apply);
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
@@ -252,11 +257,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewri
     auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
                                       forLoop.getInductionVar());
 
+    auto contF =
+        lowerLambda(cast<LambdaOp>(f.getDefiningOp()), Block::iterator(x1),
+                    SmallVector<mlir::Value, 5>{x1}, rewriter);
     // TODO: This addition is hardcoded. Add Transl
-//    auto mappedFun = ConT(f, block, Block::iterator(x1), rewriter);
-    auto addition = rewriter.create<AddFOp>(f.getLoc(),
-                                            x1.getResult(),
-                                            x1.getResult());
+    //    auto mappedFun = ConT(f, block, Block::iterator(x1), rewriter);
+    // The Lambda how to get x1 somehow. Also there could be multiple inputs
+    // to a single Lambda
+    auto addition =
+        rewriter.create<AddFOp>(f.getLoc(), x1.getResult(), x1.getResult());
 
     auto storing = rewriter.create<StoreOp>(
         appliedFun->getLoc(), addition, contArray, forLoop.getInductionVar());
@@ -287,7 +296,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block, PatternRewriter &rewri
 }
 
 /// Continuation Translation
-mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterator contLocation,
+mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
+                             Block::iterator contLocation,
                              PatternRewriter &rewriter) {
   Location loc = contValue.getLoc();
 
@@ -307,7 +317,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterato
     // However the casting for some reason does not work. I'll hardcode it for
     // now
     if (literalValue == "0") {
-//      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+      //      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
       rewriter.setInsertionPoint(block, contLocation);
 
       // Done. Erase Op and return
@@ -322,7 +332,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterato
       //          contValue);
       // This should check for an array type
     } else if (literalValue == "[5,5,5,5]") {
-//      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
+      //      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
       rewriter.setInsertionPoint(block, contLocation);
 
       auto array = rewriter.create<AllocOp>(
@@ -347,6 +357,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterato
       //        contValue);
     }
   } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
+    emitError(loc)
+        << "We dont lower Lambdas using the function ConT right now.";
     // A Lambda has only one block
     Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
     // For now start at the back and just find the first apply
@@ -359,26 +371,17 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterato
     }
 
     // Finding the return from the chunk of rise IR
-    rise::ReturnOp returnOp;    //TODO: Do getTerminator instead
-    for (auto op = block.rbegin(); op != block.rend(); op++) {
-      if (isa<rise::ReturnOp>(*op)) {
-        returnOp = cast<rise::ReturnOp>(*op);
-        break;
-      }
-    }
-
-    auto front = block.getIterator();
-    //    block.getOperations().splice()
+    rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
 
     // Translate first, inline later
     // Can I inline the operations of a block into another block?
+    // Yes I can! Using splice on the iplists
 
-    //This Lambda has to get its inputs somehow.
+    // This Lambda has to get its inputs somehow. <- This is a problem
 
-
-//    auto addition = rewriter.create<AddFOp>(contValue.getLoc(),
-//                                                x1.getResult(),
-//                                                x1.getResult());
+    //    auto addition = rewriter.create<AddFOp>(contValue.getLoc(),
+    //                                                x1.getResult(),
+    //                                                x1.getResult());
   } else {
     emitError(contValue.getLoc())
         << "can not perform continuation "
@@ -408,6 +411,30 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block, Block::iterato
   //        << " not "
   //           "supported.";
   //  }
+}
+
+mlir::Value mlir::rise::lowerLambda(LambdaOp lambda,
+                                    Block::iterator contLocation,
+                                    SmallVector<mlir::Value, 5> arguments,
+                                    PatternRewriter &rewriter) {
+  // A Lambda has only one block
+  Block &block = lambda.region().front();
+  // For now start at the back and just find the first apply
+  ApplyOp lastApply;
+  for (auto op = block.rbegin(); op != block.rend(); op++) {
+    if (isa<ApplyOp>(*op)) {
+      lastApply = cast<ApplyOp>(*op);
+      break;
+    }
+  }
+
+  // Finding the return from the chunk of rise IR
+  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
+
+  // We have to associate the block arguments of the first block with the
+  // arguments given to this function.
+  // Look in Block merge how two blocks are merged.
+  //  lambda.region().front().getArguments()
 }
 
 /// gather all patterns
