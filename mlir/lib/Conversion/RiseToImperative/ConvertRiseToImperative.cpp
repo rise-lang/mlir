@@ -97,6 +97,10 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
 
+  /// New Idea:
+  // Instead generate all new stuff into the new function and delete the riseFun
+  // at the end. This will free us from this annoying erasure stuff.
+
   // The function has only one block, as a rise module can only have one block.
   Block &block = riseFun.getBody().front();
   // For now start at the back and just find the first apply
@@ -118,6 +122,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   }
 
   // Translation to imperative
+  rewriter.setInsertionPointAfter(lastApply);
   auto result = AccT(lastApply, &block, rewriter);
 
   // Replace rise.return (leaving the rise module) with a return for the funcOp
@@ -182,7 +187,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
         ConT(initializer, block, Block::iterator(initializer.getDefiningOp()),
              rewriter);
 
-    rewriter.setInsertionPoint(apply);
+    //    rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
     auto acc = rewriter.create<AllocOp>(
         appliedFun->getLoc(),
@@ -243,7 +248,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto contArray =
         ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
 
-    rewriter.setInsertionPoint(apply);
+    //    rewriter.setInsertionPoint(apply);
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
     auto upperBound = rewriter.create<ConstantIndexOp>(
         appliedFun->getLoc(), n.getValue().getIntValue());
@@ -301,6 +306,14 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
 
     return contArray;
 
+  } else if (isa<AddOp>(appliedFun)) {
+    auto addOp = cast<AddOp>(applyOperands.pop_back_val().getDefiningOp());
+    auto summand0 = applyOperands.pop_back_val();
+    auto summand1 = applyOperands.pop_back_val();
+
+    auto newAddOp = rewriter.create<AddFOp>(addOp.getLoc(), summand0, summand1);
+
+    return newAddOp;
   } else if (isa<ApplyOp>(appliedFun)) {
     emitError(appliedFun->getLoc()) << "We should never get here";
     //    auto tmp = AccT(expression, cast<ApplyOp>(appliedFun), rewriter);
@@ -316,6 +329,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
                              Block::iterator contLocation,
                              PatternRewriter &rewriter) {
   Location loc = contValue.getLoc();
+  auto oldInsertPoint = rewriter.saveInsertionPoint();
 
   if (isa<LiteralOp>(contValue.getDefiningOp())) {
     StringRef literalValue =
@@ -340,6 +354,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
       contValue.getDefiningOp()->dropAllUses();
       rewriter.eraseOp(contValue.getDefiningOp());
 
+      rewriter.restoreInsertionPoint(oldInsertPoint);
       return rewriter.create<ConstantFloatOp>(
           loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
 
@@ -364,6 +379,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
       // Done. erase Op and return
       contValue.getDefiningOp()->dropAllUses();
       rewriter.eraseOp(contValue.getDefiningOp());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
       return array.getResult();
 
       //    return rewriter.create<RiseContinuationTranslation>(
@@ -403,6 +420,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
         << "can not perform continuation "
            "translation for "
         << contValue.getDefiningOp()->getName().getStringRef().str();
+
+    rewriter.restoreInsertionPoint(oldInsertPoint);
     return contValue;
   }
 
@@ -434,67 +453,23 @@ mlir::Value mlir::rise::lowerLambda(LambdaOp lambda, Operation *tmpOp,
                                     SmallVector<mlir::Value, 5> arguments,
                                     PatternRewriter &rewriter) {
   // TODO: This whole thing should call to the AccT to be translated, as it
-  // should be basically independent from the stuff above. Translation should
-  // happen using the lambda arguments. During inlining they will be replaced
-  // with the exact applied values.
+  // should be basically independent from the surrounding stuff. Translation
+  // should happen using the lambda arguments. During inlining they will be
+  // replaced with the exact applied values.
+  ApplyOp lastApply;
+  for (auto op = lambda.region().front().rbegin();
+       op != lambda.region().front().rend(); op++) {
+    if (isa<ApplyOp>(*op)) {
+      lastApply = cast<ApplyOp>(*op);
+      break;
+    }
+  }
 
-  // A Lambda has only one block
-//  Block &block = lambda.region().front();
-//  // For now start at the back and just find the first apply
-//  ApplyOp lastApply;
-//  for (auto op = block.rbegin(); op != block.rend(); op++) {
-//    if (isa<ApplyOp>(*op)) {
-//      lastApply = cast<ApplyOp>(*op);
-//      break;
-//    }
-//  }
-//
-//  auto appliedFun = lastApply.getOperand(0);
-
-  // Finding the return from the chunk of rise IR
-//  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
-
-  //  rewriter.setInsertionPoint(&lambda.getParentRegion()->front(),
-  //  contLocation);
-
-  //  rewriter.setInsertionPointToStart(&lambda.region().front());
   rewriter.setInsertionPointAfter(tmpOp);
-  auto addition =
-      rewriter.create<AddFOp>(lambda.getLoc(), arguments[0], arguments[0]);
+//  auto result = AccT(lastApply, &lambda.region().front(), rewriter);
+    auto addition =
+        rewriter.create<AddFOp>(lambda.getLoc(), arguments[0], arguments[0]);
 
-  //    appliedFun.dropAllUses();
-  //    rewriter.eraseOp(appliedFun.getDefiningOp());
-  //
-  //    lastApply.getResult().dropAllUses();
-  //    rewriter.eraseOp(lastApply);
-  //
-  //    rewriter.eraseOp(returnOp);
-  //  // Now the Lambda is lowered. Note: We should prob. indicate this somehow
-  //  in
-  //  // the Op. Maybe in an Attribute Next inline the lambda where it is being
-  //  // applied.
-  //  lambda.region().front().getOperations().splice(
-  //      contLocation, lambda.region().front().getOperations());
-
-  // Splice moves operations (from,
-  //    lambda.getParentRegion()->front().getOperations().splice(
-  //        ++contLocation, lambda.region().front().getOperations(), addition);
-  //  std::cout << "\n empty: " << lambda.region().empty() << std::flush;
-  //
-  //    lambda.region().dropAllReferences();
-  //    lambda.region().front().dropAllReferences();
-  //    lambda.region().front().dropAllUses();
-  //    lambda.region().front().getOperations().clear();
-  //    lambda.region().front().eraseArgument(0);
-  //
-  std::cout << "\n empty: " << lambda.region().empty()
-            << " no uses?: " << lambda.region().front().use_empty()
-            << std::flush;
-  //  // We have to associate the block arguments of the first block with the
-  //  // arguments given to this function.
-  //  // Look in Block merge how two blocks are merged.
-  //  //  lambda.region().front().getArguments()
-  //  return lambda.getResult();
   return addition;
 }
 
@@ -551,3 +526,62 @@ mlir::rise::createConvertRiseToImperativePass() {
 static PassRegistration<ConvertRiseToImperativePass>
     pass("convert-rise-to-imperative",
          "Compile all functional primitives of the rise dialect to imperative");
+
+// Old Stuff:
+
+// From Lambda:
+
+// A Lambda has only one block
+//  Block &block = lambda.region().front();
+//  // For now start at the back and just find the first apply
+//  ApplyOp lastApply;
+//  for (auto op = block.rbegin(); op != block.rend(); op++) {
+//    if (isa<ApplyOp>(*op)) {
+//      lastApply = cast<ApplyOp>(*op);
+//      break;
+//    }
+//  }
+//
+//  auto appliedFun = lastApply.getOperand(0);
+
+// Finding the return from the chunk of rise IR
+//  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
+
+//  rewriter.setInsertionPoint(&lambda.getParentRegion()->front(),
+//  contLocation);
+
+//  rewriter.setInsertionPointToStart(&lambda.region().front());
+
+//    appliedFun.dropAllUses();
+//    rewriter.eraseOp(appliedFun.getDefiningOp());
+//
+//    lastApply.getResult().dropAllUses();
+//    rewriter.eraseOp(lastApply);
+//
+//    rewriter.eraseOp(returnOp);
+//  // Now the Lambda is lowered. Note: We should prob. indicate this somehow
+//  in
+//  // the Op. Maybe in an Attribute Next inline the lambda where it is being
+//  // applied.
+//  lambda.region().front().getOperations().splice(
+//      contLocation, lambda.region().front().getOperations());
+
+// Splice moves operations (from,
+//    lambda.getParentRegion()->front().getOperations().splice(
+//        ++contLocation, lambda.region().front().getOperations(), addition);
+//  std::cout << "\n empty: " << lambda.region().empty() << std::flush;
+//
+//    lambda.region().dropAllReferences();
+//    lambda.region().front().dropAllReferences();
+//    lambda.region().front().dropAllUses();
+//    lambda.region().front().getOperations().clear();
+//    lambda.region().front().eraseArgument(0);
+//
+//  std::cout << "\n empty: " << lambda.region().empty()
+//            << " no uses?: " << lambda.region().front().use_empty()
+//            << std::flush;
+//  // We have to associate the block arguments of the first block with the
+//  // arguments given to this function.
+//  // Look in Block merge how two blocks are merged.
+//  //  lambda.region().front().getArguments()
+//  return lambda.getResult();
