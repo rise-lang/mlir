@@ -87,22 +87,13 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
       loc, StringRef("riseFun"),
       FunctionType::get({}, riseFunOp.getResult().getType(), context),
       ArrayRef<NamedAttribute>{});
-  rewriter.inlineRegionBefore(riseFunOp.region(), riseFun.getBody(),
-                              riseFun.getBody().begin());
 
   rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
-  auto callRiseFunOp = rewriter.create<CallOp>(riseFunOp.getLoc(), riseFun);
+  auto callRiseFunOp = rewriter.create<CallOp>(riseFun.getLoc(), riseFun);
+  riseFun.addEntryBlock();
 
-  // We don't need the riseModule anymore
-  riseFunOp.replaceAllUsesWith(callRiseFunOp);
-  rewriter.eraseOp(riseFunOp);
-
-  /// New Idea:
-  // Instead generate all new stuff into the new function and delete the riseFun
-  // at the end. This will free us from this annoying erasure stuff.
-
-  // The function has only one block, as a rise module can only have one block.
-  Block &block = riseFun.getBody().front();
+  // The rise module can only have one block.
+  Block &block = riseRegion.front();
   // For now start at the back and just find the first apply
   ApplyOp lastApply;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
@@ -111,7 +102,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
       break;
     }
   }
-
   // Finding the return from the chunk of rise IR
   rise::ReturnOp returnOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
@@ -122,25 +112,25 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   }
 
   // Translation to imperative
-  rewriter.setInsertionPointAfter(lastApply);
-  auto result = AccT(lastApply, &block, rewriter);
+  rewriter.setInsertionPointToStart(&riseFun.getBody().front());
+  auto result = AccT(lastApply, rewriter);
 
-  // Replace rise.return (leaving the rise module) with a return for the funcOp
-  rewriter.setInsertionPoint(returnOp);
+  rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
 
-  rewriter.eraseOp(returnOp);
-
+  // We don't need the riseModule anymore
+  riseFunOp.replaceAllUsesWith(callRiseFunOp);
+  rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
+// std::cout << "\n" << "" << "\n" << std::flush;
 
 /// Acceptor Translation
-/// expression (List of Operations) for Acceptor Translation    - E in paper
-/// output "pointer" for Acceptor Translation                   - A in paper
-/// returns a lowered expression (list of operations)
-/// Using the existing OpListType should make things fairly straight forward.
-mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
-                             PatternRewriter &rewriter) {
+/// apply - The ApplyOp to start the translation.
+/// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
+mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
+  // lower outsideArgs first
+
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
   // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
@@ -179,13 +169,10 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto array = applyOperands.pop_back_val();
 
     // Add Continuation for array.
-    auto contArray =
-        ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
+    auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
     // Add Continuation for init
-    auto contInit =
-        ConT(initializer, block, Block::iterator(initializer.getDefiningOp()),
-             rewriter);
+    auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
     //    rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
@@ -213,25 +200,29 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
                                       forLoop.getInductionVar());
 
     // TODO: This addition is hardcoded. Add Transl
+
+    // What do I do here? -> create an ApplyOp and call AccT with it?
+    // AddFun also is of a funType. It should prob. be handled similar to a Lambda
     auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
                                             x1.getResult(), x2.getResult());
+
     auto storing =
         rewriter.create<StoreOp>(reductionFun.getLoc(), addition.getResult(),
                                  acc.getResult(), lowerBound.getResult());
 
-    // remomve applies
-    while (applyStack.size()) {
-      applyStack.back().getOperation()->dropAllUses();
-      rewriter.eraseOp(applyStack.pop_back_val());
-    }
-
-    // remove reduce
-    appliedFun->dropAllUses();
-    rewriter.eraseOp(appliedFun);
-
-    // remove reduction Function TODO: reductionFun is not yet realized with
-    reductionFun.dropAllUses();
-    rewriter.eraseOp(reductionFun.getDefiningOp());
+    //    // remomve applies
+    //    while (applyStack.size()) {
+    //      applyStack.back().getOperation()->dropAllUses();
+    //      rewriter.eraseOp(applyStack.pop_back_val());
+    //    }
+    //
+    //    // remove reduce
+    //    appliedFun->dropAllUses();
+    //    rewriter.eraseOp(appliedFun);
+    //
+    //    // remove reduction Function
+    //    reductionFun.dropAllUses();
+    //    rewriter.eraseOp(reductionFun.getDefiningOp());
 
     return acc.getResult();
 
@@ -241,14 +232,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    // TODO: LambdaOp not translated yet
     auto f = cast<LambdaOp>(applyOperands.pop_back_val().getDefiningOp());
     auto array = applyOperands.pop_back_val();
 
-    auto contArray =
-        ConT(array, block, Block::iterator(array.getDefiningOp()), rewriter);
+    auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
-    //    rewriter.setInsertionPoint(apply);
     auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
     auto upperBound = rewriter.create<ConstantIndexOp>(
         appliedFun->getLoc(), n.getValue().getIntValue());
@@ -257,63 +245,76 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
     auto forLoop =
         rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
 
-    // create operations for addition inside the loop
     rewriter.setInsertionPointToStart(forLoop.getBody());
     auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
                                       forLoop.getInductionVar());
 
-    // cast fails
-    auto lambdaResult =
-        lowerLambda(f, x1, Block::iterator(x1),
-                    SmallVector<mlir::Value, 5>{x1.getResult()}, rewriter);
-
-    // TODO: This addition is hardcoded. Add Transl
-    //    auto mappedFun = ConT(f, block, Block::iterator(x1), rewriter);
-    // The Lambda has to get x1 somehow. Also there could be multiple inputs
-    // to a single Lambda
+    // Lower mapped function
+    f.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
+    // search for the last apply inside the lambda and start lowering from there
+    ApplyOp lastApply;
+    for (auto op = f.region().front().rbegin(); op != f.region().front().rend();
+         op++) {
+      if (isa<ApplyOp>(*op)) {
+        lastApply = cast<ApplyOp>(*op);
+        break;
+      }
+    }
+    auto lambdaResult = AccT(lastApply, rewriter);
 
     rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
-    //    auto addition =
-    //        rewriter.create<AddFOp>(f.getLoc(), x1.getResult(),
-    //        x1.getResult());
 
     auto storing =
         rewriter.create<StoreOp>(appliedFun->getLoc(), lambdaResult, contArray,
                                  forLoop.getInductionVar());
 
-    // Finished, erase all applies:
-    while (applyStack.size()) {
-      applyStack.back().getOperation()->dropAllUses();
-      rewriter.eraseOp(applyStack.pop_back_val());
-    }
-
-    // TODO: remove LambdaOp. I do not understand why it still has uses
-    //    for (auto operand :
-    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)) {
-    //      operand.dropAllUses();
+    //    // Finished, erase all applies:
+    //    while (applyStack.size()) {
+    //      applyStack.back().getOperation()->dropAllUses();
+    //      rewriter.eraseOp(applyStack.pop_back_val());
     //    }
-    //    auto operand = cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)[0];
-    //    operand.dropAllUses();
-    //    f.region().front().dropAllUses();
-    //    f.
-
-    // remove MapOp
-    appliedFun->dropAllUses();
-    rewriter.eraseOp(appliedFun);
-
-    f.getResult().dropAllUses();
-    rewriter.eraseOp(f);
+    //
+    //    // TODO: remove LambdaOp. I do not understand why it still has uses
+    //    //    for (auto operand :
+    //    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)) {
+    //    //      operand.dropAllUses();
+    //    //    }
+    //    //    auto operand =
+    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)[0];
+    //    //    operand.dropAllUses();
+    //    //    f.region().front().dropAllUses();
+    //    //    f.
+    //
+    //    // remove MapOp
+    //    appliedFun->dropAllUses();
+    //    rewriter.eraseOp(appliedFun);
+    //
+    //    f.getResult().dropAllUses();
+    //    rewriter.eraseOp(f);
 
     return contArray;
 
   } else if (isa<AddOp>(appliedFun)) {
-    auto addOp = cast<AddOp>(applyOperands.pop_back_val().getDefiningOp());
     auto summand0 = applyOperands.pop_back_val();
     auto summand1 = applyOperands.pop_back_val();
 
-    auto newAddOp = rewriter.create<AddFOp>(addOp.getLoc(), summand0, summand1);
+    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
+    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
 
+    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(), contSummand0,
+                                            contSummand1);
     return newAddOp;
+
+  } else if (isa<MultOp>(appliedFun)) {
+    auto factor0 = applyOperands.pop_back_val();
+    auto factor1 = applyOperands.pop_back_val();
+
+    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
+    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
+
+    auto newMultOp = rewriter.create<MulFOp>(appliedFun->getLoc(), contFactor0,
+                                             contFactor1);
+    return newMultOp;
   } else if (isa<ApplyOp>(appliedFun)) {
     emitError(appliedFun->getLoc()) << "We should never get here";
     //    auto tmp = AccT(expression, cast<ApplyOp>(appliedFun), rewriter);
@@ -325,7 +326,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Block *block,
 }
 
 /// Continuation Translation
-mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
+mlir::Value mlir::rise::ConT(mlir::Value contValue,
                              Block::iterator contLocation,
                              PatternRewriter &rewriter) {
   Location loc = contValue.getLoc();
@@ -347,25 +348,20 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
     // However the casting for some reason does not work. I'll hardcode it for
     // now
     if (literalValue == "0") {
-      //      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
-      rewriter.setInsertionPoint(block, contLocation);
-
-      // Done. Erase Op and return
-      contValue.getDefiningOp()->dropAllUses();
-      rewriter.eraseOp(contValue.getDefiningOp());
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return rewriter.create<ConstantFloatOp>(
+      auto fillOp = rewriter.create<ConstantFloatOp>(
           loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
 
-      //      rewriter.create<RiseContinuationTranslation>(
-      //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
-      //          contValue);
-      // This should check for an array type
-    } else if (literalValue == "[5,5,5,5]") {
-      //      rewriter.setInsertionPointAfter(contValue.getDefiningOp());
-      rewriter.setInsertionPoint(block, contLocation);
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return fillOp.getResult();
+    } else if (literalValue == "5") {
+      auto fillOp = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
 
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return fillOp.getResult();
+    }
+      // This should check for an array type
+    else if (literalValue == "[5,5,5,5]") {
       auto array = rewriter.create<AllocOp>(
           loc, MemRefType::get(ArrayRef<int64_t>{4},
                                FloatType::getF32(rewriter.getContext())));
@@ -375,10 +371,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
 
       rewriter.create<linalg::FillOp>(loc, array.getResult(),
                                       filler.getResult());
-
-      // Done. erase Op and return
-      contValue.getDefiningOp()->dropAllUses();
-      rewriter.eraseOp(contValue.getDefiningOp());
 
       rewriter.restoreInsertionPoint(oldInsertPoint);
       return array.getResult();
@@ -406,20 +398,12 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
     // Finding the return from the chunk of rise IR
     rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
 
-    // Translate first, inline later
-    // Can I inline the operations of a block into another block?
-    // Yes I can! Using splice on the iplists
-
-    // This Lambda has to get its inputs somehow. <- This is a problem
-
-    //    auto addition = rewriter.create<AddFOp>(contValue.getLoc(),
-    //                                                x1.getResult(),
-    //                                                x1.getResult());
   } else {
-    emitError(contValue.getLoc())
+    emitRemark(contValue.getLoc())
         << "can not perform continuation "
            "translation for "
-        << contValue.getDefiningOp()->getName().getStringRef().str();
+        << contValue.getDefiningOp()->getName().getStringRef().str()
+        << " leaving Value as is.";
 
     rewriter.restoreInsertionPoint(oldInsertPoint);
     return contValue;
@@ -446,31 +430,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue, Block *block,
   //        << " not "
   //           "supported.";
   //  }
-}
-
-mlir::Value mlir::rise::lowerLambda(LambdaOp lambda, Operation *tmpOp,
-                                    Block::iterator contLocation,
-                                    SmallVector<mlir::Value, 5> arguments,
-                                    PatternRewriter &rewriter) {
-  // TODO: This whole thing should call to the AccT to be translated, as it
-  // should be basically independent from the surrounding stuff. Translation
-  // should happen using the lambda arguments. During inlining they will be
-  // replaced with the exact applied values.
-  ApplyOp lastApply;
-  for (auto op = lambda.region().front().rbegin();
-       op != lambda.region().front().rend(); op++) {
-    if (isa<ApplyOp>(*op)) {
-      lastApply = cast<ApplyOp>(*op);
-      break;
-    }
-  }
-
-  rewriter.setInsertionPointAfter(tmpOp);
-//  auto result = AccT(lastApply, &lambda.region().front(), rewriter);
-    auto addition =
-        rewriter.create<AddFOp>(lambda.getLoc(), arguments[0], arguments[0]);
-
-  return addition;
 }
 
 /// gather all patterns
@@ -506,7 +465,7 @@ void ConvertRiseToImperativePass::runOnModule() {
   //    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect,
   //    mlir::loop::LoopOpsDialect>();
   target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
-                    ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp,
+                    ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
                     linalg::FillOp, mlir::ReturnOp,
                     RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
