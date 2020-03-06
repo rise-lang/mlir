@@ -202,7 +202,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     // TODO: This addition is hardcoded. Add Transl
 
     // What do I do here? -> create an ApplyOp and call AccT with it?
-    // AddFun also is of a funType. It should prob. be handled similar to a Lambda
+    // AddFun also is of a funType. It should prob. be handled similar to a
+    // Lambda
     auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
                                             x1.getResult(), x2.getResult());
 
@@ -312,8 +313,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
     auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
 
-    auto newMultOp = rewriter.create<MulFOp>(appliedFun->getLoc(), contFactor0,
-                                             contFactor1);
+    auto newMultOp =
+        rewriter.create<MulFOp>(appliedFun->getLoc(), contFactor0, contFactor1);
     return newMultOp;
   } else if (isa<ApplyOp>(appliedFun)) {
     emitError(appliedFun->getLoc()) << "We should never get here";
@@ -336,13 +337,27 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
     StringRef literalValue =
         dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
-    //  TODO: I should be doing this. But this does not work
-    //  std::cout << "\nTest printing";
-    //  if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-    //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-    //      std::cout << "\nHouston, we have a Float Literal";
-    //    }
-    //  }
+//    //  TODO: I should be doing this. But this does not work
+//    //  std::cout << "\nTest printing";
+//    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+//      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+//      } else {
+//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
+//      }
+//      //  or this:
+//      if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
+//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+//      } else {
+//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
+//      }
+//      // or:
+//      if (Float num = op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
+//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+//      } else {
+//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
+//      }
+//    }
 
     // This should of course check for an int or float type
     // However the casting for some reason does not work. I'll hardcode it for
@@ -360,7 +375,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       rewriter.restoreInsertionPoint(oldInsertPoint);
       return fillOp.getResult();
     }
-      // This should check for an array type
+    // This should check for an array type
     else if (literalValue == "[5,5,5,5]") {
       auto array = rewriter.create<AllocOp>(
           loc, MemRefType::get(ArrayRef<int64_t>{4},
