@@ -25,7 +25,9 @@
 
 namespace mlir {
 namespace rise {
-mlir::Value AccT(ApplyOp apply, PatternRewriter &rewriter);
+// std::variant would be nice to have here. Look at how this works. I need a sum type for my path, I think
+using OutputPathType = llvm::SmallVector<Value, 10>;
+mlir::Value AccT(ApplyOp apply, OutputPathType outputPath, PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);
 LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);

@@ -113,7 +113,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
-  auto result = AccT(lastApply, rewriter);
+  auto result = AccT(lastApply, {}, rewriter);
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
@@ -130,12 +130,12 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
 /// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
-mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRewriter &rewriter) {
   // lower outsideArgs first
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
 
-  // If functions are applied partially i.e. appliedFun is an ApplyOp we recurse
+  // If functions are applied partially i.e. appliedFun is an ApplyOp we iterate
   // here until we reach a non ApplyOp
   // We push the operands of the applies into a vector, as only the effectively
   // applied Op knows what to do with them.
@@ -177,7 +177,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     // Add Continuation for init
     auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
-    //    rewriter.setInsertionPoint(apply);
     // Accumulator for Reduction
     auto acc = rewriter.create<AllocOp>(
         appliedFun->getLoc(),
@@ -223,7 +222,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
 
     rewriter.setInsertionPointAfter(x2);
 
-    auto lambdaResult = AccT(lastApply, rewriter);
+    auto lambdaResult = AccT(lastApply, {}, rewriter);
     rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
 
     auto storing =
@@ -238,8 +237,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto f =
-        applyOperands.pop_back_val();
+    auto f = applyOperands.pop_back_val();
 
     auto array = applyOperands.pop_back_val();
 
@@ -265,8 +263,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
     // search for the last apply inside the lambda and start lowering from there
     ApplyOp lastApply;
-    for (auto op = fLambda.region().front().rbegin(); op != fLambda.region().front().rend();
-         op++) {
+    for (auto op = fLambda.region().front().rbegin();
+         op != fLambda.region().front().rend(); op++) {
       if (isa<ApplyOp>(*op)) {
         lastApply = cast<ApplyOp>(*op);
         break;
@@ -275,7 +273,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
 
     // What would the argument for the storing look like?
     // I would pass the outputArr and the "Path"? -> what exactly is the "o"?
-    auto lambdaResult = AccT(lastApply, rewriter);
+    auto lambdaResult = AccT(lastApply, {}, rewriter);
 
     rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
 
