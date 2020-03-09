@@ -118,13 +118,12 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
 
-//  // We don't need the riseModule anymore
+  //  // We don't need the riseModule anymore
   riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
-
 
 // TODO: look at Map(Map(id))
 
@@ -168,6 +167,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
     auto reductionFun = applyOperands.pop_back_val();
+
     auto initializer = applyOperands.pop_back_val();
     auto array = applyOperands.pop_back_val();
 
@@ -202,38 +202,33 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto x2 = rewriter.create<LoadOp>(reductionFun.getLoc(), contArray,
                                       forLoop.getInductionVar());
 
-    // TODO: This addition is hardcoded. Add Transl
-
-    // What do I do here? -> create an ApplyOp and call AccT with it?
-    // AddFun also is of a funType. It should prob. be handled similar to a
-    // Lambda
-//    auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
-//                                            x1.getResult(), x2.getResult());
-    if (!isa<LambdaOp>(reductionFun.getDefiningOp())){
-      reductionFun = expandToLambda(reductionFun, rewriter);
-    } else {
-      std::cout << "\n I acutallyhave a Lambda" << std:: flush;
+    LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
+    if (!reductionLambda) {
+      reductionLambda = expandToLambda(reductionFun, rewriter);
     }
-    std::cout << "\n bla" << isa<LambdaOp>(reductionFun.getDefiningOp()) << std:: flush;
 
+    ApplyOp lastApply;
+    for (auto op = reductionLambda.region().front().rbegin();
+         op != reductionLambda.region().front().rend(); op++) {
+      if (isa<ApplyOp>(*op)) {
+        lastApply = cast<ApplyOp>(*op);
+        break;
+      }
+    }
+    // substitution
+    reductionLambda.region().front().getArgument(0).replaceAllUsesWith(
+        x1.getResult());
+    reductionLambda.region().front().getArgument(1).replaceAllUsesWith(
+        x2.getResult());
 
-//    auto storing =
-//        rewriter.create<StoreOp>(reductionFun.getLoc(), addition.getResult(),
-//                                 acc.getResult(), lowerBound.getResult());
+    rewriter.setInsertionPointAfter(x2);
 
-    //    // remomve applies
-    //    while (applyStack.size()) {
-    //      applyStack.back().getOperation()->dropAllUses();
-    //      rewriter.eraseOp(applyStack.pop_back_val());
-    //    }
-    //
-    //    // remove reduce
-    //    appliedFun->dropAllUses();
-    //    rewriter.eraseOp(appliedFun);
-    //
-    //    // remove reduction Function
-    //    reductionFun.dropAllUses();
-    //    rewriter.eraseOp(reductionFun.getDefiningOp());
+    auto lambdaResult = AccT(lastApply, rewriter);
+    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
+
+    auto storing =
+        rewriter.create<StoreOp>(reductionFun.getLoc(), lambdaResult,
+                                 acc.getResult(), lowerBound.getResult());
 
     return acc.getResult();
 
@@ -243,10 +238,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    LambdaOp f = dyn_cast<LambdaOp>(applyOperands.pop_back_val().getDefiningOp());
-    if (!f) {
-      f = expandToLambda(applyOperands.pop_back_val(), rewriter);
-    }
+    auto f =
+        applyOperands.pop_back_val();
 
     auto array = applyOperands.pop_back_val();
 
@@ -264,11 +257,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
                                       forLoop.getInductionVar());
 
+    LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
+    if (!fLambda) {
+      fLambda = expandToLambda(f, rewriter);
+    }
     // Lower mapped function
-    f.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
+    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
     // search for the last apply inside the lambda and start lowering from there
     ApplyOp lastApply;
-    for (auto op = f.region().front().rbegin(); op != f.region().front().rend();
+    for (auto op = fLambda.region().front().rbegin(); op != fLambda.region().front().rend();
          op++) {
       if (isa<ApplyOp>(*op)) {
         lastApply = cast<ApplyOp>(*op);
@@ -285,31 +282,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto storing =
         rewriter.create<StoreOp>(appliedFun->getLoc(), lambdaResult, contArray,
                                  forLoop.getInductionVar());
-
-    //    // Finished, erase all applies:
-    //    while (applyStack.size()) {
-    //      applyStack.back().getOperation()->dropAllUses();
-    //      rewriter.eraseOp(applyStack.pop_back_val());
-    //    }
-    //
-    //    // TODO: remove LambdaOp. I do not understand why it still has uses
-    //    //    for (auto operand :
-    //    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)) {
-    //    //      operand.dropAllUses();
-    //    //    }
-    //    //    auto operand =
-    //    cast<LambdaOp>(f.getDefiningOp()).getODSOperands(0)[0];
-    //    //    operand.dropAllUses();
-    //    //    f.region().front().dropAllUses();
-    //    //    f.
-    //
-    //    // remove MapOp
-    //    appliedFun->dropAllUses();
-    //    rewriter.eraseOp(appliedFun);
-    //
-    //    f.getResult().dropAllUses();
-    //    rewriter.eraseOp(f);
-
     return contArray;
 
   } else if (isa<AddOp>(appliedFun)) {
@@ -343,19 +315,49 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
   }
 }
 
-LambdaOp mlir::rise::expandToLambda(mlir::Value value, PatternRewriter &rewriter) {
+LambdaOp mlir::rise::expandToLambda(mlir::Value value,
+                                    PatternRewriter &rewriter) {
   LambdaOp newLambda;
+  rewriter.setInsertionPoint(value.getDefiningOp());
+  FunType funType = value.getType().dyn_cast<FunType>();
+
+  newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+  auto *entry = new Block();
+  newLambda.region().push_back(entry);
+
+  rewriter.setInsertionPointToStart(entry);
+
+  Value appliedOp;
   if (isa<AddOp>(value.getDefiningOp())) {
-    rewriter.setInsertionPoint(value.getDefiningOp());
-    newLambda = rewriter.create<LambdaOp>(value.getLoc(), cast<AddOp>(value.getDefiningOp()).getType());
-    auto *entry = new Block();
-    newLambda.region().push_back(entry);
-//    entry->addArguments((newLambda.lambda_result().cast<FunType>()).getInput());
+    // get the two summands
+    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+    argumentTypes.push_back(funType.getInput());
+    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
+    entry->addArguments(argumentTypes);
 
-    // Lambda has to get the correct operands here
+    appliedOp = rewriter.create<AddOp>(
+        value.getLoc(), funType,
+        DataTypeAttr::get(rewriter.getContext(),
+                          cast<AddOp>(value.getDefiningOp()).t()));
+  } else if (isa<MultOp>(value.getDefiningOp())) {
+    // get the two factors
+    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+    argumentTypes.push_back(funType.getInput());
+    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
+    entry->addArguments(argumentTypes);
 
+    appliedOp = rewriter.create<MultOp>(
+        value.getLoc(), funType,
+        DataTypeAttr::get(rewriter.getContext(),
+                          cast<MultOp>(value.getDefiningOp()).t()));
+  } else {
+    emitError(value.getLoc())
+        << "Expanding this operation to a Lambda is not supported.";
   }
 
+  ApplyOp applyOp = rewriter.create<ApplyOp>(value.getLoc(), funType, appliedOp,
+                                             entry->getArguments());
+  rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
 
   return newLambda;
 }
@@ -371,27 +373,31 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
     StringRef literalValue =
         dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
-//    //  TODO: I should be doing this. But this does not work
-//    //  std::cout << "\nTest printing";
-//    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-//      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//      } else {
-//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
-//      }
-//      //  or this:
-//      if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
-//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//      } else {
-//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
-//      }
-//      // or:
-//      if (Float num = op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
-//        std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//      } else {
-//        std::cout << "\nHouston, we dont have a Float Literal" << std::flush;
-//      }
-//    }
+    //    //  TODO: I should be doing this. But this does not work
+    //    //  std::cout << "\nTest printing";
+    //    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+    //      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
+    //        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+    //      } else {
+    //        std::cout << "\nHouston, we dont have a Float Literal" <<
+    //        std::flush;
+    //      }
+    //      //  or this:
+    //      if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
+    //        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+    //      } else {
+    //        std::cout << "\nHouston, we dont have a Float Literal" <<
+    //        std::flush;
+    //      }
+    //      // or:
+    //      if (Float num =
+    //      op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
+    //        std::cout << "\nHouston, we have a Float Literal" << std::flush;
+    //      } else {
+    //        std::cout << "\nHouston, we dont have a Float Literal" <<
+    //        std::flush;
+    //      }
+    //    }
 
     // This should of course check for an int or float type
     // However the casting for some reason does not work. I'll hardcode it for

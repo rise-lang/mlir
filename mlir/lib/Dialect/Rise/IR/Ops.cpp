@@ -105,6 +105,8 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseColon() || parser.parseType(funType))
     return failure();
 
+  result.addTypes(funType);
+
   // arguments have to fit the given lambda type
   argumentTypes.push_back(funType.getInput());
   for (int i = 1; i < arguments.size(); i++) {
@@ -125,7 +127,6 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
     return failure();
 
   LambdaOp::ensureTerminator(*body, builder, result.location);
-  result.addTypes(funType);
   return success();
 }
 
