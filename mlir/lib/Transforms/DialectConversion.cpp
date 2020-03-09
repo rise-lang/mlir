@@ -1312,8 +1312,8 @@ OperationLegalizer::legalizePattern(Operation *op, RewritePattern *pattern,
   };
   (void)replacedRoot;
   (void)updatedRootInPlace;
-  assert((replacedRoot || updatedRootInPlace()) &&
-         "expected pattern to replace the root operation");
+//  assert((replacedRoot || updatedRootInPlace()) &&
+//         "expected pattern to replace the root operation");
 
   // Recursively legalize each of the operations updated in place.
   for (unsigned i = curState.numRootUpdates,

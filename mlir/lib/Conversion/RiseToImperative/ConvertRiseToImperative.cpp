@@ -118,12 +118,15 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
 
-  // We don't need the riseModule anymore
+//  // We don't need the riseModule anymore
   riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
+
+
+// TODO: look at Map(Map(id))
 
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
@@ -204,12 +207,19 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     // What do I do here? -> create an ApplyOp and call AccT with it?
     // AddFun also is of a funType. It should prob. be handled similar to a
     // Lambda
-    auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
-                                            x1.getResult(), x2.getResult());
+//    auto addition = rewriter.create<AddFOp>(reductionFun.getLoc(),
+//                                            x1.getResult(), x2.getResult());
+    if (!isa<LambdaOp>(reductionFun.getDefiningOp())){
+      reductionFun = expandToLambda(reductionFun, rewriter);
+    } else {
+      std::cout << "\n I acutallyhave a Lambda" << std:: flush;
+    }
+    std::cout << "\n bla" << isa<LambdaOp>(reductionFun.getDefiningOp()) << std:: flush;
 
-    auto storing =
-        rewriter.create<StoreOp>(reductionFun.getLoc(), addition.getResult(),
-                                 acc.getResult(), lowerBound.getResult());
+
+//    auto storing =
+//        rewriter.create<StoreOp>(reductionFun.getLoc(), addition.getResult(),
+//                                 acc.getResult(), lowerBound.getResult());
 
     //    // remomve applies
     //    while (applyStack.size()) {
@@ -233,7 +243,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto f = cast<LambdaOp>(applyOperands.pop_back_val().getDefiningOp());
+    LambdaOp f = dyn_cast<LambdaOp>(applyOperands.pop_back_val().getDefiningOp());
+    if (!f) {
+      f = expandToLambda(applyOperands.pop_back_val(), rewriter);
+    }
+
     auto array = applyOperands.pop_back_val();
 
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
@@ -261,6 +275,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
         break;
       }
     }
+
+    // What would the argument for the storing look like?
+    // I would pass the outputArr and the "Path"? -> what exactly is the "o"?
     auto lambdaResult = AccT(lastApply, rewriter);
 
     rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
@@ -324,6 +341,23 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, PatternRewriter &rewriter) {
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
   }
+}
+
+LambdaOp mlir::rise::expandToLambda(mlir::Value value, PatternRewriter &rewriter) {
+  LambdaOp newLambda;
+  if (isa<AddOp>(value.getDefiningOp())) {
+    rewriter.setInsertionPoint(value.getDefiningOp());
+    newLambda = rewriter.create<LambdaOp>(value.getLoc(), cast<AddOp>(value.getDefiningOp()).getType());
+    auto *entry = new Block();
+    newLambda.region().push_back(entry);
+//    entry->addArguments((newLambda.lambda_result().cast<FunType>()).getInput());
+
+    // Lambda has to get the correct operands here
+
+  }
+
+
+  return newLambda;
 }
 
 /// Continuation Translation

@@ -25,16 +25,12 @@
 
 namespace mlir {
 namespace rise {
-mlir::Value AccT(ApplyOp apply,
-                 PatternRewriter &rewriter);
+mlir::Value AccT(ApplyOp apply, PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);
-mlir::Value lowerLambda(LambdaOp lambda, Operation *tmpOp,
-                        Block::iterator contLocation,
-                        SmallVector<mlir::Value, 5> arguments,
-                        PatternRewriter &rewriter);
-} // namespace rise
+LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
 
+} // namespace rise
 } // namespace mlir
 
 #endif // MLIR_CONVERTRISETOIMPERATIVE_H
