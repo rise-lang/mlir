@@ -47,13 +47,47 @@ namespace rise {
 //===----------------------------------------------------------------------===//
 ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType output;
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+  SmallVector<OpAsmParser::OperandType, 4> arguments2;
+  SmallVector<Type, 4> argumentTypes2 = SmallVector<Type, 4>();
   FunctionType returnType;
+  std::cout << "\n still here. " << std::flush;
 
-  /// Indicate, that this is not lowered
-  // TODO: This is temporary
-//  result.addAttribute("lowered", BoolAttr::get(false, builder.getContext()));
+  OpAsmParser::OperandType opt;
+  Type t;
+
+  if (parser.parseLParen() || parser.parseRegionArgument(arguments2[0])) //||
+//      parser.parseColonType(argumentTypes2[0]))
+    return failure();
+
+  // TODO: parse input args
+
+  if (parser.parseRParen())
+    return failure();
+
+  std::cout << "\n still here. " << std::flush;
+
+  //  if (parser.parseRegionArgumentList(arguments,
+  //  OpAsmParser::Delimiter::Paren))
+  //    return failure();
+  //  if (parser.parseLParen() || parser.parseRegionArgument(arguments[0]))
+  //    return failure();
+  //
+  //  // TODO: enable parsing of more than 1 input
+  //  if (parser.parseOptionalComma() || parser.parseOptionalKeyword("in:") ||
+  //      parser.parseOptionalRegionArgument(arguments[1]) ||
+  //      parser.parseRParen())
+  //    return failure();
+
+  //  if (parser.parseRegionArgumentList(arguments,
+  //  OpAsmParser::Delimiter::Paren))
+  //    return failure();
+
+  //  if
+  //  (parser.parseRegionArgumentList(arguments,1,OpAsmParser::Delimiter::Paren))
+  //    return failure();
 
   Region *body = result.addRegion();
   if (parser.parseRegion(*body, arguments, argumentTypes))

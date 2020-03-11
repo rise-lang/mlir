@@ -3,7 +3,7 @@
 func @print_memref_f32(memref<*xf32>)
 func @array_times_2() {
 
-    %res = rise.fun {
+    %res = rise.fun (%out:memref<4xf32>) {
         %array = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
         %doubleFun = rise.lambda (%summand) : !rise.fun<data<float> -> data<float>> {
             %addFun = rise.add #rise.float
@@ -23,3 +23,4 @@ func @array_times_2() {
 // ARRAY_TIMES_2: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // ARRAY_TIMES_2: [10, 10, 10, 10]
+

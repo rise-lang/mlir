@@ -130,7 +130,8 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
 /// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
-mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRewriter &rewriter) {
+mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath,
+                             PatternRewriter &rewriter) {
   // lower outsideArgs first
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
@@ -214,14 +215,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRe
         break;
       }
     }
-    // substitution
-    reductionLambda.region().front().getArgument(0).replaceAllUsesWith(
-        x1.getResult());
-    reductionLambda.region().front().getArgument(1).replaceAllUsesWith(
-        x2.getResult());
+    Substitute(reductionLambda, {x1.getResult(), x2.getResult()});
 
     rewriter.setInsertionPointAfter(x2);
-
     auto lambdaResult = AccT(lastApply, {}, rewriter);
     rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
 
@@ -252,6 +248,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRe
         rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
 
     rewriter.setInsertionPointToStart(forLoop.getBody());
+
+    // This LoadOp should not be created here.
     auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
                                       forLoop.getInductionVar());
 
@@ -260,7 +258,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRe
       fLambda = expandToLambda(f, rewriter);
     }
     // Lower mapped function
-    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
+    //    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
     // search for the last apply inside the lambda and start lowering from there
     ApplyOp lastApply;
     for (auto op = fLambda.region().front().rbegin();
@@ -270,6 +268,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRe
         break;
       }
     }
+
+    Substitute(fLambda, {x1.getResult()});
 
     // What would the argument for the storing look like?
     // I would pass the outputArr and the "Path"? -> what exactly is the "o"?
@@ -311,6 +311,24 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath, PatternRe
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
   }
+}
+
+void mlir::rise::Substitute(LambdaOp lambda,
+                            llvm::SmallVector<Value, 10> args) {
+  if (lambda.region().front().getArguments().size() < args.size()) {
+    emitError(lambda.getLoc())
+        << "Too many arguments given for Lambda substitution";
+  }
+  // TODO: right now we can not do Substitution more than once for a single
+  // lambda. We want to be able to do that to use a Lambda more than once for
+  // translation.
+  for (int i = 0; i < args.size(); i++) {
+    lambda.region().front().getArgument(i).replaceAllUsesWith(args[i]);
+    //    lambda.region().front().insertArgument(i, args[i].getType());
+  }
+  // TODO: look at how the IR looks at this point to find out how we can do
+  // Substitution more than once.
+  return;
 }
 
 LambdaOp mlir::rise::expandToLambda(mlir::Value value,
@@ -372,7 +390,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
     //    //  TODO: I should be doing this. But this does not work
-    //    //  std::cout << "\nTest printing";
+    //    std::cout << "\nTest printing";
     //    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
     //      if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
     //        std::cout << "\nHouston, we have a Float Literal" << std::flush;
