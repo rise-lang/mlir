@@ -30,3 +30,36 @@ func @array_times_2() {
 // ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // ARRAY_TIMES_2: [10, 10, 10, 10]
 
+
+
+Michel Steuwer:
+con(array)(λ(expT(n`.`dt1, read))(x =>
+        comment("mapSeq")`;`
+        `for`(n, i =>
+//          λ(expT(dt1, read))(x => λ(accT(dt2))(o => acc(f(x))(o)))(x `@` i)(A `@` i)
+//          λ(accT(dt2))(o => acc(f(x `@` i))(o))(A `@` i)
+            acc(f(x `@` i))(A `@` i)
+        )
+    ))
+Michel Steuwer:
+con(array)(λ(expT(n`.`dt1, read))(x =>
+        comment("mapSeq")`;`
+        `for`(n, i => {
+          //          λ(expT(dt1, read))(x => λ(accT(dt2))(o => acc(f(x))(o)))(x `@` i)(A `@` i)
+          //          λ(accT(dt2))(o => acc(f(x `@` i))(o))(A `@` i)
+          val `x@i` = x `@` i     // %xi = rise.idx %x %i
+          val `fx@i` = f(`x@i`)   // %fxi = rise.apply f %xi
+          val `A@i` = A `@` i     // %outi = rise.idx %out %i
+          acc(`fx@i`)(`A@i`)
+        })
+    ))
+Michel Steuwer:
+con(array)(λ(expT(n`.`dt1, read))(x =>
+        comment("mapSeq")`;`
+        `for`(n, i => {
+          // %xi = rise.idx %x %i
+          // %outi = rise.idx %out %i
+          // %expr = unary_op %xi
+          // rise.assign %expr %outi
+        })
+    ))
