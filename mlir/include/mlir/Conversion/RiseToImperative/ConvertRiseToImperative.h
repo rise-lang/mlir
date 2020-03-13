@@ -23,6 +23,8 @@
 #include "mlir/Dialect/Rise/Passes.h"
 #include "mlir/Dialect/StandardOps/Ops.h"
 
+#include "mlir/Dialect/Rise/variant.hpp"
+
 namespace mlir {
 namespace rise {
 // using std::variant would be better, but that is C++17
@@ -36,7 +38,7 @@ union OutputPathElement {
 // std::variant would be nice to have here. Look at how this works. I need a sum
 // type for my path, I think
 using OutputPathType = llvm::SmallVector<OutputPathElement, 10>;
-mlir::Value AccT(ApplyOp apply, OutputPathType outputPath,
+mlir::Value AccT(ApplyOp apply, Value out,
                  PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);

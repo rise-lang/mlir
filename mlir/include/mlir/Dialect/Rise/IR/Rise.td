@@ -92,19 +92,25 @@ def RiseContinuationTranslation : Rise_Op<"cont"> {
 def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let summary = "rise fun";
   let regions = (region SizedRegion<1> : $region);
-//  let arguments = (ins AnyType:$out, Variadic<AnyType>:$inputs);
-  let arguments = (ins Variadic<AnyType>:$inputs);
-  let results = (outs AnyType:$output);
+  //  let arguments = (ins AnyType:$out, Variadic<AnyType>:$inputs);
+  let arguments = (ins StrAttr:$name, Variadic<AnyType>:$inputs);  // This is not really used. We have region arguments, not "normal" arguments.
+  //  let results = (outs AnyType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-//def RiseInOp : Rise_Op<"in", [SingleBlockImplicitTerminator<"InOp">]> {
+def RiseOutOp : Rise_Op<"out"> {
+  let summary = "rise out";
+  let arguments = (ins AnyType : $input);
+  let results = (outs DataType : $output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+// def RiseInOp : Rise_Op<"in", [SingleBlockImplicitTerminator<"InOp">]> {
 //  let summary = "rise in";
 //  let arguments = (ins MemrefType:$input);
 //  let results = (outs DataType:$output);
 //  let parser = [{ return parse$cppClass(parser, result); }];
 //}
-
 
 def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
   let summary = "literal";

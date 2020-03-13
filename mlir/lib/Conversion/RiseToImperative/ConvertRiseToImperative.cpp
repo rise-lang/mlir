@@ -83,18 +83,37 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   // operations
   rewriter.setInsertionPointToStart(
       &riseRegion.getParentRegion()->getParentRegion()->front());
+
+  // find declaration for the riseFun and delete
+  auto forwardDeclaration =
+      riseRegion.getParentOfType<ModuleOp>().lookupSymbol(riseFunOp.name());
+  rewriter.eraseOp(forwardDeclaration);
+
+  //The in is tmp for now.
   auto riseFun = rewriter.create<FuncOp>(
-      loc, StringRef("riseFun"),
-      FunctionType::get({}, riseFunOp.getResult().getType(), context),
+      loc, riseFunOp.name(),
+      FunctionType::get(riseFunOp.region().front().getArgument(0).getType(),
+                        {},
+                        context),
       ArrayRef<NamedAttribute>{});
 
+
   rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
-  auto callRiseFunOp = rewriter.create<CallOp>(riseFun.getLoc(), riseFun);
+//  auto callRiseFunOp = rewriter.create<CallOp>(riseFun.getLoc(), riseFun);
   riseFun.addEntryBlock();
 
   // The rise module can only have one block.
   Block &block = riseRegion.front();
-  // For now start at the back and just find the first apply
+
+  RiseOutOp outOp;
+  for (auto op = block.begin(); op != block.end(); op++) {
+    if (isa<RiseOutOp>(*op)) {
+      outOp = cast<RiseOutOp>(*op);
+      break;
+    }
+  }
+
+  // For now start at the back and just find the first apply.
   ApplyOp lastApply;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
     if (isa<ApplyOp>(*op)) {
@@ -111,15 +130,16 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     }
   }
 
+
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
-  auto result = AccT(lastApply, {}, rewriter);
+  auto result = AccT(lastApply, outOp.getResult(), rewriter);
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
-  auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc(), result);
+  auto newReturn = rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
 
   //  // We don't need the riseModule anymore
-  riseFunOp.replaceAllUsesWith(callRiseFunOp);
+  //  riseFunOp.replaceAllUsesWith(callRiseFunOp);
   rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
@@ -130,7 +150,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
 /// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
-mlir::Value mlir::rise::AccT(ApplyOp apply, OutputPathType outputPath,
+mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
                              PatternRewriter &rewriter) {
   // lower outsideArgs first
 

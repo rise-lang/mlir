@@ -48,57 +48,57 @@ namespace rise {
 ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType output;
+  Type outputType;
+
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-  SmallVector<OpAsmParser::OperandType, 4> arguments2;
-  SmallVector<Type, 4> argumentTypes2 = SmallVector<Type, 4>();
-  FunctionType returnType;
-  std::cout << "\n still here. " << std::flush;
 
-  OpAsmParser::OperandType opt;
-  Type t;
+  StringAttr name;
 
-  if (parser.parseLParen() || parser.parseRegionArgument(arguments2[0])) //||
-//      parser.parseColonType(argumentTypes2[0]))
+  if (parser.parseAttribute(name, "name", result.attributes))
     return failure();
+
+  if (parser.parseLParen())
+    return failure();
+
+  if (parser.parseRegionArgument(output))
+    return failure();
+
+  if (parser.parseColonType(outputType))
+    return failure();
+
+  arguments.push_back(output);
+  argumentTypes.push_back(outputType);
 
   // TODO: parse input args
 
   if (parser.parseRParen())
     return failure();
 
-  std::cout << "\n still here. " << std::flush;
-
-  //  if (parser.parseRegionArgumentList(arguments,
-  //  OpAsmParser::Delimiter::Paren))
-  //    return failure();
-  //  if (parser.parseLParen() || parser.parseRegionArgument(arguments[0]))
-  //    return failure();
-  //
-  //  // TODO: enable parsing of more than 1 input
-  //  if (parser.parseOptionalComma() || parser.parseOptionalKeyword("in:") ||
-  //      parser.parseOptionalRegionArgument(arguments[1]) ||
-  //      parser.parseRParen())
-  //    return failure();
-
-  //  if (parser.parseRegionArgumentList(arguments,
-  //  OpAsmParser::Delimiter::Paren))
-  //    return failure();
-
-  //  if
-  //  (parser.parseRegionArgumentList(arguments,1,OpAsmParser::Delimiter::Paren))
-  //    return failure();
-
   Region *body = result.addRegion();
   if (parser.parseRegion(*body, arguments, argumentTypes))
     return failure();
 
-  if (parser.parseColonType(returnType))
-    return failure();
-
-  result.addTypes(returnType.getResult(0));
-
   LambdaOp::ensureTerminator(*body, builder, result.location);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// RiseOutOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType operand;
+  Type operandType;
+
+  parser.parseOperand(operand);
+  parser.resolveOperandUnsafe(operand, result.operands);
+  // parse Memref and create one of our types for it.
+
+  DataType riseType =
+      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
+                     Float::get(builder.getContext()));
+  result.addTypes(riseType);
   return success();
 }
 
