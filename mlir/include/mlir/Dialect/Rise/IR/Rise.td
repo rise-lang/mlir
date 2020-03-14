@@ -84,7 +84,7 @@ def RiseContinuationTranslation : Rise_Op<"cont"> {
   let summary = "rise cont";
   let description =
       "A marker where to continue with the lowering to imperative";
-  let arguments = (ins AnyType : $cont);
+  let arguments = (ins AnyType:$cont);
   let results = (outs AnyType);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
@@ -98,10 +98,17 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def RiseIdxOp : Rise_Op<"idx"> {
+  let summary = "rise idx";
+  let arguments = (ins AnyMemRef:$input, AnyType:$index);
+  let results = (outs AnyType:$output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def RiseOutOp : Rise_Op<"out"> {
   let summary = "rise out";
-  let arguments = (ins AnyType : $input);
-  let results = (outs DataType : $output);
+  let arguments = (ins AnyType:$input);
+  let results = (outs DataType:$output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

@@ -132,8 +132,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
   auto result = AccT(lastApply, outOp.getResult(), rewriter);
-  //codegen here
-
+  // codegen here
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -142,12 +141,11 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   //  // We don't need the riseModule anymore
   //  riseFunOp.replaceAllUsesWith(callRiseFunOp);
 
-  //replace output
-  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
-      riseFun.getBody().front().getArgument(0));
+  // replace output // TODO: put back in
+//  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
+//      riseFun.getBody().front().getArgument(0));
 
-
-  rewriter.eraseOp(riseFunOp);
+//  rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -276,39 +274,56 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     rewriter.setInsertionPointToStart(forLoop.getBody());
 
-    // This LoadOp should not be created here.
-    auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
-                                      forLoop.getInductionVar());
-
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
     if (!fLambda) {
       fLambda = expandToLambda(f, rewriter);
     }
+
+    // TODO: create a custom builder (or create?) for RiseIdxOp and call this
+    // one here, so I dont have to give the resulting type.
+    ArrayRef<int64_t> shape =
+        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+
+    MemRefType indexOpResult =
+        MemRefType::get(shape, FloatType::getF32(rewriter.getContext()));
+    auto xi =
+        rewriter.create<RiseIdxOp>(loc, indexOpResult, contArray, forLoop.getInductionVar());
+
+    // create Apply for Lambda now, and create other idx for the out.
+    // start AccT for Apply of Lambda and add case for Lamda
+
+
+
+    //    // This LoadOp should not be created here.
+    //    auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
+    //                                      forLoop.getInductionVar());
+
     // Lower mapped function
     //    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
     // search for the last apply inside the lambda and start lowering from there
-    ApplyOp lastApply;
-    for (auto op = fLambda.region().front().rbegin();
-         op != fLambda.region().front().rend(); op++) {
-      if (isa<ApplyOp>(*op)) {
-        lastApply = cast<ApplyOp>(*op);
-        break;
-      }
-    }
+    //    ApplyOp lastApply;
+    //    for (auto op = fLambda.region().front().rbegin();
+    //         op != fLambda.region().front().rend(); op++) {
+    //      if (isa<ApplyOp>(*op)) {
+    //        lastApply = cast<ApplyOp>(*op);
+    //        break;
+    //      }
+    //    }
     // instead have a case for Lambda.
     // generate an Apply for the Lambda
 
-    Substitute(fLambda, {x1.getResult()});
+    //    Substitute(fLambda, {x1.getResult()});
 
     // What would the argument for the storing look like?
     // I would pass the outputArr and the "Path"? -> what exactly is the "o"?
-    auto lambdaResult = AccT(lastApply, {}, rewriter);
+    //    auto lambdaResult = AccT(lastApply, {}, rewriter);
 
-    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
+    //    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
 
-    auto storing = rewriter.create<StoreOp>(appliedFun->getLoc(), lambdaResult,
-                                            out.getDefiningOp()->getOperand(0),
-                                            forLoop.getInductionVar());
+    //    auto storing = rewriter.create<StoreOp>(appliedFun->getLoc(),
+    //    lambdaResult,
+    //                                            out.getDefiningOp()->getOperand(0),
+    //                                            forLoop.getInductionVar());
     return contArray;
 
   } else if (isa<AddOp>(appliedFun)) {
@@ -419,30 +434,35 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
     //    //  TODO: I should be doing this. But this does not work
-//        std::cout << "\nTest printing";
-//        if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-//          if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT)) {
-//            std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//          } else {
-//            std::cout << "\nHouston, we dont have a Float Literal" <<
-//            std::flush;
-//          }
-//          //  or this:
-//          if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
-//            std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//          } else {
-//            std::cout << "\nHouston, we dont have a Float Literal" <<
-//            std::flush;
-//          }
-//          // or:
-//          if (Float num =
-//          op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
-//            std::cout << "\nHouston, we have a Float Literal" << std::flush;
-//          } else {
-//            std::cout << "\nHouston, we dont have a Float Literal" <<
-//            std::flush;
-//          }
-//        }
+    //        std::cout << "\nTest printing";
+    //        if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp()))
+    //        {
+    //          if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
+    //          {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //          //  or this:
+    //          if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //          // or:
+    //          if (Float num =
+    //          op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //        }
 
     // This should of course check for an int or float type
     // However the casting for some reason does not work. I'll hardcode it for
@@ -566,7 +586,7 @@ void ConvertRiseToImperativePass::runOnModule() {
   //    mlir::loop::LoopOpsDialect>();
   target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
-                    linalg::FillOp, mlir::ReturnOp,
+                    linalg::FillOp, mlir::ReturnOp, mlir::rise::RiseIdxOp,
                     RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(

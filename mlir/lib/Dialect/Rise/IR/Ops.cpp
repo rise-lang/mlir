@@ -89,9 +89,10 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
-  Type operandType;
 
-  parser.parseOperand(operand);
+  if (parser.parseOperand(operand))
+    return failure();
+
   parser.resolveOperandUnsafe(operand, result.operands);
   // parse Memref and create one of our types for it.
 
@@ -99,6 +100,42 @@ ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
       ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
                      Float::get(builder.getContext()));
   result.addTypes(riseType);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// RiseIdxOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseIdxOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType input;
+  OpAsmParser::OperandType index;
+  Type operandType;
+
+  if (parser.parseOperand(input) || parser.parseComma() ||
+      parser.parseOperand(index))
+    failure();
+
+  parser.resolveOperandUnsafe(input, result.operands);
+  parser.resolveOperandUnsafe(index, result.operands);
+
+  // parse Memref and create one of our types for it.
+
+  DataType riseType =
+      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
+                     Float::get(builder.getContext()));
+
+  // return a memref but with one dim stripped off
+  ArrayRef<int64_t> shape = result.operands.front()
+                                .getType()
+                                .dyn_cast<MemRefType>()
+                                .getShape()
+                                .drop_back(1);
+
+  MemRefType output =
+      MemRefType::get(shape, FloatType::getF32(builder.getContext()));
+
+  result.addTypes(output);
   return success();
 }
 
