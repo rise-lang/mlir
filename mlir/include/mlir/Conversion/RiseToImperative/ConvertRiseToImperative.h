@@ -27,23 +27,19 @@
 
 namespace mlir {
 namespace rise {
-// using std::variant would be better, but that is C++17
-// TODO: This is not complete. We have to be able to represent i%m etc.
-//       Also representing fst and snd as bool is just a placeholder
-union OutputPathElement {
-  int idx;
-  bool fst;
-  Value identifier;
-};
 // std::variant would be nice to have here. Look at how this works. I need a sum
 // type for my path, I think
-using OutputPathType = llvm::SmallVector<OutputPathElement, 10>;
+using OutputPathType = mpark::variant<int, bool, Value>;
 mlir::Value AccT(ApplyOp apply, Value out,
                  PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);
+SmallVector<OutputPathType, 10> codeGen(Operation *op, SmallVector<OutputPathType,10> path);
+SmallVector<OutputPathType, 10> codeGen(Value val, SmallVector<OutputPathType,10> path);
+
 void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
 LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
+void print(SmallVector<OutputPathType , 10> input);
 
 } // namespace rise
 } // namespace mlir

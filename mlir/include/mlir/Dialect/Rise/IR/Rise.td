@@ -100,10 +100,24 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
 
 def RiseIdxOp : Rise_Op<"idx"> {
   let summary = "rise idx";
-  let arguments = (ins AnyMemRef:$input, AnyType:$index);
+  let arguments = (ins AnyMemRef:$arg0, AnyType:$arg1);
   let results = (outs AnyType:$output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
+
+def RiseBinaryOp : Rise_Op<"bin_op"> {
+  let summary = "rise bin_op";
+  let arguments = (ins AnyType:$arg0, AnyType:$arg1);
+  let results = (outs AnyType:$output);
+  //let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseAssignOp : Rise_Op<"assign"> {
+  let summary = "rise assign";
+  let arguments = (ins AnyType:$value, AnyType:$assignee);
+  //let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 
 def RiseOutOp : Rise_Op<"out"> {
   let summary = "rise out";

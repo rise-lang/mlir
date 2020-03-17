@@ -40,7 +40,6 @@ struct ConvertRiseToImperativePass
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
-
 /// Apply
 struct ApplyToImpLowering : public OpRewritePattern<ApplyOp> {
   using OpRewritePattern<ApplyOp>::OpRewritePattern;
@@ -133,6 +132,24 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
   auto result = AccT(lastApply, outOp.getResult(), rewriter);
   // codegen here
+  //  std::cout << "\nmain AccT finished!" << std::flush;
+
+  // For now just find the assign ad-hoc and go from there. Later think about
+  // where to start with Codegen
+  rise::RiseAssignOp assign;
+  for (auto opFor = riseFun.getBody().front().rbegin();
+       opFor != riseFun.getBody().front().rend(); opFor++) {
+    if (isa<mlir::loop::ForOp>(*opFor)) {
+      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
+           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
+        if (isa<rise::RiseAssignOp>(*op)) {
+          assign = cast<rise::RiseAssignOp>(*op);
+          break;
+        }
+      }
+    }
+  }
+  codeGen(assign, {});
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -142,10 +159,10 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   //  riseFunOp.replaceAllUsesWith(callRiseFunOp);
 
   // replace output // TODO: put back in
-//  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
-//      riseFun.getBody().front().getArgument(0));
+  //  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
+  //      riseFun.getBody().front().getArgument(0));
 
-//  rewriter.eraseOp(riseFunOp);
+  //  rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -281,22 +298,36 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     // TODO: create a custom builder (or create?) for RiseIdxOp and call this
     // one here, so I dont have to give the resulting type.
-    ArrayRef<int64_t> shape =
+    ArrayRef<int64_t> inShape =
         contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
 
-    MemRefType indexOpResult =
-        MemRefType::get(shape, FloatType::getF32(rewriter.getContext()));
-    auto xi =
-        rewriter.create<RiseIdxOp>(loc, indexOpResult, contArray, forLoop.getInductionVar());
+    MemRefType inIndexOpResult =
+        MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
+    auto xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+                                         forLoop.getInductionVar());
+
+    // TODO: question: does this fit in terms of types?
+    auto fxi = rewriter.create<ApplyOp>(loc, fLambda.getType(),
+                                        fLambda.getResult(), xi.getResult());
+
+    ArrayRef<int64_t> outShape =
+        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+    MemRefType outIndexOpResult =
+        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult,
+                                           out.getDefiningOp()->getOperand(0),
+                                           forLoop.getInductionVar());
+
+    AccT(fxi, outi.getResult(), rewriter);
+    // tmp Apply not needed anymore.
+    rewriter.eraseOp(fxi);
 
     // create Apply for Lambda now, and create other idx for the out.
     // start AccT for Apply of Lambda and add case for Lamda
 
-
-
     //    // This LoadOp should not be created here.
-    //    auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
-    //                                      forLoop.getInductionVar());
+    //        auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
+    //                                          forLoop.getInductionVar());
 
     // Lower mapped function
     //    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
@@ -326,6 +357,23 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     //                                            forLoop.getInductionVar());
     return contArray;
 
+  } else if (isa<LambdaOp>(appliedFun)) {
+    LambdaOp lambda = cast<LambdaOp>(appliedFun);
+    Substitute(lambda, applyOperands);
+
+    // Find last Apply inside Lambda:
+    ApplyOp lastApply;
+    for (auto op = lambda.region().front().rbegin();
+         op != lambda.region().front().rend(); op++) {
+      if (isa<ApplyOp>(*op)) {
+        lastApply = cast<ApplyOp>(*op);
+        break;
+      }
+    }
+
+    return AccT(lastApply, out, rewriter);
+    std::cout << "\nstill alive!" << std::flush;
+
   } else if (isa<AddOp>(appliedFun)) {
     auto summand0 = applyOperands.pop_back_val();
     auto summand1 = applyOperands.pop_back_val();
@@ -333,8 +381,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
     auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
 
-    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(), contSummand0,
-                                            contSummand1);
+    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
+    //    contSummand0,
+    //                                            contSummand1);
+    auto newAddOp = rewriter.create<RiseBinaryOp>(
+        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
+        contSummand0, contSummand1);
+    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+                                                    newAddOp.getResult(), out);
+
     return newAddOp;
 
   } else if (isa<MultOp>(appliedFun)) {
@@ -355,6 +410,85 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
   }
+}
+
+SmallVector<OutputPathType, 10>
+mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path) {
+  if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
+    std::cout << "\nCodeGen for assignOp!" << std::flush;
+    auto leftPath = codeGen(assign.assignee(), {});
+    auto rightPath = codeGen(assign.value(), {});
+
+    std::cout << "back from recursion, will generate for assign now. \n" << std::flush;
+    print(leftPath);
+    print(rightPath);
+    // Generate load and store here?
+
+  } else {
+    std::cout << "\nI dont know how to do CodeGen for:"
+              << op->getName().getStringRef().str() << std::flush;
+  }
+  return path;
+}
+
+SmallVector<OutputPathType, 10>
+mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path) {
+  if (val.isa<OpResult>()) {
+    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+      // first recurse into the index if index is not a block argument
+      auto indexPath = codeGen(idx.arg1(), {});
+      std::cout << "indexPath: \n" << std::flush;
+      print(indexPath);
+      path.append(indexPath.begin(), indexPath.end());
+
+      codeGen(idx.arg0(), path);
+
+      std::cout << "\nCodeGen for idx!" << std::flush;
+    } else if (RiseBinaryOp binOp =
+                   dyn_cast<RiseBinaryOp>(val.getDefiningOp())) {
+      std::cout << "\nCodeGen for binOp!" << std::flush;
+      codeGen(binOp.arg0(), {});
+      codeGen(binOp.arg1(), {});
+
+      //TODO generate addF now here.?
+      // how could I get a handle to the values of the loads for generating the addf
+
+
+    } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
+      path.push_back(alloc.getResult());
+      std::cout << "have reached alloc, should prob. reverso now.\n" << std::flush;
+    } else {
+      std::cout << "\nI dont know how to do CodeGen for:" << std::flush;
+    }
+  } else {
+    // val is a BlockArg
+
+    std::cout << "I have reached a BlockArg, should prob. do reverse now."
+              << std::flush;
+    path.push_back(val);
+  }
+  return path;
+}
+
+void mlir::rise::print(SmallVector<OutputPathType, 10> input) {
+  struct {
+    void operator()(int i) { std::cout << "int!" << i << ", "; }
+    void operator()(std::string const &) { std::cout << "string!"; }
+    void operator()(bool b) { std::cout << "bool: " << b << ", "; }
+    void operator()(Value val) {
+      if (val.isa<OpResult>()) {
+        std::cout << "val: "
+                  << val.getDefiningOp()->getName().getStringRef().str();
+      } else {
+        std::cout << "blockArg, ";
+      }
+    }
+  } visitor;
+  std::cout << "\npath: {";
+  for (OutputPathType element : input) {
+    mpark::visit(visitor, input[0]);
+  }
+  std::cout << "}\n" << std::flush;
 }
 
 void mlir::rise::Substitute(LambdaOp lambda,
@@ -587,7 +721,8 @@ void ConvertRiseToImperativePass::runOnModule() {
   target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
                     linalg::FillOp, mlir::ReturnOp, mlir::rise::RiseIdxOp,
-                    RiseContinuationTranslation>();
+                    mlir::rise::RiseBinaryOp, mlir::rise::RiseAssignOp,
+                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });
