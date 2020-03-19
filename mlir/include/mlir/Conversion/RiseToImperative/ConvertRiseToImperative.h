@@ -27,20 +27,24 @@
 
 namespace mlir {
 namespace rise {
-// std::variant would be nice to have here. Look at how this works. I need a sum
-// type for my path, I think
+
 using OutputPathType = mpark::variant<int, bool, Value>;
-mlir::Value AccT(ApplyOp apply, Value out,
-                 PatternRewriter &rewriter);
+
+mlir::Value AccT(ApplyOp apply, Value out, PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);
-SmallVector<OutputPathType, 10> codeGen(Operation *op, SmallVector<OutputPathType,10> path);
-SmallVector<OutputPathType, 10> codeGen(Value val, SmallVector<OutputPathType,10> path);
+Value codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
+              PatternRewriter &rewriter);
+Value codeGen(Value val, SmallVector<OutputPathType, 10> path,
+              PatternRewriter &rewriter);
+SmallVector<OutputPathType, 10>
+codeGenStore(Value val, Value storeLocation,
+             SmallVector<OutputPathType, 10> path, PatternRewriter &rewriter);
 
 void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
 LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
-void print(SmallVector<OutputPathType , 10> input);
-
+void print(SmallVector<OutputPathType, 10> input);
+void printUses(Value val);
 } // namespace rise
 } // namespace mlir
 

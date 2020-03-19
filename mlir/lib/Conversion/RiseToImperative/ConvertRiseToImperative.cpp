@@ -149,20 +149,64 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
       }
     }
   }
-  codeGen(assign, {});
+  codeGen(assign, {}, rewriter);
+
+  // erase intermediate operations. We remove them back to front right now, this
+  // should be alright in terms of dependencies.
+  SmallVector<Operation *, 10> erasureList = {};
+  riseFun.walk([&erasureList](Operation *inst) {
+    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+        isa<RiseIdxOp>(inst)) {
+      erasureList.push_back(inst);
+    }
+    return;
+  });
+  // cleanup
+
+  size_t unneededOps = erasureList.size();
+  for (size_t i = 0; i < unneededOps; i++) {
+    auto op = erasureList.pop_back_val();
+//    std::cout << "erasing:" << op->getName().getStringRef().str() << "\n"
+//              << std::flush;
+    //    op->dropAllDefinedValueUses();
+    //    op->dropAllUses();
+    op->dropAllUses();
+    op->dropAllReferences();
+    rewriter.eraseOp(op);
+  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
       rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
 
-  //  // We don't need the riseModule anymore
-  //  riseFunOp.replaceAllUsesWith(callRiseFunOp);
+  // We don't need the riseModule anymore
+  // replace output
+  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
+      riseFun.getBody().front().getArgument(0));
 
-  // replace output // TODO: put back in
-  //  riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
-  //      riseFun.getBody().front().getArgument(0));
+//  riseFunOp.walk([&rewriter](Operation *inst) {
+//    if (!inst->use_empty()) {
+//      //      std::cout << "printing uses for " <<
+//      //      inst->getName().getStringRef().str()
+//      //                << "\n"
+//      //                << std::flush;
+//
+//      //      inst->dropAllDefinedValueUses();
+//      //      inst->getResult(0).dropAllUses();
+//      printUses(inst->getResult(0));
+//
+//      //      rewriter.eraseOp(inst);
+//    } else {
+//      std::cout << "walking over: " << inst->getName().getStringRef().str()
+//                << "\n"
+//                << std::flush;
+//    }
+//    return;
+//  });
 
-  //  rewriter.eraseOp(riseFunOp);
+  riseFunOp.getOperation()->dropAllUses();
+  riseFunOp.getOperation()->dropAllReferences();
+  rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -307,8 +351,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
                                          forLoop.getInductionVar());
 
     // TODO: question: does this fit in terms of types?
+    //    auto lambdaCopy = rewriter.create<LambdaOp>(
+    //        fLambda.getLoc(), fLambda.lambda_result().getType());
+    LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
     auto fxi = rewriter.create<ApplyOp>(loc, fLambda.getType(),
-                                        fLambda.getResult(), xi.getResult());
+                                        lambdaCopy.getResult(), xi.getResult());
 
     ArrayRef<int64_t> outShape =
         contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
@@ -320,7 +367,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
+    fxi.getResult().dropAllUses();
     rewriter.eraseOp(fxi);
+
+    lambdaCopy.getResult().dropAllUses();
+    rewriter.eraseOp(lambdaCopy);
 
     // create Apply for Lambda now, and create other idx for the out.
     // start AccT for Apply of Lambda and add case for Lamda
@@ -412,62 +463,105 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
   }
 }
 
-SmallVector<OutputPathType, 10>
-mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path) {
+Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
+                          PatternRewriter &rewriter) {
   if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
-    std::cout << "\nCodeGen for assignOp!" << std::flush;
-    auto leftPath = codeGen(assign.assignee(), {});
-    auto rightPath = codeGen(assign.value(), {});
+//    std::cout << "\nCodeGen for assignOp!" << std::flush;
 
-    std::cout << "back from recursion, will generate for assign now. \n" << std::flush;
-    print(leftPath);
-    print(rightPath);
+    auto writeValue = codeGen(assign.value(), {}, rewriter);
+    if (!writeValue)
+      emitError(op->getLoc()) << "Assignment has no Value to write to.";
+    auto leftPath = codeGenStore(assign.assignee(), writeValue, {}, rewriter);
+
+    //    std::cout << "back from recursion, will generate for assign now. \n"
+    //    << std::flush; print(leftPath); print(valuePath);
     // Generate load and store here?
-
+    //    rewriter.eraseOp(assign);
   } else {
-    std::cout << "\nI dont know how to do CodeGen for:"
-              << op->getName().getStringRef().str() << std::flush;
+//    std::cout << "\nI dont know how to do CodeGen for:"
+//              << op->getName().getStringRef().str() << std::flush;
   }
+  return nullptr;
+}
+SmallVector<OutputPathType, 10>
+mlir::rise::codeGenStore(Value val, Value storeLocation,
+                         SmallVector<OutputPathType, 10> path,
+                         PatternRewriter &rewriter) {
+  if (val.isa<OpResult>()) {
+    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+//      std::cout << "\nCodeGen for idxAcc!" << std::flush;
+      path.push_back(idx.arg1());
+      return codeGenStore(idx.arg0(), storeLocation, path, rewriter);
+    }
+  } else {
+    // We have reached a BlockArgument
+//    std::cout << "I have reached a BlockArg in codeGenStore\n" << std::flush;
+//    print(path);
+    // call to reverse here.
+    auto index = path.pop_back_val();
+
+    rewriter.create<StoreOp>(val.getLoc(), storeLocation, val,
+                             mpark::get<Value>(index));
+  }
+  // This might need an extra argument passing what Value exactly I want to
+  // store.
+
+  // First right hand side, get Value to store,
+  // Then resolve lhs.
+
+  // Look at the LateX requirements and create an Overleaf
+  //
   return path;
 }
 
-SmallVector<OutputPathType, 10>
-mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path) {
+Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
+                          PatternRewriter &rewriter) {
   if (val.isa<OpResult>()) {
     if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
-      // first recurse into the index if index is not a block argument
-      auto indexPath = codeGen(idx.arg1(), {});
-      std::cout << "indexPath: \n" << std::flush;
-      print(indexPath);
-      path.append(indexPath.begin(), indexPath.end());
+      //      auto indexPath = codeGen(idx.arg1(), {});
+      //      std::cout << "indexPath: \n" << std::flush;
+      //      print(indexPath);
+      //      path.append(indexPath.begin(), indexPath.end());
 
-      codeGen(idx.arg0(), path);
+//      std::cout << "\nCodeGen for idx!" << std::flush;
 
-      std::cout << "\nCodeGen for idx!" << std::flush;
+      // First add index to the path.
+      path.push_back(idx.arg1());
+      return codeGen(idx.arg0(), path, rewriter);
+
     } else if (RiseBinaryOp binOp =
                    dyn_cast<RiseBinaryOp>(val.getDefiningOp())) {
-      std::cout << "\nCodeGen for binOp!" << std::flush;
-      codeGen(binOp.arg0(), {});
-      codeGen(binOp.arg1(), {});
+//      std::cout << "\nCodeGen for binOp!" << std::flush;
+      auto arg0 = codeGen(binOp.arg0(), {}, rewriter);
+      auto arg1 = codeGen(binOp.arg1(), {}, rewriter);
 
-      //TODO generate addF now here.?
-      // how could I get a handle to the values of the loads for generating the addf
-
-
+      return rewriter.create<AddFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
+          .getResult();
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
-      path.push_back(alloc.getResult());
-      std::cout << "have reached alloc, should prob. reverso now.\n" << std::flush;
+      //      path.push_back(alloc.getResult());
+//      std::cout << "Have reached alloc. Will for now just generate a load.\n"
+//                << std::flush;
+//      print(path);
+      // call to reverse here.
+      auto index = path.pop_back_val();
+
+      return rewriter
+          .create<LoadOp>(val.getLoc(), val, mpark::get<Value>(index))
+          .getResult();
     } else {
-      std::cout << "\nI dont know how to do CodeGen for:" << std::flush;
+//      std::cout << "\nI dont know how to do CodeGen for:" << std::flush;
     }
   } else {
     // val is a BlockArg
 
-    std::cout << "I have reached a BlockArg, should prob. do reverse now."
-              << std::flush;
-    path.push_back(val);
+//    std::cout << "I have reached a BlockArg, should prob. do reverse now."
+//              << std::flush;
+//    print(path);
+    //    path.push_back(val);
   }
-  return path;
+//  std::cout << "have nothing proper to return in CodeGen! I am returning the "
+//               "input.\n";
+  return val;
 }
 
 void mlir::rise::print(SmallVector<OutputPathType, 10> input) {
@@ -484,11 +578,40 @@ void mlir::rise::print(SmallVector<OutputPathType, 10> input) {
       }
     }
   } visitor;
-  std::cout << "\npath: {";
+  std::cout << "path: {";
   for (OutputPathType element : input) {
     mpark::visit(visitor, input[0]);
   }
   std::cout << "}\n" << std::flush;
+}
+
+void mlir::rise::printUses(Value val) {
+
+  //  auto uses = val.getUses();
+  //  auto iter = uses.begin();
+  //  std::cout << "first use of"
+  //            << val.getDefiningOp()->getName().getStringRef().str() << " is:
+  //            "
+  //            <<
+  //            val.getUses().begin().getUser()->getName().getStringRef().str()
+  //            << " with id "
+  //            << "\n"
+  //            << std::flush;
+  std::cout << val.getDefiningOp()->getName().getStringRef().str()
+            << " has uses: \n"
+            << std::flush;
+
+  auto uses = val.getUses().begin();
+  while (true) {
+    if (uses != val.getUses().end()) {
+      std::cout << "    " << uses.getUser()->getName().getStringRef().str()
+                << "\n"
+                << std::flush;
+      uses++;
+    } else {
+      break;
+    }
+  }
 }
 
 void mlir::rise::Substitute(LambdaOp lambda,
@@ -720,9 +843,10 @@ void ConvertRiseToImperativePass::runOnModule() {
   //    mlir::loop::LoopOpsDialect>();
   target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
-                    linalg::FillOp, mlir::ReturnOp, mlir::rise::RiseIdxOp,
-                    mlir::rise::RiseBinaryOp, mlir::rise::RiseAssignOp,
-                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
+                    linalg::FillOp, mlir::ReturnOp, mlir::rise::LambdaOp,
+                    mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
+                    mlir::rise::RiseAssignOp, mlir::rise::ApplyOp,
+                    RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });
