@@ -38,12 +38,16 @@ Value codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
 Value codeGen(Value val, SmallVector<OutputPathType, 10> path,
               PatternRewriter &rewriter);
 SmallVector<OutputPathType, 10>
-codeGenStore(Value val, Value storeLocation,
+codeGenStore(Value storeLocation, Value val,
              SmallVector<OutputPathType, 10> path, PatternRewriter &rewriter);
+Value generateWriteAccess(SmallVector<OutputPathType, 10> path, Value accessVal,
+                          PatternRewriter &rewriter);
+void generateReadAccess(SmallVector<OutputPathType, 10> path, Value storeVal,
+                        Value storeLoc, PatternRewriter &rewriter);
 
 void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
 LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
-void print(SmallVector<OutputPathType, 10> input);
+void printPath(SmallVector<OutputPathType, 10> input);
 void printUses(Value val);
 } // namespace rise
 } // namespace mlir

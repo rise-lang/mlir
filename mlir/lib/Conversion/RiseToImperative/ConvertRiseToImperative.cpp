@@ -130,25 +130,36 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
-  auto result = AccT(lastApply, outOp.getResult(), rewriter);
+  auto result =
+      AccT(lastApply, riseFunOp.region().front().getArgument(0), rewriter);
+
+  emitRemark(riseFun.getLoc()) << "AccT finished. Starting CodeGen.";
+
   // codegen here
   //  std::cout << "\nmain AccT finished!" << std::flush;
 
   // For now just find the assign ad-hoc and go from there. Later think about
   // where to start with Codegen
   rise::RiseAssignOp assign;
-  for (auto opFor = riseFun.getBody().front().rbegin();
-       opFor != riseFun.getBody().front().rend(); opFor++) {
-    if (isa<mlir::loop::ForOp>(*opFor)) {
-      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
-           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
-        if (isa<rise::RiseAssignOp>(*op)) {
-          assign = cast<rise::RiseAssignOp>(*op);
-          break;
-        }
-      }
+  riseFun.walk([&assign](Operation *inst) {
+    if (isa<RiseAssignOp>(inst)) {
+      assign = cast<RiseAssignOp>(inst);
     }
-  }
+    return;
+  });
+  //  for (auto opFor = riseFun.getBody().front().rbegin();
+  //       opFor != riseFun.getBody().front().rend(); opFor++) {
+  //    if (isa<mlir::loop::ForOp>(*opFor)) {
+  //      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
+  //           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
+  //        if (isa<rise::RiseAssignOp>(*op)) {
+  //          assign = cast<rise::RiseAssignOp>(*op);
+  //          break;
+  //        }
+  //      }
+  //    }
+  //  }
+
   codeGen(assign, {}, rewriter);
 
   // erase intermediate operations. We remove them back to front right now, this
@@ -166,10 +177,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
-//    std::cout << "erasing:" << op->getName().getStringRef().str() << "\n"
-//              << std::flush;
-    //    op->dropAllDefinedValueUses();
-    //    op->dropAllUses();
     op->dropAllUses();
     op->dropAllReferences();
     rewriter.eraseOp(op);
@@ -184,29 +191,29 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
       riseFun.getBody().front().getArgument(0));
 
-//  riseFunOp.walk([&rewriter](Operation *inst) {
-//    if (!inst->use_empty()) {
-//      //      std::cout << "printing uses for " <<
-//      //      inst->getName().getStringRef().str()
-//      //                << "\n"
-//      //                << std::flush;
-//
-//      //      inst->dropAllDefinedValueUses();
-//      //      inst->getResult(0).dropAllUses();
-//      printUses(inst->getResult(0));
-//
-//      //      rewriter.eraseOp(inst);
-//    } else {
-//      std::cout << "walking over: " << inst->getName().getStringRef().str()
-//                << "\n"
-//                << std::flush;
-//    }
-//    return;
-//  });
+    riseFunOp.walk([&rewriter](Operation *inst) {
+      if (!inst->use_empty()) {
+        //      std::cout << "printing uses for " <<
+        //      inst->getName().getStringRef().str()
+        //                << "\n"
+        //                << std::flush;
 
-  riseFunOp.getOperation()->dropAllUses();
-  riseFunOp.getOperation()->dropAllReferences();
-  rewriter.eraseOp(riseFunOp);
+        //      inst->dropAllDefinedValueUses();
+        inst->getResult(0).dropAllUses();
+//        printUses(inst->getResult(0));
+
+        //      rewriter.eraseOp(inst);
+      } else {
+//        std::cout << "walking over: " << inst->getName().getStringRef().str()
+//                  << "\n"
+//                  << std::flush;
+      }
+      return;
+    });
+
+    riseFunOp.getOperation()->dropAllUses();
+    riseFunOp.getOperation()->dropAllReferences();
+    rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -342,33 +349,52 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     // TODO: create a custom builder (or create?) for RiseIdxOp and call this
     // one here, so I dont have to give the resulting type.
-    ArrayRef<int64_t> inShape =
-        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+//    std::cout << "still here! \n" << std::flush;
 
-    MemRefType inIndexOpResult =
-        MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-    auto xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                         forLoop.getInductionVar());
+    // We could also already have an idx here.
+    // put this into its own functiono
 
-    // TODO: question: does this fit in terms of types?
-    //    auto lambdaCopy = rewriter.create<LambdaOp>(
-    //        fLambda.getLoc(), fLambda.lambda_result().getType());
+    RiseIdxOp xi;
+
+    if (contArray.getType().isa<MemRefType>()) {
+//      std::cout << "got a memref! Shape: \n"
+//                << contArray.getType().dyn_cast<MemRefType>().getShape().size()
+//                << ","
+//                << contArray.getType().dyn_cast<MemRefType>().getShape()[0]
+//                << std::flush;
+
+      ArrayRef<int64_t> inShape =
+          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+
+      MemRefType inIndexOpResult =
+          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
+
+      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+                                      forLoop.getInductionVar());
+
+    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+//      std::cout << "got an idx and not a memref! \n" << std::flush;
+    }
+
+    // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
-    auto fxi = rewriter.create<ApplyOp>(loc, fLambda.getType(),
+    auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
                                         lambdaCopy.getResult(), xi.getResult());
 
     ArrayRef<int64_t> outShape =
         contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
     MemRefType outIndexOpResult =
         MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult,
-                                           out.getDefiningOp()->getOperand(0),
+    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
                                            forLoop.getInductionVar());
 
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
+
+//    std::cout << "deleting apply dependency for lambda" << std::flush;
     fxi.getResult().dropAllUses();
-    rewriter.eraseOp(fxi);
+    fxi.erase();
+//    rewriter.eraseOp(fxi);
 
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
@@ -465,6 +491,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
 Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
                           PatternRewriter &rewriter) {
+  if (!op) {
+    emitError(rewriter.getUnknownLoc()) << "codegen started with nullptr!";
+  }
   if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
 //    std::cout << "\nCodeGen for assignOp!" << std::flush;
 
@@ -478,30 +507,39 @@ Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
     // Generate load and store here?
     //    rewriter.eraseOp(assign);
   } else {
-//    std::cout << "\nI dont know how to do CodeGen for:"
-//              << op->getName().getStringRef().str() << std::flush;
+    //    std::cout << "\nI dont know how to do CodeGen for:"
+    //              << op->getName().getStringRef().str() << std::flush;
   }
   return nullptr;
 }
 SmallVector<OutputPathType, 10>
-mlir::rise::codeGenStore(Value val, Value storeLocation,
+mlir::rise::codeGenStore(Value storeLocation, Value val,
                          SmallVector<OutputPathType, 10> path,
                          PatternRewriter &rewriter) {
-  if (val.isa<OpResult>()) {
-    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+  if (storeLocation.isa<OpResult>()) {
+    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(storeLocation.getDefiningOp())) {
 //      std::cout << "\nCodeGen for idxAcc!" << std::flush;
       path.push_back(idx.arg1());
-      return codeGenStore(idx.arg0(), storeLocation, path, rewriter);
+      //      std::cout <<
+      //      idx.arg0().getDefiningOp()->getName().getStringRef().str()
+      //                <<
+      //                idx.arg1().getDefiningOp()->getName().getStringRef().str()
+      //                <<
+      //                storeLocation.getDefiningOp()->getName().getStringRef().str()
+      //                << std::flush;
+
+      return codeGenStore(idx.arg0(), val, path, rewriter);
     }
   } else {
     // We have reached a BlockArgument
-//    std::cout << "I have reached a BlockArg in codeGenStore\n" << std::flush;
-//    print(path);
+    //    std::cout << "I have reached a BlockArg in codeGenStore\n";
+    //    std::flush; print(path);
     // call to reverse here.
-    auto index = path.pop_back_val();
+    //    auto index = path.pop_back_val();
 
-    rewriter.create<StoreOp>(val.getLoc(), storeLocation, val,
-                             mpark::get<Value>(index));
+    generateReadAccess(path, val, storeLocation, rewriter);
+    //    rewriter.create<StoreOp>(val.getLoc(), val, storeLocation,
+    //                             mpark::get<Value>(index));
   }
   // This might need an extra argument passing what Value exactly I want to
   // store.
@@ -531,40 +569,75 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
     } else if (RiseBinaryOp binOp =
                    dyn_cast<RiseBinaryOp>(val.getDefiningOp())) {
-//      std::cout << "\nCodeGen for binOp!" << std::flush;
+      //      std::cout << "\nCodeGen for binOp!" << std::flush;
       auto arg0 = codeGen(binOp.arg0(), {}, rewriter);
       auto arg1 = codeGen(binOp.arg1(), {}, rewriter);
 
       return rewriter.create<AddFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
           .getResult();
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
-      //      path.push_back(alloc.getResult());
-//      std::cout << "Have reached alloc. Will for now just generate a load.\n"
-//                << std::flush;
-//      print(path);
       // call to reverse here.
-      auto index = path.pop_back_val();
+      return generateWriteAccess(path, alloc.getResult(), rewriter);
 
-      return rewriter
-          .create<LoadOp>(val.getLoc(), val, mpark::get<Value>(index))
-          .getResult();
     } else {
 //      std::cout << "\nI dont know how to do CodeGen for:" << std::flush;
     }
   } else {
     // val is a BlockArg
 
-//    std::cout << "I have reached a BlockArg, should prob. do reverse now."
-//              << std::flush;
-//    print(path);
+    //    std::cout << "I have reached a BlockArg, should prob. do reverse now."
+    //              << std::flush;
+    //    print(path);
     //    path.push_back(val);
   }
-//  std::cout << "have nothing proper to return in CodeGen! I am returning the "
-//               "input.\n";
+  //  std::cout << "have nothing proper to return in CodeGen! I am returning the
+  //  "
+  //               "input.\n";
   return val;
 }
 
-void mlir::rise::print(SmallVector<OutputPathType, 10> input) {
+Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
+                                      Value accessVal,
+                                      PatternRewriter &rewriter) {
+//  std::cout << "reversing Path for writing.\n" << std::flush;
+//  printPath(path);
+
+  int index;
+  SmallVector<Value, 10> indexValues = {};
+  for (OutputPathType element : path) {
+    if (auto i = mpark::get_if<int>(&element)) {
+      index = *i;
+    } else if (auto val = mpark::get_if<Value>(&element)) {
+      indexValues.push_back(*val);
+    }
+  }
+  return rewriter.create<LoadOp>(accessVal.getLoc(), accessVal, indexValues)
+      .getResult();
+  return nullptr;
+}
+
+void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
+                                    Value storeVal, Value storeLoc,
+                                    PatternRewriter &rewriter) {
+//  std::cout << "reversing Path for reading\n" << std::flush;
+//  printPath(path);
+
+  int index;
+  SmallVector<Value, 10> indexValues = {};
+  for (OutputPathType element : path) {
+    if (auto i = mpark::get_if<int>(&element)) {
+      index = *i;
+    } else if (auto val = mpark::get_if<Value>(&element)) {
+      indexValues.push_back(*val);
+    }
+  }
+  ValueRange valRange = ValueRange(indexValues);
+  rewriter.create<StoreOp>(storeLoc.getLoc(), storeVal, storeLoc, indexValues);
+
+  return;
+}
+
+void mlir::rise::printPath(SmallVector<OutputPathType, 10> input) {
   struct {
     void operator()(int i) { std::cout << "int!" << i << ", "; }
     void operator()(std::string const &) { std::cout << "string!"; }
@@ -634,18 +707,19 @@ void mlir::rise::Substitute(LambdaOp lambda,
 
 LambdaOp mlir::rise::expandToLambda(mlir::Value value,
                                     PatternRewriter &rewriter) {
-  LambdaOp newLambda;
-  rewriter.setInsertionPoint(value.getDefiningOp());
-  FunType funType = value.getType().dyn_cast<FunType>();
-
-  newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-  auto *entry = new Block();
-  newLambda.region().push_back(entry);
-
-  rewriter.setInsertionPointToStart(entry);
 
   Value appliedOp;
   if (isa<AddOp>(value.getDefiningOp())) {
+    LambdaOp newLambda;
+    rewriter.setInsertionPoint(value.getDefiningOp());
+    FunType funType = value.getType().dyn_cast<FunType>();
+
+    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+    auto *entry = new Block();
+    newLambda.region().push_back(entry);
+
+    rewriter.setInsertionPointToStart(entry);
+
     // get the two summands
     SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
     argumentTypes.push_back(funType.getInput());
@@ -656,7 +730,24 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
         value.getLoc(), funType,
         DataTypeAttr::get(rewriter.getContext(),
                           cast<AddOp>(value.getDefiningOp()).t()));
+
+    ApplyOp applyOp = rewriter.create<ApplyOp>(
+        value.getLoc(), funType, appliedOp, entry->getArguments());
+    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
+
+    return newLambda;
+
   } else if (isa<MultOp>(value.getDefiningOp())) {
+    LambdaOp newLambda;
+    rewriter.setInsertionPoint(value.getDefiningOp());
+    FunType funType = value.getType().dyn_cast<FunType>();
+
+    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+    auto *entry = new Block();
+    newLambda.region().push_back(entry);
+
+    rewriter.setInsertionPointToStart(entry);
+
     // get the two factors
     SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
     argumentTypes.push_back(funType.getInput());
@@ -667,16 +758,94 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
         value.getLoc(), funType,
         DataTypeAttr::get(rewriter.getContext(),
                           cast<MultOp>(value.getDefiningOp()).t()));
+
+    ApplyOp applyOp = rewriter.create<ApplyOp>(
+        value.getLoc(), funType, appliedOp, entry->getArguments());
+    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
+
+    return newLambda;
+  } else if (isa<ApplyOp>(value.getDefiningOp())) {
+    //    std::cout << "expanding applied fun." << std::flush;
+    //    LambdaOp newLambda;
+    //    rewriter.setInsertionPoint(value.getDefiningOp());
+    //    FunType funType = value.getType().dyn_cast<FunType>();
+    //
+    //    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+    //    auto *entry = new Block();
+    //    newLambda.region().push_back(entry);
+    //
+    //    rewriter.setInsertionPointToStart(entry);
+    //
+    //
+    //    return expandToLambda(cast<ApplyOp>(value.getDefiningOp()).fun(),
+    //    rewriter);
+    std::cout << " hi1: \n" << std::flush;
+
+    LambdaOp newLambda;
+    rewriter.setInsertionPoint(value.getDefiningOp());
+    FunType funType = value.getType().dyn_cast<FunType>();
+
+    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+    auto *entry = new Block();
+    newLambda.region().push_back(entry);
+
+    rewriter.setInsertionPointToStart(entry);
+    std::cout << " hi1: \n" << std::flush;
+
+    // get the two factors
+    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+    std::cout << " hi1: \n" << std::flush;
+
+    argumentTypes.push_back(funType.getInput());
+    std::cout << " hi1: \n" << std::flush;
+
+    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
+    std::cout << " hi1: \n" << std::flush;
+
+    entry->addArguments(argumentTypes);
+
+    //    appliedOp = rewriter.create<MultOp>(
+    //        value.getLoc(), funType,
+    //        DataTypeAttr::get(rewriter.getContext(),
+    //                          cast<MultOp>(value.getDefiningOp()).t()));
+    std::cout << " hi1: \n" << std::flush;
+    appliedOp =
+        cast<ApplyOp>(rewriter.clone(*(cast<ApplyOp>(value.getDefiningOp()))))
+            .getResult();
+    //    ApplyOp applyOp = rewriter.clone(*(cast<ApplyOp>(value)));
+    std::cout << " hi2: \n" << std::flush;
+
+    ApplyOp applyOp = rewriter.create<ApplyOp>(
+        value.getLoc(), funType, appliedOp, entry->getArguments());
+    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
+    return newLambda;
+
+  } else if (isa<MapOp>(value.getDefiningOp())) {
+    std::cout << "expanding "
+                 "map fun."
+              << std::flush;
+
+    //    LambdaOp newLambda;
+    //    rewriter.setInsertionPoint(value.getDefiningOp());
+    //    FunType funType = value.getType().dyn_cast<FunType>();
+    //
+    //    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
+    //    auto *entry = new Block();
+    //    newLambda.region().push_back(entry);
+    //
+    //    rewriter.setInsertionPointToStart(entry);
+    //
+    //    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+    //    argumentTypes.push_back(funType.getInput());
+    //    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
+    //    entry->addArguments(argumentTypes);
+    //
+    //    rewriter.create<MapOp>(value.getLoc(), )
   } else {
     emitError(value.getLoc())
-        << "Expanding this operation to a Lambda is not supported.";
+        << "Expanding " << value.getDefiningOp()->getName().getStringRef().str()
+        << " to a Lambda is not supported.";
   }
-
-  ApplyOp applyOp = rewriter.create<ApplyOp>(value.getLoc(), funType, appliedOp,
-                                             entry->getArguments());
-  rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
-
-  return newLambda;
 }
 
 /// Continuation Translation
@@ -757,6 +926,19 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       //        MemRefType::get(ArrayRef<int64_t>{32},
       //                        FloatType::getF32(rewriter.getContext())),
       //        contValue);
+    } else if (literalValue == "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
     }
   } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
     emitError(loc)

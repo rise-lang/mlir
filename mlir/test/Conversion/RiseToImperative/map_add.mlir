@@ -5,7 +5,6 @@ func @rise_fun(memref<4xf32>)
 func @array_times_2() {
 
     rise.fun "rise_fun" (%outArg:memref<4xf32>) {
-        %out = rise.out %outArg
         %array = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
         %doubleFun = rise.lambda (%summand) : !rise.fun<data<float> -> data<float>> {
             %addFun = rise.add #rise.float
