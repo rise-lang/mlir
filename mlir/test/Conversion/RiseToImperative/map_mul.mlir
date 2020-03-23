@@ -1,9 +1,10 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e array_times_5 -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=ARRAY_TIMES_5
 
 func @print_memref_f32(memref<*xf32>)
+func @rise_fun(memref<4xf32>)
 func @array_times_5() {
 
-    %res = rise.fun {
+    rise.fun "rise_fun" (%outArg:memref<4xf32>) {
         %array = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
         %times5 = rise.lambda (%in) : !rise.fun<data<float> -> data<float>> {
             %cst5 = rise.literal #rise.lit<float<5>>
@@ -15,9 +16,13 @@ func @array_times_5() {
         %multipliedArray = rise.apply %mapFun, %times5, %array
 
         rise.return %multipliedArray : !rise.data<array<4, float>>
-    } : () -> memref<4xf32>
+    }
 
-    %print_me = memref_cast %res : memref<4xf32> to memref<*xf32>
+    //prepare output Array
+    %outputArray = alloc() : memref<4xf32>
+    call @rise_fun(%outputArray) : (memref<4xf32>) -> ()
+
+    %print_me = memref_cast %outputArray : memref<4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }

@@ -29,7 +29,7 @@ namespace mlir {
 namespace rise {
 
 
-using OutputPathType = mpark::variant<int, bool, Value>;
+using OutputPathType = mpark::variant<int, Value>;
 
 mlir::Value AccT(ApplyOp apply, Value out, PatternRewriter &rewriter);
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
