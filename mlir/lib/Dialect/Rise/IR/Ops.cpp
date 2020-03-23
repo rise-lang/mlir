@@ -96,9 +96,14 @@ ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
   parser.resolveOperandUnsafe(operand, result.operands);
   // parse Memref and create one of our types for it.
 
-  DataType riseType =
+  //  DataType riseType =
+  //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
+  //      4),
+  //                     Float::get(builder.getContext()));
+  DataType riseType = ArrayType::get(
+      builder.getContext(), Nat::get(builder.getContext(), 4),
       ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
-                     Float::get(builder.getContext()));
+                     Float::get(builder.getContext())));
   result.addTypes(riseType);
   return success();
 }

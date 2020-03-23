@@ -147,40 +147,41 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     }
     return;
   });
-  //  for (auto opFor = riseFun.getBody().front().rbegin();
-  //       opFor != riseFun.getBody().front().rend(); opFor++) {
-  //    if (isa<mlir::loop::ForOp>(*opFor)) {
-  //      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
-  //           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
-  //        if (isa<rise::RiseAssignOp>(*op)) {
-  //          assign = cast<rise::RiseAssignOp>(*op);
-  //          break;
-  //        }
-  //      }
-  //    }
-  //  }
+  for (auto opFor = riseFun.getBody().front().rbegin();
+       opFor != riseFun.getBody().front().rend(); opFor++) {
+    if (isa<mlir::loop::ForOp>(*opFor)) {
+      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
+           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
+        if (isa<rise::RiseAssignOp>(*op)) {
+          assign = cast<rise::RiseAssignOp>(*op);
+          break;
+        }
+      }
+    }
+  }
 
   codeGen(assign, {}, rewriter);
 
-  // erase intermediate operations. We remove them back to front right now, this
-  // should be alright in terms of dependencies.
-  SmallVector<Operation *, 10> erasureList = {};
-  riseFun.walk([&erasureList](Operation *inst) {
-    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-        isa<RiseIdxOp>(inst)) {
-      erasureList.push_back(inst);
-    }
-    return;
-  });
-  // cleanup
-
-  size_t unneededOps = erasureList.size();
-  for (size_t i = 0; i < unneededOps; i++) {
-    auto op = erasureList.pop_back_val();
-    op->dropAllUses();
-    op->dropAllReferences();
-    rewriter.eraseOp(op);
-  }
+  //  // erase intermediate operations. We remove them back to front right now,
+  //  this
+  //  // should be alright in terms of dependencies.
+  //  SmallVector<Operation *, 10> erasureList = {};
+  //  riseFun.walk([&erasureList](Operation *inst) {
+  //    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+  //        isa<RiseIdxOp>(inst)) {
+  //      erasureList.push_back(inst);
+  //    }
+  //    return;
+  //  });
+  //  // cleanup
+  //
+  //  size_t unneededOps = erasureList.size();
+  //  for (size_t i = 0; i < unneededOps; i++) {
+  //    auto op = erasureList.pop_back_val();
+  //    op->dropAllUses();
+  //    op->dropAllReferences();
+  //    rewriter.eraseOp(op);
+  //  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -191,29 +192,30 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   riseFunOp.region().front().getArgument(0).replaceAllUsesWith(
       riseFun.getBody().front().getArgument(0));
 
-    riseFunOp.walk([&rewriter](Operation *inst) {
-      if (!inst->use_empty()) {
-        //      std::cout << "printing uses for " <<
-        //      inst->getName().getStringRef().str()
-        //                << "\n"
-        //                << std::flush;
-
-        //      inst->dropAllDefinedValueUses();
-        inst->getResult(0).dropAllUses();
-//        printUses(inst->getResult(0));
-
-        //      rewriter.eraseOp(inst);
-      } else {
-//        std::cout << "walking over: " << inst->getName().getStringRef().str()
-//                  << "\n"
-//                  << std::flush;
-      }
-      return;
-    });
-
-    riseFunOp.getOperation()->dropAllUses();
-    riseFunOp.getOperation()->dropAllReferences();
-    rewriter.eraseOp(riseFunOp);
+  //  riseFunOp.walk([&rewriter](Operation *inst) {
+  //    if (!inst->use_empty()) {
+  //      //      std::cout << "printing uses for " <<
+  //      //      inst->getName().getStringRef().str()
+  //      //                << "\n"
+  //      //                << std::flush;
+  //
+  //      //      inst->dropAllDefinedValueUses();
+  //      inst->getResult(0).dropAllUses();
+  //      //        printUses(inst->getResult(0));
+  //
+  //      //      rewriter.eraseOp(inst);
+  //    } else {
+  //      //        std::cout << "walking over: " <<
+  //      //        inst->getName().getStringRef().str()
+  //      //                  << "\n"
+  //      //                  << std::flush;
+  //    }
+  //    return;
+  //  });
+  //
+  //    riseFunOp.getOperation()->dropAllUses();
+  //    riseFunOp.getOperation()->dropAllReferences();
+  //    rewriter.eraseOp(riseFunOp);
   return matchSuccess();
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -349,7 +351,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     // TODO: create a custom builder (or create?) for RiseIdxOp and call this
     // one here, so I dont have to give the resulting type.
-//    std::cout << "still here! \n" << std::flush;
+    //    std::cout << "still here! \n" << std::flush;
 
     // We could also already have an idx here.
     // put this into its own functiono
@@ -357,11 +359,13 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     RiseIdxOp xi;
 
     if (contArray.getType().isa<MemRefType>()) {
-//      std::cout << "got a memref! Shape: \n"
-//                << contArray.getType().dyn_cast<MemRefType>().getShape().size()
-//                << ","
-//                << contArray.getType().dyn_cast<MemRefType>().getShape()[0]
-//                << std::flush;
+      //      std::cout << "got a memref! Shape: \n"
+      //                <<
+      //                contArray.getType().dyn_cast<MemRefType>().getShape().size()
+      //                << ","
+      //                <<
+      //                contArray.getType().dyn_cast<MemRefType>().getShape()[0]
+      //                << std::flush;
 
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
@@ -373,7 +377,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
                                       forLoop.getInductionVar());
 
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-//      std::cout << "got an idx and not a memref! \n" << std::flush;
+      //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
 
     // operate on a copy of the lambda to avoid generating dependencies.
@@ -391,10 +395,10 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-//    std::cout << "deleting apply dependency for lambda" << std::flush;
+    //    std::cout << "deleting apply dependency for lambda" << std::flush;
     fxi.getResult().dropAllUses();
     fxi.erase();
-//    rewriter.eraseOp(fxi);
+    //    rewriter.eraseOp(fxi);
 
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
@@ -433,6 +437,16 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     //                                            out.getDefiningOp()->getOperand(0),
     //                                            forLoop.getInductionVar());
     return contArray;
+
+  } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
+    auto tuple = applyOperands.pop_back_val();
+    auto contTuple = ConT(tuple, rewriter.getInsertionPoint(), rewriter);
+
+    auto fstIntermOp = rewriter.create<RiseFstIntermediateOp>(
+        fstOp.getLoc(), FloatType::getF32(rewriter.getContext()), contTuple);
+    auto assignment = rewriter.create<RiseAssignOp>(
+        appliedFun->getLoc(), fstIntermOp.getResult(), out);
+    return fstIntermOp.getResult();
 
   } else if (isa<LambdaOp>(appliedFun)) {
     LambdaOp lambda = cast<LambdaOp>(appliedFun);
@@ -489,13 +503,219 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
   }
 }
 
+/// Continuation Translation
+mlir::Value mlir::rise::ConT(mlir::Value contValue,
+                             Block::iterator contLocation,
+                             PatternRewriter &rewriter) {
+  Location loc = contValue.getLoc();
+  auto oldInsertPoint = rewriter.saveInsertionPoint();
+
+  if (isa<LiteralOp>(contValue.getDefiningOp())) {
+    StringRef literalValue =
+        dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
+
+    //    //  TODO: I should be doing this. But this does not work
+    //        std::cout << "\nTest printing";
+    //        if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp()))
+    //        {
+    //          if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
+    //          {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //          //  or this:
+    //          if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //          // or:
+    //          if (Float num =
+    //          op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
+    //            std::cout << "\nHouston, we have a Float Literal" <<
+    //            std::flush;
+    //          } else {
+    //            std::cout << "\nHouston, we dont have a Float Literal" <<
+    //            std::flush;
+    //          }
+    //        }
+
+    // This should of course check for an int or float type
+    // However the casting for some reason does not work. I'll hardcode it for
+    // now
+    if (literalValue == "0") {
+      auto fillOp = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return fillOp.getResult();
+    } else if (literalValue == "5") {
+      auto fillOp = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return fillOp.getResult();
+    }
+    // This should check for an array type
+    else if (literalValue == "[5,5,5,5]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
+
+      //    return rewriter.create<RiseContinuationTranslation>(
+      //        contValue.getLoc(),
+      //        MemRefType::get(ArrayRef<int64_t>{32},
+      //                        FloatType::getF32(rewriter.getContext())),
+      //        contValue);
+    } else if (literalValue == "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
+    } else if (literalValue ==
+               "[[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5]]]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4, 4, 4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
+    } else if (literalValue ==
+               "[[[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
+               "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
+               "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5], [5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
+               "[5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
+               "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]]]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4, 4, 4, 4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
+    }
+
+  } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
+    emitError(loc)
+        << "We dont lower Lambdas using the function ConT right now.";
+    // A Lambda has only one block
+    Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
+    // For now start at the back and just find the first apply
+    ApplyOp lastApply;
+    for (auto op = block.rbegin(); op != block.rend(); op++) {
+      if (isa<ApplyOp>(*op)) {
+        lastApply = cast<ApplyOp>(*op);
+        break;
+      }
+    }
+
+    // Finding the return from the chunk of rise IR
+    rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
+
+  } else if (ApplyOp apply = dyn_cast<ApplyOp>(contValue.getDefiningOp())) {
+    if (ZipOp zipOp = dyn_cast<ZipOp>(apply.fun().getDefiningOp())) {
+      auto lhs = apply.getOperand(1);
+      auto rhs = apply.getOperand(2);
+
+      auto contLhs = ConT(lhs, rewriter.getInsertionPoint(), rewriter);
+      auto contRhs = ConT(rhs, rewriter.getInsertionPoint(), rewriter);
+
+      // usually this is an Array of tuples. But at the end it always has to be
+      // projected to fst or snd. For now I will keep the type as
+      // memref<...xf32>
+      MemRefType outputType =
+          MemRefType::get({4}, FloatType::getF32(rewriter.getContext()));
+      auto zipped = rewriter.create<RiseZipIntermediateOp>(
+          zipOp.getLoc(), outputType, contLhs, contRhs);
+
+      return zipped;
+    }
+
+  } else {
+    emitRemark(contValue.getLoc())
+        << "can not perform continuation "
+           "translation for "
+        << contValue.getDefiningOp()->getName().getStringRef().str()
+        << " leaving Value as is.";
+
+    rewriter.restoreInsertionPoint(oldInsertPoint);
+    return contValue;
+  }
+
+  //    std::cout << "\n 1\n" << op.literalAttr().getType().getKind() << " and
+  //    "
+  //    << RiseTypeKind::RISE_FLOAT;
+  //
+  //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_ARRAY)) {
+  //      std::cout << "\n 2 \n";
+  //
+  //    } else if (op.literalAttr().getValue()) {
+  //      rewriter.create<RiseContinuationTranslation>(
+  //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
+  //          contValue);
+  //      std::cout << "\n 3\n";
+  //
+  //    }
+  //  } else {
+  //    emitError(contValue.getLoc())
+  //        << "\nContinuation Translation of "
+  //        << contValue.getDefiningOp()->getName().getStringRef().str()
+  //        << " not "
+  //           "supported.";
+  //  }
+}
+
 Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
                           PatternRewriter &rewriter) {
   if (!op) {
     emitError(rewriter.getUnknownLoc()) << "codegen started with nullptr!";
   }
   if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
-//    std::cout << "\nCodeGen for assignOp!" << std::flush;
+    //    std::cout << "\nCodeGen for assignOp!" << std::flush;
 
     auto writeValue = codeGen(assign.value(), {}, rewriter);
     if (!writeValue)
@@ -518,7 +738,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
                          PatternRewriter &rewriter) {
   if (storeLocation.isa<OpResult>()) {
     if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(storeLocation.getDefiningOp())) {
-//      std::cout << "\nCodeGen for idxAcc!" << std::flush;
+      //      std::cout << "\nCodeGen for idxAcc!" << std::flush;
       path.push_back(idx.arg1());
       //      std::cout <<
       //      idx.arg0().getDefiningOp()->getName().getStringRef().str()
@@ -561,10 +781,22 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       //      print(indexPath);
       //      path.append(indexPath.begin(), indexPath.end());
 
-//      std::cout << "\nCodeGen for idx!" << std::flush;
+      std::cout << "\nCodeGen for idx!" << std::flush;
 
       // First add index to the path.
-      path.push_back(idx.arg1());
+
+      // TODO: for whatever reason arg1() can be null here.
+      printPath(path);
+      Value arg1 = idx.arg1();
+      if (isa<Value>(arg1))
+        std::cout << "\nein Value!" << std::flush;
+
+      if (arg1)
+        std::cout << "\narg1:"
+                  << std::flush;
+
+      path.push_back(arg1);
+      printPath(path);
       return codeGen(idx.arg0(), path, rewriter);
 
     } else if (RiseBinaryOp binOp =
@@ -579,8 +811,42 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       // call to reverse here.
       return generateWriteAccess(path, alloc.getResult(), rewriter);
 
+    } else if (RiseZipIntermediateOp zipIntermOp =
+                   dyn_cast<RiseZipIntermediateOp>(val.getDefiningOp())) {
+      std::cout << "\nCodeGen for zipInterm!" << std::flush;
+
+      // now there has to be an idx on the path.
+      printPath(path);
+      auto sndPath = path.pop_back_val();
+
+      auto topPath = path.pop_back_val();
+      auto idx = mpark::get_if<Value>(&topPath);
+      bool fst = mpark::get_if<bool>(&sndPath);
+//      // TODO: check whether idx and fst exist.
+//
+//      path.push_back(&idx);
+//
+//      if (fst) {
+//        return codeGen(zipIntermOp.lhs(), path, rewriter);
+//      } else {
+//        return codeGen(zipIntermOp.rhs(), path, rewriter);
+//      }
+    } else if (RiseFstIntermediateOp fstIntermOp =
+                   dyn_cast<RiseFstIntermediateOp>(val.getDefiningOp())) {
+      std::cout << "\nCodeGen for fstInterm!" << std::flush;
+
+      path.push_back(true);
+      return codeGen(fstIntermOp.value(), path, rewriter);
+
+    } else if (RiseSndIntermediateOp sndIntermOp =
+                   dyn_cast<RiseSndIntermediateOp>(val.getDefiningOp())) {
+      path.push_back(false);
+      return codeGen(sndIntermOp.value(), path, rewriter);
+
     } else {
-//      std::cout << "\nI dont know how to do CodeGen for:" << std::flush;
+      std::cout << "\nI dont know how to do CodeGen for:"
+                << val.getDefiningOp()->getName().getStringRef().str()
+                << std::flush;
     }
   } else {
     // val is a BlockArg
@@ -599,8 +865,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
                                       Value accessVal,
                                       PatternRewriter &rewriter) {
-//  std::cout << "reversing Path for writing.\n" << std::flush;
-//  printPath(path);
+  std::cout << "reversing Path for writing.\n" << std::flush;
+  printPath(path);
 
   int index;
   SmallVector<Value, 10> indexValues = {};
@@ -619,8 +885,8 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
 void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
                                     Value storeVal, Value storeLoc,
                                     PatternRewriter &rewriter) {
-//  std::cout << "reversing Path for reading\n" << std::flush;
-//  printPath(path);
+  std::cout << "reversing Path for reading\n" << std::flush;
+  printPath(path);
 
   int index;
   SmallVector<Value, 10> indexValues = {};
@@ -848,149 +1114,6 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
   }
 }
 
-/// Continuation Translation
-mlir::Value mlir::rise::ConT(mlir::Value contValue,
-                             Block::iterator contLocation,
-                             PatternRewriter &rewriter) {
-  Location loc = contValue.getLoc();
-  auto oldInsertPoint = rewriter.saveInsertionPoint();
-
-  if (isa<LiteralOp>(contValue.getDefiningOp())) {
-    StringRef literalValue =
-        dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
-
-    //    //  TODO: I should be doing this. But this does not work
-    //        std::cout << "\nTest printing";
-    //        if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp()))
-    //        {
-    //          if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
-    //          {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //          //  or this:
-    //          if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //          // or:
-    //          if (Float num =
-    //          op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //        }
-
-    // This should of course check for an int or float type
-    // However the casting for some reason does not work. I'll hardcode it for
-    // now
-    if (literalValue == "0") {
-      auto fillOp = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return fillOp.getResult();
-    } else if (literalValue == "5") {
-      auto fillOp = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return fillOp.getResult();
-    }
-    // This should check for an array type
-    else if (literalValue == "[5,5,5,5]") {
-      auto array = rewriter.create<AllocOp>(
-          loc, MemRefType::get(ArrayRef<int64_t>{4},
-                               FloatType::getF32(rewriter.getContext())));
-      // For now just fill the array with one value
-      auto filler = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-      rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                      filler.getResult());
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return array.getResult();
-
-      //    return rewriter.create<RiseContinuationTranslation>(
-      //        contValue.getLoc(),
-      //        MemRefType::get(ArrayRef<int64_t>{32},
-      //                        FloatType::getF32(rewriter.getContext())),
-      //        contValue);
-    } else if (literalValue == "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]") {
-      auto array = rewriter.create<AllocOp>(
-          loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
-                               FloatType::getF32(rewriter.getContext())));
-      // For now just fill the array with one value
-      auto filler = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-      rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                      filler.getResult());
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return array.getResult();
-    }
-  } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
-    emitError(loc)
-        << "We dont lower Lambdas using the function ConT right now.";
-    // A Lambda has only one block
-    Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
-    // For now start at the back and just find the first apply
-    ApplyOp lastApply;
-    for (auto op = block.rbegin(); op != block.rend(); op++) {
-      if (isa<ApplyOp>(*op)) {
-        lastApply = cast<ApplyOp>(*op);
-        break;
-      }
-    }
-
-    // Finding the return from the chunk of rise IR
-    rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
-
-  } else {
-    emitRemark(contValue.getLoc())
-        << "can not perform continuation "
-           "translation for "
-        << contValue.getDefiningOp()->getName().getStringRef().str()
-        << " leaving Value as is.";
-
-    rewriter.restoreInsertionPoint(oldInsertPoint);
-    return contValue;
-  }
-
-  //    std::cout << "\n 1\n" << op.literalAttr().getType().getKind() << " and
-  //    "
-  //    << RiseTypeKind::RISE_FLOAT;
-  //
-  //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_ARRAY)) {
-  //      std::cout << "\n 2 \n";
-  //
-  //    } else if (op.literalAttr().getValue()) {
-  //      rewriter.create<RiseContinuationTranslation>(
-  //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
-  //          contValue);
-  //      std::cout << "\n 3\n";
-  //
-  //    }
-  //  } else {
-  //    emitError(contValue.getLoc())
-  //        << "\nContinuation Translation of "
-  //        << contValue.getDefiningOp()->getName().getStringRef().str()
-  //        << " not "
-  //           "supported.";
-  //  }
-}
-
 /// gather all patterns
 void mlir::populateRiseToImpConversionPatterns(
     OwningRewritePatternList &patterns, MLIRContext *ctx) {
@@ -1027,8 +1150,9 @@ void ConvertRiseToImperativePass::runOnModule() {
                     ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
                     linalg::FillOp, mlir::ReturnOp, mlir::rise::LambdaOp,
                     mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
-                    mlir::rise::RiseAssignOp, mlir::rise::ApplyOp,
-                    RiseContinuationTranslation>();
+                    mlir::rise::RiseFstIntermediateOp,
+                    mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
+                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });

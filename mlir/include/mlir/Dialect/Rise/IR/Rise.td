@@ -112,6 +112,26 @@ def RiseBinaryOp : Rise_Op<"bin_op"> {
   //let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def RiseZipIntermediateOp : Rise_Op<"zip_interm"> {
+  let summary = "rise zip_interm";
+  let arguments = (ins AnyType:$lhs, AnyType:$rhs);
+  let results = (outs AnyType:$output);
+  //let parser = [{ return parse$cppClass(parser, result); }];
+}
+def RiseFstIntermediateOp : Rise_Op<"fst_interm"> {
+  let summary = "rise fst_interm";
+  let arguments = (ins AnyType:$value);
+  let results = (outs AnyType:$output);
+  //let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseSndIntermediateOp : Rise_Op<"snd_interm"> {
+  let summary = "rise snd_interm";
+  let arguments = (ins AnyType:$value);
+  let results = (outs AnyType:$output);
+  //let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def RiseAssignOp : Rise_Op<"assign"> {
   let summary = "rise assign";
   let arguments = (ins AnyType:$value, AnyType:$assignee);
