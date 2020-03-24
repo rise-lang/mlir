@@ -135,7 +135,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 
   emitRemark(riseFun.getLoc()) << "AccT finished. Starting CodeGen.";
 
-
   SmallVector<rise::RiseAssignOp, 10> assignOps;
   riseFun.walk([&assignOps](Operation *inst) {
     if (isa<RiseAssignOp>(inst)) {
@@ -147,29 +146,25 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   SmallVector<Operation *, 10> erasureList = {};
   for (rise::RiseAssignOp assign : assignOps) {
     codeGen(assign, {}, rewriter);
-    //
-    // erase intermediate operations. We remove them back to front right now,
-    // this should be alright in terms of dependencies.
-    riseFun.walk([&erasureList](Operation *inst) {
-      if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-          isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-          isa<RiseFstIntermediateOp>(inst) ||
-          isa<RiseSndIntermediateOp>(inst)) {
-        erasureList.push_back(inst);
-      }
-      return;
-    });
-    // cleanup
-
-    break;
   }
-//  size_t unneededOps = erasureList.size();
-//  for (size_t i = 0; i < unneededOps; i++) {
-//    auto op = erasureList.pop_back_val();
-//    op->dropAllUses();
-//    op->dropAllReferences();
-//    rewriter.eraseOp(op);
-//  }
+  // cleanup
+  // erase intermediate operations. We remove them back to front right now,
+  // this should be alright in terms of dependencies.
+  riseFun.walk([&erasureList](Operation *inst) {
+    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
+        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
+      erasureList.push_back(inst);
+    }
+    return;
+  });
+  size_t unneededOps = erasureList.size();
+  for (size_t i = 0; i < unneededOps; i++) {
+    auto op = erasureList.pop_back_val();
+    op->dropAllUses();
+    op->dropAllReferences();
+    rewriter.eraseOp(op);
+  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -219,15 +214,14 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
   OpBuilder::InsertPoint savedInsertionPoint = rewriter.saveInsertionPoint();
-  // If functions are applied partially i.e. appliedFun is an ApplyOp we iterate
-  // here until we reach a non ApplyOp
-  // We push the operands of the applies into a vector, as only the effectively
-  // applied Op knows what to do with them.
-  // We always leave out operand 0, as this is the applied function
-  // Operands in the Vector will be ordered such that the top most operand is
-  // the first needed to the applied function. As applies are processed
-  // bottom-up, in the case that an apply has more than 1 operand they have to
-  // be added right to left to keep order.
+  // If functions are applied partially i.e. appliedFun is an ApplyOp we
+  // iterate here until we reach a non ApplyOp We push the operands of the
+  // applies into a vector, as only the effectively applied Op knows what to
+  // do with them. We always leave out operand 0, as this is the applied
+  // function Operands in the Vector will be ordered such that the top most
+  // operand is the first needed to the applied function. As applies are
+  // processed bottom-up, in the case that an apply has more than 1 operand
+  // they have to be added right to left to keep order.
   SmallVector<Value, 10> applyOperands = SmallVector<Value, 10>();
   SmallVector<ApplyOp, 10> applyStack = SmallVector<ApplyOp, 10>();
   applyStack.push_back(apply);
@@ -313,16 +307,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         loc, lambdaCopy.getType(), lambdaCopy.getResult(),
         ValueRange{xi.getResult(), accIdx.getResult()});
 
-    // This generated idx is not consistent with the bible
-    // I just generate a 0 as index for the simplest case.
-    ArrayRef<int64_t> outShape =
-        out.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-    MemRefType outIndexOpResult =
-        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    auto out0 = rewriter.create<RiseIdxOp>(
-        loc, outIndexOpResult, acc.getResult(), lowerBound.getResult());
-
-    AccT(fxi, out0.getResult(), rewriter);
+    AccT(fxi, accIdx.getResult(), rewriter);
 
     fxi.getResult().dropAllUses();
     fxi.erase();
@@ -331,14 +316,24 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoop);
-    auto storing = rewriter.create<RiseAssignOp>(
-        appliedFun->getLoc(), accIdx.getResult(), out0.getResult());
 
-    //        auto storing =
-    //            rewriter.create<StoreOp>(reductionFun.getLoc(), lambdaResult,
-    //                                     acc.getResult(),
-    //                                     lowerBound.getResult());
-    //
+    // This generated idx is not consistent with the bible
+    // I just generate a 0 as index for the simplest case.
+    ArrayRef<int64_t> outShape =
+        out.getType().dyn_cast<MemRefType>().getShape();
+    MemRefType outIndexOpResult =
+        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+    auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
+                                           lowerBound.getResult());
+
+    RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
+        acc.getLoc(),
+        MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
+        acc.getResult(), lowerBound.getResult());
+
+    auto storing = rewriter.create<RiseAssignOp>(
+        appliedFun->getLoc(), storeAccIdx.getResult(), out0.getResult());
+
     rewriter.restoreInsertionPoint(savedInsertionPoint);
 
     return acc.getResult();
@@ -399,7 +394,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       forLoop.getInductionVar());
 
-      //      std::cout << "created idxOp with args: " << isa<Value>(xi.arg0())
+      //      std::cout << "created idxOp with args: " <<
+      //      isa<Value>(xi.arg0())
       //                << isa<Value>(xi.arg1()) << "\n"
       //                << std::flush;
       //      std::cout << "arg1: " << xi.arg1().getType().isa<IndexType>()
@@ -431,39 +427,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
-    // create Apply for Lambda now, and create other idx for the out.
-    // start AccT for Apply of Lambda and add case for Lamda
-
-    //    // This LoadOp should not be created here.
-    //        auto x1 = rewriter.create<LoadOp>(appliedFun->getLoc(), contArray,
-    //                                          forLoop.getInductionVar());
-
-    // Lower mapped function
-    //    fLambda.region().front().getArgument(0).replaceAllUsesWith(x1.getResult());
-    // search for the last apply inside the lambda and start lowering from there
-    //    ApplyOp lastApply;
-    //    for (auto op = fLambda.region().front().rbegin();
-    //         op != fLambda.region().front().rend(); op++) {
-    //      if (isa<ApplyOp>(*op)) {
-    //        lastApply = cast<ApplyOp>(*op);
-    //        break;
-    //      }
-    //    }
-    // instead have a case for Lambda.
-    // generate an Apply for the Lambda
-
-    //    Substitute(fLambda, {x1.getResult()});
-
-    // What would the argument for the storing look like?
-    // I would pass the outputArr and the "Path"? -> what exactly is the "o"?
-    //    auto lambdaResult = AccT(lastApply, {}, rewriter);
-
-    //    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
-
-    //    auto storing = rewriter.create<StoreOp>(appliedFun->getLoc(),
-    //    lambdaResult,
-    //                                            out.getDefiningOp()->getOperand(0),
-    //                                            forLoop.getInductionVar());
     return contArray;
 
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
@@ -522,14 +485,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     //                                            contSummand1);
     auto newAddOp = rewriter.create<RiseBinaryOp>(
         appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        contSummand0, contSummand1);
+        StringAttr::get("add", rewriter.getContext()), contSummand0,
+        contSummand1);
     auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
                                                     newAddOp.getResult(), out);
 
     return newAddOp;
 
   } else if (isa<MultOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Mult";
+    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
 
     auto factor0 = applyOperands.pop_back_val();
     auto factor1 = applyOperands.pop_back_val();
@@ -539,7 +503,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     auto newMultOp = rewriter.create<RiseBinaryOp>(
         appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        contFactor0, contFactor1);
+        StringAttr::get("mul", rewriter.getContext()), contFactor0,
+        contFactor1);
 
     auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
                                                     newMultOp.getResult(), out);
@@ -572,9 +537,11 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
 
     //    //  TODO: I should be doing this. But this does not work
     //        std::cout << "\nTest printing";
-    //        if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp()))
+    //        if (LiteralOp op =
+    //        dyn_cast<LiteralOp>(contValue.getDefiningOp()))
     //        {
-    //          if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
+    //          if
+    //          (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
     //          {
     //            std::cout << "\nHouston, we have a Float Literal" <<
     //            std::flush;
@@ -744,8 +711,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       auto contLhs = ConT(lhs, rewriter.getInsertionPoint(), rewriter);
       auto contRhs = ConT(rhs, rewriter.getInsertionPoint(), rewriter);
 
-      // usually this is an Array of tuples. But at the end it always has to be
-      // projected to fst or snd. For now I will keep the type as
+      // usually this is an Array of tuples. But at the end it always has to
+      // be projected to fst or snd. For now I will keep the type as
       // memref<...xf32>
       MemRefType outputType =
           MemRefType::get({4}, FloatType::getF32(rewriter.getContext()));
@@ -905,9 +872,16 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       //      std::cout << "\nCodeGen for binOp!" << std::flush;
       auto arg0 = codeGen(binOp.arg0(), {}, rewriter);
       auto arg1 = codeGen(binOp.arg1(), {}, rewriter);
-
-      return rewriter.create<AddFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
-          .getResult();
+      if (binOp.op().equals("add")) {
+        return rewriter.create<AddFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
+            .getResult();
+      } else if (binOp.op().equals("mul")) {
+        return rewriter.create<MulFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
+            .getResult();
+      } else {
+        emitError(binOp.getLoc()) << "Cannot create code for binOp:" << binOp.op();
+        return binOp.getResult();
+      }
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
       emitRemark(alloc.getLoc()) << "Codegen for alloc";
 
@@ -966,12 +940,14 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
   } else {
     // val is a BlockArg
 
-    //    std::cout << "I have reached a BlockArg, should prob. do reverse now."
+    //    std::cout << "I have reached a BlockArg, should prob. do reverse
+    //    now."
     //              << std::flush;
     //    print(path);
     //    path.push_back(val);
   }
-  //  std::cout << "have nothing proper to return in CodeGen! I am returning the
+  //  std::cout << "have nothing proper to return in CodeGen! I am returning
+  //  the
   //  "
   //               "input.\n";
   return val;
@@ -1053,7 +1029,8 @@ void mlir::rise::printUses(Value val) {
   //  auto uses = val.getUses();
   //  auto iter = uses.begin();
   //  std::cout << "first use of"
-  //            << val.getDefiningOp()->getName().getStringRef().str() << " is:
+  //            << val.getDefiningOp()->getName().getStringRef().str() << "
+  //            is:
   //            "
   //            <<
   //            val.getUses().begin().getUser()->getName().getStringRef().str()

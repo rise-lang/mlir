@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mapMapId -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=4D_MAP_ADD
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mapMapId -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=4D_MAP_ADD --dump-input=fail
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(memref<4x4x4x4xf32>)
@@ -39,11 +39,69 @@ func @mapMapId() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// 4D_MAP_ADD: Unranked Memref rank = 3 descriptor@ = {{.*}}
-// 4D_MAP_ADD: Memref base@ = {{.*}} rank = 3 offset = 0 sizes = [4, 4, 4] strides = [4, 4, 1] data =
-// TODO: define in 4D
-// 4D_MAP_ADD: [[10,10,10,10],
-// 4D_MAP_ADD: [10,10,10,10],
-// 4D_MAP_ADD: [10,10,10,10],
-// 4D_MAP_ADD: [10,10,10,10]]
-// not matching for some reason.
+// 4D_MAP_ADD: Unranked Memref rank = 4 descriptor@ = {{.*}}
+// 4D_MAP_ADD: Memref base@ = {{.*}} rank = 4 offset = 0 sizes = [4, 4, 4, 4] strides = [64, 16, 4, 1] data =
+// 4D_MAP_ADD:{{[[[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]]],
+// 4D_MAP_ADD: {{[[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]]],
+// 4D_MAP_ADD: {{[[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]]],
+// 4D_MAP_ADD: {{[[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]],
+// 4D_MAP_ADD:  {{[[10,     10,     10,     10],}}
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10],
+// 4D_MAP_ADD:   [10,     10,     10,     10]]]]

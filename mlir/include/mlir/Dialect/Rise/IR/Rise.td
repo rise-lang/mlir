@@ -98,41 +98,41 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseIdxOp : Rise_Op<"idx"> {
+def RiseIdxOp : Rise_Op<"codegen.idx"> {
   let summary = "rise idx";
   let arguments = (ins AnyMemRef:$arg0, AnyType:$arg1);
   let results = (outs AnyType:$output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseBinaryOp : Rise_Op<"bin_op"> {
+def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {
   let summary = "rise bin_op";
-  let arguments = (ins AnyType:$arg0, AnyType:$arg1);
+  let arguments = (ins StrAttr:$op, AnyType:$arg0, AnyType:$arg1);
   let results = (outs AnyType:$output);
   //let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseZipIntermediateOp : Rise_Op<"zip_interm"> {
+def RiseZipIntermediateOp : Rise_Op<"codegen.zip"> {
   let summary = "rise zip_interm";
   let arguments = (ins AnyType:$lhs, AnyType:$rhs);
   let results = (outs AnyType:$output);
   //let parser = [{ return parse$cppClass(parser, result); }];
 }
-def RiseFstIntermediateOp : Rise_Op<"fst_interm"> {
+def RiseFstIntermediateOp : Rise_Op<"codegen.fst"> {
   let summary = "rise fst_interm";
   let arguments = (ins AnyType:$value);
   let results = (outs AnyType:$output);
   //let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseSndIntermediateOp : Rise_Op<"snd_interm"> {
+def RiseSndIntermediateOp : Rise_Op<"codegen.snd"> {
   let summary = "rise snd_interm";
   let arguments = (ins AnyType:$value);
   let results = (outs AnyType:$output);
   //let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseAssignOp : Rise_Op<"assign"> {
+def RiseAssignOp : Rise_Op<"codegen.assign"> {
   let summary = "rise assign";
   let arguments = (ins AnyType:$value, AnyType:$assignee);
   //let parser = [{ return parse$cppClass(parser, result); }];
