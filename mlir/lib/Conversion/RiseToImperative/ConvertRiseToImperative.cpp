@@ -135,53 +135,41 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 
   emitRemark(riseFun.getLoc()) << "AccT finished. Starting CodeGen.";
 
-  // codegen here
-  //  std::cout << "\nmain AccT finished!" << std::flush;
 
-  // For now just find the assign ad-hoc and go from there. Later think about
-  // where to start with Codegen
-  rise::RiseAssignOp assign;
-  riseFun.walk([&assign](Operation *inst) {
+  SmallVector<rise::RiseAssignOp, 10> assignOps;
+  riseFun.walk([&assignOps](Operation *inst) {
     if (isa<RiseAssignOp>(inst)) {
-      assign = cast<RiseAssignOp>(inst);
+      assignOps.push_back(cast<RiseAssignOp>(inst));
     }
     return;
   });
-  for (auto opFor = riseFun.getBody().front().rbegin();
-       opFor != riseFun.getBody().front().rend(); opFor++) {
-    if (isa<mlir::loop::ForOp>(*opFor)) {
-      for (auto op = cast<loop::ForOp>(*opFor).getBody()->rbegin();
-           op != cast<loop::ForOp>(*opFor).getBody()->rend(); op++) {
-        if (isa<rise::RiseAssignOp>(*op)) {
-          assign = cast<rise::RiseAssignOp>(*op);
-          break;
-        }
-      }
-    }
-  }
-//
-  codeGen(assign, {}, rewriter);
-//
-  // erase intermediate operations. We remove them back to front right now,
-  // this should be alright in terms of dependencies.
-  SmallVector<Operation *, 10> erasureList = {};
-  riseFun.walk([&erasureList](Operation *inst) {
-    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
-      erasureList.push_back(inst);
-    }
-    return;
-  });
-  // cleanup
 
-  size_t unneededOps = erasureList.size();
-  for (size_t i = 0; i < unneededOps; i++) {
-    auto op = erasureList.pop_back_val();
-    op->dropAllUses();
-    op->dropAllReferences();
-    rewriter.eraseOp(op);
+  SmallVector<Operation *, 10> erasureList = {};
+  for (rise::RiseAssignOp assign : assignOps) {
+    codeGen(assign, {}, rewriter);
+    //
+    // erase intermediate operations. We remove them back to front right now,
+    // this should be alright in terms of dependencies.
+    riseFun.walk([&erasureList](Operation *inst) {
+      if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+          isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
+          isa<RiseFstIntermediateOp>(inst) ||
+          isa<RiseSndIntermediateOp>(inst)) {
+        erasureList.push_back(inst);
+      }
+      return;
+    });
+    // cleanup
+
+    break;
   }
+//  size_t unneededOps = erasureList.size();
+//  for (size_t i = 0; i < unneededOps; i++) {
+//    auto op = erasureList.pop_back_val();
+//    op->dropAllUses();
+//    op->dropAllReferences();
+//    rewriter.eraseOp(op);
+//  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -230,7 +218,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
   // lower outsideArgs first
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
-
+  OpBuilder::InsertPoint savedInsertionPoint = rewriter.saveInsertionPoint();
   // If functions are applied partially i.e. appliedFun is an ApplyOp we iterate
   // here until we reach a non ApplyOp
   // We push the operands of the applies into a vector, as only the effectively
@@ -292,13 +280,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto forLoop =
         rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
 
-    // create operations for addition inside the loop
     rewriter.setInsertionPointToStart(forLoop.getBody());
-//    auto x1 = rewriter.create<LoadOp>(reductionFun.getLoc(), acc.getResult(),
-//                                      lowerBound.getResult());
-//    auto x2 = rewriter.create<LoadOp>(reductionFun.getLoc(), contArray,
-//                                      forLoop.getInductionVar());
-
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
     if (!reductionLambda) {
       reductionLambda = expandToLambda(reductionFun, rewriter);
@@ -306,6 +288,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     RiseIdxOp xi;
 
+    // index into input
     if (contArray.getType().isa<MemRefType>()) {
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
@@ -318,10 +301,17 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
     }
 
+    // index into acc
+    RiseIdxOp accIdx = rewriter.create<RiseIdxOp>(
+        acc.getLoc(),
+        MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
+        acc.getResult(), lowerBound.getResult());
+
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
-    auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
-                                        lambdaCopy.getResult(), ValueRange{xi.getResult(), acc.getResult()});
+    auto fxi = rewriter.create<ApplyOp>(
+        loc, lambdaCopy.getType(), lambdaCopy.getResult(),
+        ValueRange{xi.getResult(), accIdx.getResult()});
 
     // This generated idx is not consistent with the bible
     // I just generate a 0 as index for the simplest case.
@@ -329,10 +319,10 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         out.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
     MemRefType outIndexOpResult =
         MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           lowerBound.getResult());
+    auto out0 = rewriter.create<RiseIdxOp>(
+        loc, outIndexOpResult, acc.getResult(), lowerBound.getResult());
 
-    AccT(fxi, outi.getResult(), rewriter);
+    AccT(fxi, out0.getResult(), rewriter);
 
     fxi.getResult().dropAllUses();
     fxi.erase();
@@ -340,18 +330,17 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
+    rewriter.setInsertionPointAfter(forLoop);
+    auto storing = rewriter.create<RiseAssignOp>(
+        appliedFun->getLoc(), accIdx.getResult(), out0.getResult());
 
+    //        auto storing =
+    //            rewriter.create<StoreOp>(reductionFun.getLoc(), lambdaResult,
+    //                                     acc.getResult(),
+    //                                     lowerBound.getResult());
+    //
+    rewriter.restoreInsertionPoint(savedInsertionPoint);
 
-//    Substitute(reductionLambda, {x1.getResult(), x2.getResult()});
-//
-//    rewriter.setInsertionPointAfter(x2);
-//    auto lambdaResult = AccT(lastApply, {}, rewriter);
-//    rewriter.setInsertionPointAfter(lambdaResult.getDefiningOp());
-//
-//    auto storing =
-//        rewriter.create<StoreOp>(reductionFun.getLoc(), lambdaResult,
-//                                 acc.getResult(), lowerBound.getResult());
-//
     return acc.getResult();
 
   } else if (isa<MapOp>(appliedFun)) {
@@ -828,8 +817,9 @@ Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
     emitError(rewriter.getUnknownLoc()) << "codegen started with nullptr!";
   }
   if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
-    emitRemark(op->getLoc()) << "Codegen for Assign";
+    rewriter.setInsertionPointAfter(assign);
 
+    emitRemark(op->getLoc()) << "Codegen for Assign";
 
     auto writeValue = codeGen(assign.value(), {}, rewriter);
     if (!writeValue)
@@ -868,6 +858,12 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       //                << std::flush;
 
       return codeGenStore(idx.arg0(), val, path, rewriter);
+    } else {
+      emitRemark(val.getLoc())
+          << "CodegenStore for "
+          << val.getDefiningOp()->getName().getStringRef().str();
+
+      generateReadAccess(path, val, storeLocation, rewriter);
     }
   } else {
     // We have reached a BlockArgument
