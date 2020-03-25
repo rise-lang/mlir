@@ -143,28 +143,28 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     return;
   });
 
-//  SmallVector<Operation *, 10> erasureList = {};
-//  for (rise::RiseAssignOp assign : assignOps) {
-//    codeGen(assign, {}, rewriter);
-//  }
-//  // cleanup
-//  // erase intermediate operations. We remove them back to front right now,
-//  // this should be alright in terms of dependencies.
-//  riseFun.walk([&erasureList](Operation *inst) {
-//    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-//        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-//        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
-//      erasureList.push_back(inst);
-//    }
-//    return;
-//  });
-//  size_t unneededOps = erasureList.size();
-//  for (size_t i = 0; i < unneededOps; i++) {
-//    auto op = erasureList.pop_back_val();
-//    op->dropAllUses();
-//    op->dropAllReferences();
-//    rewriter.eraseOp(op);
-//  }
+  SmallVector<Operation *, 10> erasureList = {};
+  for (rise::RiseAssignOp assign : assignOps) {
+    codeGen(assign, {}, rewriter);
+  }
+  // cleanup
+  // erase intermediate operations. We remove them back to front right now,
+  // this should be alright in terms of dependencies.
+  riseFun.walk([&erasureList](Operation *inst) {
+    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
+        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
+      erasureList.push_back(inst);
+    }
+    return;
+  });
+  size_t unneededOps = erasureList.size();
+  for (size_t i = 0; i < unneededOps; i++) {
+    auto op = erasureList.pop_back_val();
+    op->dropAllUses();
+    op->dropAllReferences();
+    rewriter.eraseOp(op);
+  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -292,9 +292,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       forLoop.getInductionVar());
-//      std::cout << "contArray is of MemrefType";
+      //      std::cout << "contArray is of MemrefType";
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-//      std::cout << "contArray is not of MemrefType";
+      //      std::cout << "contArray is not of MemrefType";
     }
 
     // index into acc
@@ -325,6 +325,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         out.getType().dyn_cast<MemRefType>().getShape();
     MemRefType outIndexOpResult =
         MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+    // TODO: at this point we sometimes need the 0 to access a val and sometimes
+    // not.
     auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
                                            lowerBound.getResult());
 
@@ -532,63 +534,36 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
   Location loc = contValue.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
+
+
   if (isa<LiteralOp>(contValue.getDefiningOp())) {
     emitRemark(contValue.getLoc()) << "ConT of Literal";
-
-    StringRef literalValue =
+    std::string literalValue =
         dyn_cast<LiteralOp>(contValue.getDefiningOp()).literalAttr().getValue();
 
-    //    //  TODO: I should be doing this. But this does not work
-    //        std::cout << "\nTest printing";
-    //        if (LiteralOp op =
-    //        dyn_cast<LiteralOp>(contValue.getDefiningOp()))
-    //        {
-    //          if
-    //          (op.literalAttr().getType().kindof(RiseTypeKind::RISE_FLOAT))
-    //          {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //          //  or this:
-    //          if (op.literalAttr().getType().isa<mlir::rise::Float>()) {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //          // or:
-    //          if (Float num =
-    //          op.literalAttr().getType().dyn_cast<mlir::rise::Float>()) {
-    //            std::cout << "\nHouston, we have a Float Literal" <<
-    //            std::flush;
-    //          } else {
-    //            std::cout << "\nHouston, we dont have a Float Literal" <<
-    //            std::flush;
-    //          }
-    //        }
+    emitRemark(contValue.getLoc()) << "Literal value: " << literalValue;
+
+    if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+      if (op.literalAttr().getType().isa<Float>()) {
+        auto fillOp = rewriter.create<ConstantFloatOp>(
+            loc, llvm::APFloat(std::stof(literalValue)), FloatType::getF32(rewriter.getContext()));
+
+        rewriter.restoreInsertionPoint(oldInsertPoint);
+        return fillOp.getResult();
+      } else if (op.literalAttr().getType().isa<ArrayType>()) {
+//        std::cout << "\nHouston, we have a ArrayType Literal" << std::flush;
+
+      } else {
+        emitError(op.getLoc()) << "We can not lower literals of this type right now!";
+      }
+    }
 
     // This should of course check for an int or float type
     // However the casting for some reason does not work. I'll hardcode it for
     // now
-    if (literalValue == "0") {
-      auto fillOp = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(0.0f), FloatType::getF32(rewriter.getContext()));
 
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return fillOp.getResult();
-    } else if (literalValue == "5") {
-      auto fillOp = rewriter.create<ConstantFloatOp>(
-          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-      rewriter.restoreInsertionPoint(oldInsertPoint);
-      return fillOp.getResult();
-    }
     // This should check for an array type
-    else if (literalValue == "[5,5,5,5]") {
+    if (literalValue == "[5,5,5,5]") {
       auto array = rewriter.create<AllocOp>(
           loc, MemRefType::get(ArrayRef<int64_t>{4},
                                FloatType::getF32(rewriter.getContext())));
@@ -627,6 +602,19 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       //                        FloatType::getF32(rewriter.getContext())),
       //        contValue);
     } else if (literalValue == "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]") {
+      auto array = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
+                               FloatType::getF32(rewriter.getContext())));
+      // For now just fill the array with one value
+      auto filler = rewriter.create<ConstantFloatOp>(
+          loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
+
+      rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                      filler.getResult());
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      return array.getResult();
+    } else if (literalValue == "[[2,2,2,2], [2,2,2,2], [2,2,2,2], [2,2,2,2]]") {
       auto array = rewriter.create<AllocOp>(
           loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
                                FloatType::getF32(rewriter.getContext())));
@@ -751,13 +739,13 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
           loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
                                FloatType::getF32(rewriter.getContext())));
 
-//      AccT(apply, tmpArray.getResult(), rewriter);
-//
-//      return tmpArray.getResult();
-        AccT(apply, tmpArray.getResult(), rewriter);
+      //      AccT(apply, tmpArray.getResult(), rewriter);
+      //
+      //      return tmpArray.getResult();
+      AccT(apply, tmpArray.getResult(), rewriter);
 
-        return tmpArray.getResult();
-        //What do we really want to return here?
+      return tmpArray.getResult();
+      // What do we really want to return here?
 
     } else {
       emitError(apply.getLoc()) << "Can not perform ConT for this apply!";
@@ -883,8 +871,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       Value arg1 = idx.arg1();
       path.push_back(arg1);
-//      std::cout << "pushed back!\n" << std::flush;
-//      printPath(path);
+      //      std::cout << "pushed back!\n" << std::flush;
+      //      printPath(path);
       return codeGen(idx.arg0(), path, rewriter);
 
     } else if (RiseBinaryOp binOp =
@@ -901,7 +889,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
         return rewriter.create<MulFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
             .getResult();
       } else {
-        emitError(binOp.getLoc()) << "Cannot create code for binOp:" << binOp.op();
+        emitError(binOp.getLoc())
+            << "Cannot create code for binOp:" << binOp.op();
         return binOp.getResult();
       }
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
@@ -926,7 +915,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       //      std::cout << "arg in zip: " << idx->getType().isa<IndexType>()
       //                << std::flush;
 
-//      printPath(path);
+      //      printPath(path);
       OutputPathType sndLastElem = path[path.size() - 2];
       int *fst = mpark::get_if<int>(&sndLastElem);
 
@@ -1010,6 +999,16 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
+  int rank = storeLoc.getType().dyn_cast<MemRefType>().getRank();
+  if (indexValues.size() != rank) {
+    emitRemark(storeLoc.getLoc())
+        << "Cannot generate store. Number of indices: " << indexValues.size()
+        << " does not match rank of memref: " << rank << "!";
+    emitRemark(storeLoc.getLoc())
+        << "We bail out be removing the first val. This should be a generated "
+           "0 for accessing a val of arraytype.";
+    indexValues.erase(indexValues.begin());
+  }
   ValueRange valRange = ValueRange(indexValues);
   rewriter.create<StoreOp>(storeLoc.getLoc(), storeVal, storeLoc, indexValues);
 
@@ -1023,7 +1022,7 @@ void mlir::rise::printPath(SmallVector<OutputPathType, 10> input) {
     void operator()(Value val) {
       if (val.isa<OpResult>()) {
         std::cout << "val: "
-                  << val.getDefiningOp()->getName().getStringRef().str();
+                  << val.getDefiningOp()->getName().getStringRef().str() << " ";
       } else {
         std::cout << "blockArg, ";
       }
@@ -1031,7 +1030,8 @@ void mlir::rise::printPath(SmallVector<OutputPathType, 10> input) {
     void operator()(Value *val) {
       if (val->isa<OpResult>()) {
         std::cout << "val: "
-                  << val->getDefiningOp()->getName().getStringRef().str();
+                  << val->getDefiningOp()->getName().getStringRef().str()
+                  << " ";
       } else {
         std::cout << "blockArg, ";
       }

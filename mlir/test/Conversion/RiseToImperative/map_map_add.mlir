@@ -37,4 +37,3 @@ func @mapMapId() {
 // MAP_MAP_ADD: {{[10,10,10,10],}}
 // MAP_MAP_ADD: {{[10,10,10,10],}}
 // MAP_MAP_ADD: {{[10,10,10,10]]}}
-// not matching for some reason.

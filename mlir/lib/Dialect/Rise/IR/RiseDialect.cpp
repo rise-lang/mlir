@@ -46,8 +46,7 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
       >();
   ///      Types:                              Nats:               Datatypes:
-  addTypes<FunType, DataTypeWrapper, Nat, Int, Float, Tuple,
-           ArrayType>();
+  addTypes<FunType, DataTypeWrapper, Nat, Int, Float, Tuple, ArrayType>();
   addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();
 }
 
