@@ -143,28 +143,28 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     return;
   });
 
-  SmallVector<Operation *, 10> erasureList = {};
-  for (rise::RiseAssignOp assign : assignOps) {
-    codeGen(assign, {}, rewriter);
-  }
-  // cleanup
-  // erase intermediate operations. We remove them back to front right now,
-  // this should be alright in terms of dependencies.
-  riseFun.walk([&erasureList](Operation *inst) {
-    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
-      erasureList.push_back(inst);
-    }
-    return;
-  });
-  size_t unneededOps = erasureList.size();
-  for (size_t i = 0; i < unneededOps; i++) {
-    auto op = erasureList.pop_back_val();
-    op->dropAllUses();
-    op->dropAllReferences();
-    rewriter.eraseOp(op);
-  }
+//  SmallVector<Operation *, 10> erasureList = {};
+//  for (rise::RiseAssignOp assign : assignOps) {
+//    codeGen(assign, {}, rewriter);
+//  }
+//  // cleanup
+//  // erase intermediate operations. We remove them back to front right now,
+//  // this should be alright in terms of dependencies.
+//  riseFun.walk([&erasureList](Operation *inst) {
+//    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+//        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
+//        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
+//      erasureList.push_back(inst);
+//    }
+//    return;
+//  });
+//  size_t unneededOps = erasureList.size();
+//  for (size_t i = 0; i < unneededOps; i++) {
+//    auto op = erasureList.pop_back_val();
+//    op->dropAllUses();
+//    op->dropAllReferences();
+//    rewriter.eraseOp(op);
+//  }
 
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
@@ -292,7 +292,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       forLoop.getInductionVar());
+//      std::cout << "contArray is of MemrefType";
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+//      std::cout << "contArray is not of MemrefType";
     }
 
     // index into acc
@@ -427,6 +429,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
+    rewriter.setInsertionPointAfter(forLoop);
     return contArray;
 
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
@@ -740,6 +743,22 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       auto sndInterm = rewriter.create<RiseSndIntermediateOp>(
           snd.getLoc(), FloatType::getF32(rewriter.getContext()), tupleCont);
       return sndInterm;
+    } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
+      emitRemark(contValue.getLoc()) << "ConT of Applied Map";
+
+      // introduce tmp Array of length n:
+      auto tmpArray = rewriter.create<AllocOp>(
+          loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
+                               FloatType::getF32(rewriter.getContext())));
+
+//      AccT(apply, tmpArray.getResult(), rewriter);
+//
+//      return tmpArray.getResult();
+        AccT(apply, tmpArray.getResult(), rewriter);
+
+        return tmpArray.getResult();
+        //What do we really want to return here?
+
     } else {
       emitError(apply.getLoc()) << "Can not perform ConT for this apply!";
     }
@@ -816,6 +835,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
 
       //      std::cout << "\nCodeGen for idxAcc!" << std::flush;
       path.push_back(idx.arg1());
+
       //      std::cout <<
       //      idx.arg0().getDefiningOp()->getName().getStringRef().str()
       //                <<
@@ -863,6 +883,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       Value arg1 = idx.arg1();
       path.push_back(arg1);
+//      std::cout << "pushed back!\n" << std::flush;
+//      printPath(path);
       return codeGen(idx.arg0(), path, rewriter);
 
     } else if (RiseBinaryOp binOp =
@@ -904,6 +926,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       //      std::cout << "arg in zip: " << idx->getType().isa<IndexType>()
       //                << std::flush;
 
+//      printPath(path);
       OutputPathType sndLastElem = path[path.size() - 2];
       int *fst = mpark::get_if<int>(&sndLastElem);
 
