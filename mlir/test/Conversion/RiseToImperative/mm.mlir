@@ -1,14 +1,13 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MM
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(memref<4x4xf32>)
+func @rise_fun(memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>)
 func @mm() {
 
-    rise.fun "rise_fun" (%outArg:memref<4x4xf32>) {
+    rise.fun "rise_fun" (%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf32>) {
         //Arrays
-        %A = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
-        %B = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
-
+        %A = rise.in %inA : !rise.data<array<4, array<4, float>>>
+        %B = rise.in %inB : !rise.data<array<4, array<4, float>>>
 
         %m1fun = rise.lambda (%arow) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
             %m2fun = rise.lambda (%bcol) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
@@ -54,7 +53,16 @@ func @mm() {
     }
     //prepare output Array
     %outputArray = alloc() : memref<4x4xf32>
-    call @rise_fun(%outputArray) : (memref<4x4xf32>) -> ()
+
+    %A = alloc() : memref<4x4xf32>
+    %cst_0 = constant 5.000000e+00 : f32
+    linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
+
+    %B = alloc() : memref<4x4xf32>
+    %cst_1 = constant 5.000000e+00 : f32
+    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
+
+    call @rise_fun(%outputArray, %A, %B) : (memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>) -> ()
 
     %print_me = memref_cast %outputArray : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()

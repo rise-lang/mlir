@@ -139,19 +139,19 @@ def RiseAssignOp : Rise_Op<"codegen.assign"> {
 }
 
 
-def RiseOutOp : Rise_Op<"out"> {
-  let summary = "rise out";
-  let arguments = (ins AnyType:$input);
-  let results = (outs DataType:$output);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-// def RiseInOp : Rise_Op<"in", [SingleBlockImplicitTerminator<"InOp">]> {
-//  let summary = "rise in";
-//  let arguments = (ins MemrefType:$input);
+//def RiseOutOp : Rise_Op<"out"> {
+//  let summary = "rise out";
+//  let arguments = (ins AnyType:$input);
 //  let results = (outs DataType:$output);
 //  let parser = [{ return parse$cppClass(parser, result); }];
 //}
+
+def RiseInOp : Rise_Op<"in"> {
+  let summary = "rise in";
+  let arguments = (ins AnyMemRef:$input);
+  let results = (outs DataTypeWrapper:$output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
 
 def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
   let summary = "literal";

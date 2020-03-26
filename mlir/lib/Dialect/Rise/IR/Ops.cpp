@@ -61,16 +61,31 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseLParen())
     return failure();
 
+  // Not working correct
+  //  if (parser.parseKeyword("out:"))
+  //    return failure();
+
+  // parsing output arg
   if (parser.parseRegionArgument(output))
     return failure();
-
   if (parser.parseColonType(outputType))
     return failure();
 
   arguments.push_back(output);
   argumentTypes.push_back(outputType);
 
-  // TODO: parse input args
+  // parsing input args
+  int i = 1;
+  while (succeeded(parser.parseOptionalComma())) {
+    OpAsmParser::OperandType input;
+    Type inputType;
+    if (parser.parseRegionArgument(input) || parser.parseColonType(inputType))
+      return failure();
+
+    arguments.push_back(input);
+    argumentTypes.push_back(inputType);
+    i++;
+  }
 
   if (parser.parseRParen())
     return failure();
@@ -84,9 +99,9 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// RiseOutOp
+// RiseInOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 
@@ -96,14 +111,20 @@ ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
   parser.resolveOperandUnsafe(operand, result.operands);
   // parse Memref and create one of our types for it.
 
-  //  DataType riseType =
+  DataTypeWrapper riseType;
+  if (parser.parseColonType(riseType))
+    return failure();
+
+
+//  DataTypeWrapper riseType = DataTypeWrapper::get(
+//      builder.getContext(),
+//      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
+//                     Float::get(builder.getContext())));
+  //  DataType riseType = ArrayType::get(
+  //      builder.getContext(), Nat::get(builder.getContext(), 4),
   //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
   //      4),
-  //                     Float::get(builder.getContext()));
-  DataType riseType = ArrayType::get(
-      builder.getContext(), Nat::get(builder.getContext(), 4),
-      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(), 4),
-                     Float::get(builder.getContext())));
+  //                     Float::get(builder.getContext())));
   result.addTypes(riseType);
   return success();
 }
@@ -232,8 +253,8 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
   // TODO: we dont want to have to explicitly give our type
   /// resolve operand adds it to the operands of this operation.
   /// I have not found another way to add it, yet
-  /// result.addOperands expects a mlir::Value, which has to contain the Type of
-  /// the Operand already, which I don't know here
+  /// result.addOperands expects a mlir::Value, which has to contain the Type
+  /// of the Operand already, which I don't know here
   if (!simplified) {
     if (parser.resolveOperand(funOperand, funType, result.operands))
       failure();
@@ -558,4 +579,4 @@ ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
 } // end namespace rise
-} // end namespace mlir
+} // namespace mlir

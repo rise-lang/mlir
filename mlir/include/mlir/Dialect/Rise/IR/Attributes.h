@@ -103,4 +103,4 @@ public:
 } // namespace rise
 }
 #endif // MLIR_RISE_ATTRIBUTES_H
-;      // namespace mlir
+       // namespace mlir
