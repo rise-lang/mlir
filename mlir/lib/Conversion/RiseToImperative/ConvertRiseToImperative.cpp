@@ -94,9 +94,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     inputTypes.push_back(blockArg.getType());
   }
   auto riseFun = rewriter.create<FuncOp>(
-      loc, riseFunOp.name(),
-      FunctionType::get(inputTypes, {},
-                        context),
+      loc, riseFunOp.name(), FunctionType::get(inputTypes, {}, context),
       ArrayRef<NamedAttribute>{});
 
   rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
@@ -105,14 +103,14 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   // The rise module can only have one block.
   Block &block = riseRegion.front();
 
-//  RiseInOp inOp;
-//  for (auto op = block.begin(); op != block.end(); op++) {
-//    if (isa<RiseInOp>(*op)) {
-//      inOp = cast<RiseInOp>(*op);
-//      break;
-//    }
-//  }
-  riseFunOp.walk([](Operation *op){
+  //  RiseInOp inOp;
+  //  for (auto op = block.begin(); op != block.end(); op++) {
+  //    if (isa<RiseInOp>(*op)) {
+  //      inOp = cast<RiseInOp>(*op);
+  //      break;
+  //    }
+  //  }
+  riseFunOp.walk([](Operation *op) {
     if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
       inOp.output().replaceAllUsesWith(inOp.input());
     }
@@ -156,15 +154,15 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     return;
   });
 
-//  // CodeGen
+  // CodeGen
   SmallVector<Operation *, 10> erasureList = {};
   for (rise::RiseAssignOp assign : assignOps) {
     codeGen(assign, {}, rewriter);
   }
 
-////   cleanup
-////   erase intermediate operations. We remove them back to front right now,
-////   this should be alright in terms of dependencies.
+  //   cleanup
+  //   erase intermediate operations. We remove them back to front right now,
+  //   this should be alright in terms of dependencies.
   riseFun.walk([&erasureList](Operation *inst) {
     if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
         isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
@@ -186,9 +184,8 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
       rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
 
   // We don't need the riseModule anymore
-//  riseFunOp.region().front().getArgument(0).dropAllUses();
-//  riseFunOp.region().front().getArgument(1).dropAllUses();
-
+  //  riseFunOp.region().front().getArgument(0).dropAllUses();
+  //  riseFunOp.region().front().getArgument(1).dropAllUses();
 
   riseFunOp.walk([&rewriter](Operation *inst) {
     if (!inst->use_empty()) {
@@ -197,7 +194,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
       //                << "\n"
       //                << std::flush;
 
-//            inst->dropAllDefinedValueUses();
+      //            inst->dropAllDefinedValueUses();
       inst->getResult(0).dropAllUses();
       //        printUses(inst->getResult(0));
 
@@ -210,7 +207,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     }
     return;
   });
-//
+  //
   riseFunOp.getOperation()->dropAllUses();
   riseFunOp.getOperation()->dropAllReferences();
   rewriter.eraseOp(riseFunOp);
@@ -549,7 +546,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
   Location loc = contValue.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
-
   if (contValue.isa<OpResult>()) {
     if (isa<LiteralOp>(contValue.getDefiningOp())) {
       emitRemark(contValue.getLoc()) << "ConT of Literal";
@@ -567,132 +563,48 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
 
           rewriter.restoreInsertionPoint(oldInsertPoint);
           return fillOp.getResult();
-        } else if (op.literalAttr().getType().isa<ArrayType>()) {
-          //        std::cout << "\nHouston, we have a ArrayType Literal" << std::flush;
+        } else if (ArrayType arrayType =
+                       op.literalAttr().getType().dyn_cast<ArrayType>()) {
+          SmallVector<int64_t, 4> shape = {};
 
+          shape.push_back(arrayType.getSize().getIntValue());
+          while (arrayType.getElementType().isa<ArrayType>()) {
+            arrayType = arrayType.getElementType().dyn_cast<ArrayType>();
+            shape.push_back(arrayType.getSize().getIntValue());
+          }
+
+          Type memrefElementType;
+          if (arrayType.getElementType().isa<Float>()) {
+            memrefElementType = FloatType::getF32(rewriter.getContext());
+          } else if (arrayType.getElementType().isa<Int>()) {
+            memrefElementType = IntegerType::get(32, rewriter.getContext());
+          }
+
+          auto array = rewriter.create<AllocOp>(
+              loc, MemRefType::get(shape, memrefElementType));
+
+          // For now just fill the array with one value
+          StringRef litStr = literalValue;
+          litStr = litStr.substr(0, litStr.find_first_of(','));
+          litStr = litStr.trim('[');
+          litStr = litStr.trim(']');
+          float fillValue = std::stof(litStr.str() + ".0f");
+
+          auto filler = rewriter.create<ConstantFloatOp>(
+              loc, llvm::APFloat(fillValue),
+              FloatType::getF32(rewriter.getContext()));
+
+          rewriter.create<linalg::FillOp>(loc, array.getResult(),
+                                          filler.getResult());
+          //        std::cout << "\nHouston, we have a ArrayType Literal" <<
+          //        std::flush;
+          rewriter.restoreInsertionPoint(oldInsertPoint);
+          return array.getResult();
         } else {
           emitError(op.getLoc())
               << "We can not lower literals of this type right now!";
         }
       }
-
-      // This should of course check for an int or float type
-      // However the casting for some reason does not work. I'll hardcode it for
-      // now
-
-      // This should check for an array type
-      if (literalValue == "[5,5,5,5]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-
-        //    return rewriter.create<RiseContinuationTranslation>(
-        //        contValue.getLoc(),
-        //        MemRefType::get(ArrayRef<int64_t>{32},
-        //                        FloatType::getF32(rewriter.getContext())),
-        //        contValue);
-      } else if (literalValue == "[10,10,10,10]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(10.0f),
-            FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-
-        //    return rewriter.create<RiseContinuationTranslation>(
-        //        contValue.getLoc(),
-        //        MemRefType::get(ArrayRef<int64_t>{32},
-        //                        FloatType::getF32(rewriter.getContext())),
-        //        contValue);
-      } else if (literalValue ==
-                 "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-      } else if (literalValue ==
-                 "[[2,2,2,2], [2,2,2,2], [2,2,2,2], [2,2,2,2]]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4, 4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-      } else if (literalValue ==
-                 "[[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5]]]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4, 4, 4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-      } else if (literalValue ==
-                 "[[[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
-                 "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
-                 "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], [[5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5], [5,5,5,5]]], [[[5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5], [5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], "
-                 "[5,5,5,5]], [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]], "
-                 "[[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]]]") {
-        auto array = rewriter.create<AllocOp>(
-            loc, MemRefType::get(ArrayRef<int64_t>{4, 4, 4, 4},
-                                 FloatType::getF32(rewriter.getContext())));
-        // For now just fill the array with one value
-        auto filler = rewriter.create<ConstantFloatOp>(
-            loc, llvm::APFloat(5.0f), FloatType::getF32(rewriter.getContext()));
-
-        rewriter.create<linalg::FillOp>(loc, array.getResult(),
-                                        filler.getResult());
-
-        rewriter.restoreInsertionPoint(oldInsertPoint);
-        return array.getResult();
-      }
-
     } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
       emitRemark(contValue.getLoc()) << "ConT of Lambda";
 
@@ -1015,7 +927,7 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
                                     Value storeVal, Value storeLoc,
                                     PatternRewriter &rewriter) {
   //  std::cout << "reversing Path for reading\n" << std::flush;
-//  printPath(path);
+  //  printPath(path);
 
   int index;
   SmallVector<Value, 10> indexValues = {};
