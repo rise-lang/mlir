@@ -288,14 +288,14 @@ def AddOp : Rise_Op<"add", [NoSideEffect]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def MultOp : Rise_Op<"mult", [NoSideEffect]> {
-  let summary = "rise mult operation";
+def MulOp : Rise_Op<"mul", [NoSideEffect]> {
+  let summary = "rise mul operation";
   let description =
       "This operation returns a function which expects two arguments of type "
       "t and returns their product of type t. We will experiment with adopting "
       "the standard arithmetics operations.";
   let arguments = (ins DataTypeAttr : $t);
-  let results = (outs FunType : $multFun);
+  let results = (outs FunType : $mulFun);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

@@ -6,8 +6,11 @@ func @mm() {
 
     rise.fun "rise_fun" (%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf32>) {
         //Arrays
-        %A = rise.in %inA : !rise.data<array<4, array<4, float>>>
-        %B = rise.in %inB : !rise.data<array<4, array<4, float>>>
+//        %A = rise.in %inA : !rise.data<array<4, array<4, float>>>
+//        %B = rise.in %inB : !rise.data<array<4, array<4, float>>>
+
+        %A = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
+        %B = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
 
         %m1fun = rise.lambda (%arow) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
             %m2fun = rise.lambda (%bcol) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
@@ -24,7 +27,7 @@ func @mm() {
                        %fst = rise.apply %fstFun, %floatTuple
                       %snd = rise.apply %sndFun, %floatTuple
 
-                      %mulFun = rise.mult #rise.float
+                      %mulFun = rise.mul #rise.float
                       %result = rise.apply %mulFun, %snd, %fst
 
                      rise.return %result : !rise.data<float>

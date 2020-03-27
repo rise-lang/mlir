@@ -7,8 +7,8 @@ func @simple_dot() {
     rise.fun "rise_fun" (%outArg:memref<1xf32>) {
 
         //Arrays
-        %array0 = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
-        %array1 = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
+        %array0 = rise.literal #rise.lit<array<4, float, [5,5,5,5]>>
+        %array1 = rise.literal #rise.lit<array<4, float, [5,5,5,5]>>
 
         //Zipping
         %zipFun = rise.zip #rise.nat<4> #rise.float #rise.float
@@ -23,7 +23,7 @@ func @simple_dot() {
                %fst = rise.apply %fstFun, %floatTuple
               %snd = rise.apply %sndFun, %floatTuple
 
-              %mulFun = rise.mult #rise.float
+              %mulFun = rise.mul #rise.float
               %result = rise.apply %mulFun, %snd, %fst
 
              rise.return %result : !rise.data<float>

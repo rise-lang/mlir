@@ -8,7 +8,7 @@ func @array_times_5() {
         %array = rise.literal #rise.lit<array<4, !rise.float, [5,5,5,5]>>
         %times5 = rise.lambda (%in) : !rise.fun<data<float> -> data<float>> {
             %cst5 = rise.literal #rise.lit<float<5>>
-            %mulFun = rise.mult #rise.float
+            %mulFun = rise.mul #rise.float
             %multiplied = rise.apply %mulFun, %in, %cst5
             rise.return %multiplied : !rise.data<float>
         }

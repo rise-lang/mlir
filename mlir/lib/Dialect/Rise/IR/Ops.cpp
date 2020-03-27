@@ -535,7 +535,7 @@ ParseResult parseAddOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// mult: {t : data} → t → t → t
-ParseResult parseMultOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseMulOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr t;
 

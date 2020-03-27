@@ -509,7 +509,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     return newAddOp;
 
-  } else if (isa<MultOp>(appliedFun)) {
+  } else if (isa<MulOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Mul";
 
     auto factor0 = applyOperands.pop_back_val();
@@ -518,15 +518,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
     auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
 
-    auto newMultOp = rewriter.create<RiseBinaryOp>(
+    auto newMulOp = rewriter.create<RiseBinaryOp>(
         appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
         StringAttr::get("mul", rewriter.getContext()), contFactor0,
         contFactor1);
 
     auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
-                                                    newMultOp.getResult(), out);
+                                                    newMulOp.getResult(), out);
 
-    return newMultOp;
+    return newMulOp;
   } else if (isa<ApplyOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Apply";
 
@@ -1068,7 +1068,7 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
 
     return newLambda;
 
-  } else if (isa<MultOp>(value.getDefiningOp())) {
+  } else if (isa<MulOp>(value.getDefiningOp())) {
     emitRemark(value.getLoc()) << "expanding mul to lambda";
 
     LambdaOp newLambda;
@@ -1087,10 +1087,10 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
     argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
     entry->addArguments(argumentTypes);
 
-    appliedOp = rewriter.create<MultOp>(
+    appliedOp = rewriter.create<MulOp>(
         value.getLoc(), funType,
         DataTypeAttr::get(rewriter.getContext(),
-                          cast<MultOp>(value.getDefiningOp()).t()));
+                          cast<MulOp>(value.getDefiningOp()).t()));
 
     ApplyOp applyOp = rewriter.create<ApplyOp>(
         value.getLoc(), funType, appliedOp, entry->getArguments());
