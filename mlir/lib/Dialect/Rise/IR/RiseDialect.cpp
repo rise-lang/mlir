@@ -273,7 +273,7 @@ mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
   Location loc = parser.getEncodedSourceLoc(parser.getCurrentLocation());
   // we only have RiseTypeAttribute
   if (attrString.startswith("lit<")) {
-    return parseLiteralAttribute(attrString, loc);
+    return parseLiteralAttribute(parser, loc);
   }
   if (attrString.startswith("array") || attrString.startswith("tuple") ||
       attrString.startswith("int") || attrString.startswith("float")) {
@@ -328,17 +328,106 @@ DataType static getArrayStructure(mlir::MLIRContext *context,
   }
 }
 
+///// returns shape x values
+//std::pair<SmallVector<int, 10>, StringRef> static parseValue(
+//    StringRef valueString) {
+////  if (!valueString.consume_front("[") || !valueString.consume_back("]")) {
+////    // only values left.
+////    SmallVector<StringRef, 4> valueStrings;
+////    valueString.split(valueStrings, ',');
+////    return std::pair<SmallVector<int, 10>, StringRef>({(int)valueStrings.size()}, valueString);
+////  }
+////
+////  auto lowerStructure = parseValue(valueString);
+////  lowerStructure.first.push_back()
+////  return std::pair<SmallVector<int, 10>, StringRef>(lowerStructure.first.
+////  //recursion
+//  int shapei = 0;
+//  SmallVector<int, 10> shape = {};
+//
+////  for (int i = 0; i < valueString.size(); i++) {
+////    if (valueString[i] == '[') {shape.push_back(1); shapei++;}
+////    if (valueString[i] == ']')
+////
+////  }
+//}
+
 /// This version still uses a syntax which couples type and value tightly
 /// New proposed structure: separate type from the literal value more strictly.
 ///         rise.literal #rise.lit<int, 42>
 ///         rise.literal #rise.lit<array<2, array<2, int>>, [[1,2],[3,4]]
-LiteralAttr RiseDialect::parseLiteralAttribute(StringRef attrString,
-                                               mlir::Location loc) const {
 
+/// Format: #rise.lit<1>            literal with int value
+///         #rise.lit<1, int>       literal with int value
+///         #rise.lit<1.0f>         literal with float value
+///         #rise.lit<1, float>     literal with float value
+///         #rise.lit<1.0f, float>  literal with float value
+
+LiteralAttr RiseDialect::parseLiteralAttribute(DialectAsmParser &parser,
+                                               mlir::Location loc) const {
+  StringRef attrString = parser.getFullSymbolSpec();
   if (!attrString.consume_front("lit<") || !attrString.consume_back(">")) {
     emitError(loc, "#rise.lit delimiter <...> mismatch");
     return nullptr;
   }
+
+
+
+
+  StringRef valueString;
+  DataType type;
+  // Check if optional explicit type is given at the end
+  if (attrString.contains("array")) {
+    auto stringPair = attrString.split("array");
+    valueString = stringPair.first;
+    type = parseDataType("array" + stringPair.second.str(), loc);
+  } else if (attrString.contains("int")) {
+    auto stringPair = attrString.split("int");
+    valueString = stringPair.first;
+    type = Int::get(getContext());
+  } else if (attrString.contains("float")) {
+    auto stringPair = attrString.split("int");
+    valueString = stringPair.first;
+    type = Int::get(getContext());
+  }
+  valueString = valueString.trim(' ');
+  valueString = valueString.trim(',');
+//  std::cout << "literalValue:" << valueString.str() << "\n" << std::flush;
+
+
+
+  //Assume we have an Array:
+
+
+
+
+////  // TODO: Work on valueString
+////  int shapei = 0;
+////  SmallVector<int, 10> shape = {};
+////  DataType elementType;
+////
+////  for (int i = 0; i < valueString.size(); i++) {
+////    if (valueString[i] == '[') {
+////      shape.push_back(1);
+////      shapei++;
+////    }
+////    if (valueString[i] == ']'){}
+////  }
+
+
+
+
+
+
+
+
+
+//  auto parsedStructure = parseValue(valueString);
+//
+//  SmallVector<int, 10> shape = parsedStructure.first;
+//  StringRef values = parsedStructure.second;
+  // construct
+
   /// format:
   ///     #rise.lit<int<int_value>>
   ///     #rise.lit<int<42>>
