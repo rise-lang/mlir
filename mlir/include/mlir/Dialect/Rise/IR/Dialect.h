@@ -52,7 +52,7 @@ public:
   /// Hook for custom parsing of Attributes
   mlir::Attribute parseAttribute(DialectAsmParser &parser,
                                  Type type) const override;
-  LiteralAttr parseLiteralAttribute(StringRef attrString,
+  LiteralAttr parseLiteralAttribute(DialectAsmParser &parser,
                                     mlir::Location loc) const;
   DataTypeAttr parseDataTypeAttribute(StringRef attrString,
                                       mlir::Location loc) const;
