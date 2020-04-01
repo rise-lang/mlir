@@ -34,6 +34,8 @@
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 #include <algorithm>
+#include <iostream>
+#include <mlir/Dialect/Rise/IR/Types.h>
 using namespace mlir;
 using llvm::MemoryBuffer;
 using llvm::SMLoc;
@@ -346,6 +348,12 @@ public:
                          function_ref<ParseResult(bool)> parseElement,
                          OpAsmParser::Delimiter delimiter);
 
+  //===--------------------------------------------------------------------===//
+  // RISE Parsing
+  //===--------------------------------------------------------------------===//
+
+  ArrayRef<int64_t> parseRiseArrayShape();
+
 private:
   /// The Parser is subclassed and reinstantiated.  Do not add additional
   /// non-trivial state here, add it to the ParserState class.
@@ -655,6 +663,14 @@ public:
   /// Parse an integer set instance into 'set'.
   ParseResult printIntegerSet(IntegerSet &set) override {
     return parser.parseIntegerSetReference(set);
+  }
+
+  //===----------------------------------------------------------------------===//
+  // RISE parsing.
+  //===----------------------------------------------------------------------===//
+
+  ArrayRef<int64_t> parseRiseArrayShape() override {
+    return parser.parseRiseArrayShape();
   }
 
   //===--------------------------------------------------------------------===//
@@ -2107,6 +2123,7 @@ ParseResult TensorLiteralParser::parseList(SmallVectorImpl<int64_t> &dims) {
   // Return the sublists' dimensions with 'size' prepended.
   dims.clear();
   dims.push_back(size);
+  std::cout << "size pushed back!: " << size << "\n" << std::flush;
   dims.append(newDims.begin(), newDims.end());
   return success();
 }
@@ -2229,6 +2246,18 @@ Attribute Parser::parseSparseElementsAttr(Type attrType) {
 
   // Build the sparse elements attribute by the indices and values.
   return SparseElementsAttr::get(type, indices, values);
+}
+
+//===----------------------------------------------------------------------===//
+// RISE parsing.
+//===----------------------------------------------------------------------===//
+
+ArrayRef<int64_t> Parser::parseRiseArrayShape() {
+  TensorLiteralParser arrayParser(*this);
+  if (arrayParser.parse())
+    return {};
+
+  return arrayParser.getShape();
 }
 
 //===----------------------------------------------------------------------===//
@@ -3532,19 +3561,17 @@ Value OperationParser::resolveSSAUse(SSAUseInfo useInfo, Type type) {
   return result;
 }
 
-
 /// Given an unbound reference to an SSA value and its type, return the value
 /// it specifies.  This returns null on failure.
 Value OperationParser::resolveSSAUseUnsafe(SSAUseInfo useInfo) {
-    auto &entries = getSSAValueEntry(useInfo.name);
+  auto &entries = getSSAValueEntry(useInfo.name);
 
-    // If we have already seen a value of this name, return it.
-    if (useInfo.number < entries.size() && entries[useInfo.number].first) {
-        auto result = entries[useInfo.number].first;
-        return result;
-    }
+  // If we have already seen a value of this name, return it.
+  if (useInfo.number < entries.size() && entries[useInfo.number].first) {
+    auto result = entries[useInfo.number].first;
+    return result;
+  }
 }
-
 
 /// Parse an SSA use with an associated type.
 ///
@@ -4245,16 +4272,15 @@ public:
 
   /// Resolve an operand to an SSA value, emitting an error on failure.
   ParseResult resolveOperandUnsafe(const OperandType &operand,
-                            SmallVectorImpl<Value> &result) override {
-      OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
-                                                   operand.location};
-      if (auto value = parser.resolveSSAUseUnsafe(operandInfo)) {
-          result.push_back(value);
-          return success();
-      }
-      return failure();
+                                   SmallVectorImpl<Value> &result) override {
+    OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
+                                               operand.location};
+    if (auto value = parser.resolveSSAUseUnsafe(operandInfo)) {
+      result.push_back(value);
+      return success();
+    }
+    return failure();
   }
-
 
   /// Parse an AffineMap of SSA ids.
   ParseResult parseAffineMapOfSSAIds(SmallVectorImpl<OperandType> &operands,

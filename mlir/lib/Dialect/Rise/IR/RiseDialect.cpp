@@ -21,6 +21,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include <iostream>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -329,14 +330,14 @@ DataType static getArrayStructure(mlir::MLIRContext *context,
 }
 
 ///// returns shape x values
-//std::pair<SmallVector<int, 10>, StringRef> static parseValue(
+// std::pair<SmallVector<int, 10>, StringRef> static parseValue(
 //    StringRef valueString) {
 ////  if (!valueString.consume_front("[") || !valueString.consume_back("]")) {
 ////    // only values left.
 ////    SmallVector<StringRef, 4> valueStrings;
 ////    valueString.split(valueStrings, ',');
-////    return std::pair<SmallVector<int, 10>, StringRef>({(int)valueStrings.size()}, valueString);
-////  }
+////    return std::pair<SmallVector<int, 10>,
+/// StringRef>({(int)valueStrings.size()}, valueString); /  }
 ////
 ////  auto lowerStructure = parseValue(valueString);
 ////  lowerStructure.first.push_back()
@@ -365,67 +366,73 @@ DataType static getArrayStructure(mlir::MLIRContext *context,
 
 LiteralAttr RiseDialect::parseLiteralAttribute(DialectAsmParser &parser,
                                                mlir::Location loc) const {
+//  if (parser.parseKeyword("lit",
+//                          "Expected keyword 'lit' in Literal Attribute!") ||
+//      parser.parseLess())
+//    return nullptr;
+
   StringRef attrString = parser.getFullSymbolSpec();
+//  std::cout << "everything: " << attrString.str() << "\n" << std::flush;
   if (!attrString.consume_front("lit<") || !attrString.consume_back(">")) {
     emitError(loc, "#rise.lit delimiter <...> mismatch");
     return nullptr;
   }
-
-
-
-
-  StringRef valueString;
-  DataType type;
-  // Check if optional explicit type is given at the end
-  if (attrString.contains("array")) {
-    auto stringPair = attrString.split("array");
-    valueString = stringPair.first;
-    type = parseDataType("array" + stringPair.second.str(), loc);
-  } else if (attrString.contains("int")) {
-    auto stringPair = attrString.split("int");
-    valueString = stringPair.first;
-    type = Int::get(getContext());
-  } else if (attrString.contains("float")) {
-    auto stringPair = attrString.split("int");
-    valueString = stringPair.first;
-    type = Int::get(getContext());
-  }
-  valueString = valueString.trim(' ');
-  valueString = valueString.trim(',');
-//  std::cout << "literalValue:" << valueString.str() << "\n" << std::flush;
-
-
-
-  //Assume we have an Array:
-
-
-
-
-////  // TODO: Work on valueString
-////  int shapei = 0;
-////  SmallVector<int, 10> shape = {};
-////  DataType elementType;
-////
-////  for (int i = 0; i < valueString.size(); i++) {
-////    if (valueString[i] == '[') {
-////      shape.push_back(1);
-////      shapei++;
-////    }
-////    if (valueString[i] == ']'){}
-////  }
-
-
-
-
-
-
-
-
-
-//  auto parsedStructure = parseValue(valueString);
 //
-//  SmallVector<int, 10> shape = parsedStructure.first;
-//  StringRef values = parsedStructure.second;
+/// Beginning of improving to look of literals:
+// Will continue when the paper stuff is done.
+//
+//  StringRef valueString = attrString;
+//  DataType type;
+//  // Check if optional explicit type is given at the end
+//  if (attrString.contains("array")) {
+//    auto stringPair = attrString.split("array");
+//    valueString = stringPair.first;
+//    type = parseDataType("array" + stringPair.second.str(), loc);
+//  } else if (attrString.contains("int")) {
+//    auto stringPair = attrString.split("int");
+//    valueString = stringPair.first;
+//    type = Int::get(getContext());
+//  } else if (attrString.contains("float")) {
+//    auto stringPair = attrString.split("int");
+//    valueString = stringPair.first;
+//    type = Int::get(getContext());
+//  }
+//  valueString = valueString.trim(' ');
+//  valueString = valueString.trim(',');
+//  std::cout << "literalValue:" << valueString.str() << "\n" << std::flush;
+//
+//  // Assume we have an Array:
+//  ArrayRef<int64_t> shape = parser.parseRiseArrayShape();
+//
+//  std::cout << "y0:" << shape.back();
+//  for (int64_t shapeeuo : shape) {
+//    std::cout << "chapeau:" << shapeeuo << std::flush;
+//  }
+//
+//  for (int i = 0; i < shape.size(); i++) {
+//    std::cout << "chapeaus:" << shape[i] << std::flush;
+//  }
+//
+//  std::cout << "\n" << std::flush;
+
+
+  ////  // TODO: Work on valueString
+  ////  int shapei = 0;
+  ////  SmallVector<int, 10> shape = {};
+  ////  DataType elementType;
+  ////
+  ////  for (int i = 0; i < valueString.size(); i++) {
+  ////    if (valueString[i] == '[') {
+  ////      shape.push_back(1);
+  ////      shapei++;
+  ////    }
+  ////    if (valueString[i] == ']'){}
+  ////  }
+
+  //  auto parsedStructure = parseValue(valueString);
+  //
+  //  SmallVector<int, 10> shape = parsedStructure.first;
+  //  StringRef values = parsedStructure.second;
   // construct
 
   /// format:
