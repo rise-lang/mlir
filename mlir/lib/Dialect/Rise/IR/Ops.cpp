@@ -318,7 +318,43 @@ ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// map: {n : nat} → {s t : data} → (s → t ) → n.s → n.t
-ParseResult parseMapOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+
+  NatAttr n;
+  DataTypeAttr s, t;
+  result.setOperandListToResizable();
+
+  // length of array
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  // input array element type
+  if (parser.parseAttribute(s, "s", result.attributes))
+    failure();
+
+  // output array element type
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(FunType::get(
+      builder.getContext(),
+      FunType::get(builder.getContext(),
+                   DataTypeWrapper::get(builder.getContext(), s.getValue()),
+                   DataTypeWrapper::get(builder.getContext(), t.getValue())),
+      FunType::get(
+          builder.getContext(),
+          DataTypeWrapper::get(
+              builder.getContext(),
+              ArrayType::get(builder.getContext(), n.getValue(), s.getValue())),
+          DataTypeWrapper::get(builder.getContext(),
+                               ArrayType::get(builder.getContext(),
+                                              n.getValue(), t.getValue())))));
+  return success();
+}
+
+/// map: {n : nat} → {s t : data} → (s → t ) → n.s → n.t
+ParseResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;
@@ -358,7 +394,7 @@ ParseResult parseMapOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// reduce: {n : nat} → {s t : data} → (s → t → t ) → t → n.s → t
-ParseResult parseReduceOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;

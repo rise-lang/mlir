@@ -251,8 +251,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
   }
 
   Location loc = apply.getLoc();
-  if (isa<ReduceOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Reduce";
+  if (isa<ReduceSeqOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of ReduceSeq";
 
     auto n = appliedFun->getAttrOfType<NatAttr>("n");
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
@@ -278,13 +278,20 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     rewriter.create<linalg::FillOp>(initializer.getLoc(), acc.getResult(),
                                     contInit);
 
-    auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
-    auto upperBound = rewriter.create<ConstantIndexOp>(
-        appliedFun->getLoc(), n.getValue().getIntValue());
-    auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+    auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
+
+    //    auto lowerBound =
+    //    rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0); auto
+    //    upperBound = rewriter.create<ConstantIndexOp>(
+    //        appliedFun->getLoc(), n.getValue().getIntValue());
+    //    auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+    //
+    //    auto forLoop =
+    //        rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound,
+    //        step);
 
     auto forLoop =
-        rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+        rewriter.create<AffineForOp>(loc, 0, n.getValue().getIntValue(), 1);
 
     rewriter.setInsertionPointToStart(forLoop.getBody());
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
@@ -313,7 +320,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     RiseIdxOp accIdx = rewriter.create<RiseIdxOp>(
         acc.getLoc(),
         MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
-        acc.getResult(), lowerBound.getResult());
+        acc.getResult(), cst_zero.getResult());
 
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
@@ -340,12 +347,12 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     // TODO: at this point we sometimes need the 0 to access a val and sometimes
     // not.
     auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           lowerBound.getResult());
+                                           cst_zero.getResult());
 
     RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
         acc.getLoc(),
         MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
-        acc.getResult(), lowerBound.getResult());
+        acc.getResult(), cst_zero.getResult());
 
     auto storing = rewriter.create<RiseAssignOp>(
         appliedFun->getLoc(), storeAccIdx.getResult(), out0.getResult());
@@ -354,8 +361,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     return acc.getResult();
 
-  } else if (isa<MapOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Map";
+  } else if (isa<MapSeqOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of MapSeq";
 
     //     For now we treat all maps as mapSeqs
     auto n = appliedFun->getAttrOfType<NatAttr>("n");
@@ -373,8 +380,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         appliedFun->getLoc(), n.getValue().getIntValue());
     auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
-    auto forLoop =
-        rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+    auto forLoop = rewriter.create<mlir::loop::ForOp>(
+        appliedFun->getLoc(), lowerBound, upperBound, step);
 
     rewriter.setInsertionPointToStart(forLoop.getBody());
 
@@ -383,24 +390,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
       fLambda = expandToLambda(f, rewriter);
     }
 
-    // TODO: create a custom builder (or create?) for RiseIdxOp and call this
-    // one here, so I dont have to give the resulting type.
-    //    std::cout << "still here! \n" << std::flush;
-
-    // We could also already have an idx here.
-    // put this into its own functiono
-
     RiseIdxOp xi;
-
     if (contArray.getType().isa<MemRefType>()) {
-      //      std::cout << "got a memref! Shape: \n"
-      //                <<
-      //                contArray.getType().dyn_cast<MemRefType>().getShape().size()
-      //                << ","
-      //                <<
-      //                contArray.getType().dyn_cast<MemRefType>().getShape()[0]
-      //                << std::flush;
-
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
 
@@ -409,13 +400,72 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       forLoop.getInductionVar());
+    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+      //      std::cout << "got an idx and not a memref! \n" << std::flush;
+    }
 
-      //      std::cout << "created idxOp with args: " <<
-      //      isa<Value>(xi.arg0())
-      //                << isa<Value>(xi.arg1()) << "\n"
-      //                << std::flush;
-      //      std::cout << "arg1: " << xi.arg1().getType().isa<IndexType>()
-      //                << std::flush;
+    // operate on a copy of the lambda to avoid generating dependencies.
+    LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
+    auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
+                                        lambdaCopy.getResult(), xi.getResult());
+
+    ArrayRef<int64_t> outShape =
+        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+    MemRefType outIndexOpResult =
+        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
+                                           forLoop.getInductionVar());
+
+    AccT(fxi, outi.getResult(), rewriter);
+    // tmp Apply not needed anymore.
+
+    //    std::cout << "deleting apply dependency for lambda" << std::flush;
+    fxi.getResult().dropAllUses();
+    fxi.erase();
+    //    rewriter.eraseOp(fxi);
+
+    lambdaCopy.getResult().dropAllUses();
+    rewriter.eraseOp(lambdaCopy);
+
+    rewriter.setInsertionPointAfter(forLoop);
+    return contArray;
+
+  } else if (isa<MapParOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of MapPar";
+
+    //     For now we treat all maps as mapSeqs
+    auto n = appliedFun->getAttrOfType<NatAttr>("n");
+    auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
+    auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
+
+    auto f = applyOperands.pop_back_val();
+
+    auto array = applyOperands.pop_back_val();
+
+    auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
+
+    auto forLoop = rewriter.create<AffineForOp>(appliedFun->getLoc(), 0,
+                                                n.getValue().getIntValue(), 1);
+
+    rewriter.setInsertionPointToStart(forLoop.getBody());
+    //    rewriter.create<AffineTerminatorOp>(loc);
+    //    rewriter.setInsertionPointToStart(forLoop.getBody());
+
+    LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
+    if (!fLambda) {
+      fLambda = expandToLambda(f, rewriter);
+    }
+
+    RiseIdxOp xi;
+    if (contArray.getType().isa<MemRefType>()) {
+      ArrayRef<int64_t> inShape =
+          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+
+      MemRefType inIndexOpResult =
+          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
+
+      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+                                      forLoop.getInductionVar());
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
@@ -664,7 +714,25 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         auto sndInterm = rewriter.create<RiseSndIntermediateOp>(
             snd.getLoc(), FloatType::getF32(rewriter.getContext()), tupleCont);
         return sndInterm;
-      } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
+      } else if (MapSeqOp mapOp =
+                     dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied Map";
+
+        // introduce tmp Array of length n:
+        auto tmpArray = rewriter.create<AllocOp>(
+            loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
+                                 FloatType::getF32(rewriter.getContext())));
+
+        //      AccT(apply, tmpArray.getResult(), rewriter);
+        //
+        //      return tmpArray.getResult();
+        AccT(apply, tmpArray.getResult(), rewriter);
+
+        return tmpArray.getResult();
+        // What do we really want to return here?
+
+      } else if (MapParOp mapOp =
+                     dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied Map";
 
         // introduce tmp Array of length n:
@@ -918,9 +986,14 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
-
-  return rewriter.create<LoadOp>(accessVal.getLoc(), accessVal, indexValues)
-      .getResult();
+  if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
+    return rewriter
+        .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)
+        .getResult();
+  } else {
+    return rewriter.create<LoadOp>(accessVal.getLoc(), accessVal, indexValues)
+        .getResult();
+  }
 }
 
 void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
@@ -949,9 +1022,16 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
     indexValues.erase(indexValues.begin());
   }
   ValueRange valRange = ValueRange(indexValues);
-  rewriter.create<StoreOp>(storeLoc.getLoc(), storeVal, storeLoc, indexValues);
+  if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
+    rewriter.create<AffineStoreOp>(storeLoc.getLoc(), storeVal, storeLoc,
+                                   llvm::makeArrayRef(indexValues));
+    return;
+  } else {
+    rewriter.create<StoreOp>(storeLoc.getLoc(), storeVal, storeLoc,
+                             llvm::makeArrayRef(indexValues));
 
-  return;
+    return;
+  }
 }
 
 /// This is obviously not really working.
@@ -1153,7 +1233,8 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
     rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
     return newLambda;
 
-  } else if (isa<MapOp>(value.getDefiningOp())) {
+  } else if (isa<MapSeqOp>(value.getDefiningOp()) ||
+             isa<MapParOp>(value.getDefiningOp())) {
     std::cout << "expanding "
                  "map fun."
               << std::flush;
@@ -1173,12 +1254,29 @@ LambdaOp mlir::rise::expandToLambda(mlir::Value value,
     //    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
     //    entry->addArguments(argumentTypes);
     //
-    //    rewriter.create<MapOp>(value.getLoc(), )
+    //    rewriter.create<MapSeqOp>(value.getLoc(), )
   } else {
     emitError(value.getLoc())
         << "Expanding " << value.getDefiningOp()->getName().getStringRef().str()
         << " to a Lambda is not supported.";
   }
+}
+
+Operation createLoopForMap(Value mapOpValue, IndexType &inductionVar,
+                           PatternRewriter &rewriter) {
+  //  auto mapOp = mapOpValue.getDefiningOp();
+  //  auto lowerBound = rewriter.create<ConstantIndexOp>(mapOp->getLoc(), 0);
+  //  auto upperBound = rewriter.create<ConstantIndexOp>(
+  //      mapOp->getLoc(),
+  //      mapOp->getAttrOfType<NatAttr>("n") n.getValue().getIntValue());
+  //  auto step = rewriter.create<ConstantIndexOp>(mapOp->getLoc(), 1);
+  //
+  //  auto forLoop = rewriter.create<mlir::loop::ForOp>(
+  //      mapOpValue.getLoc(), lowerBound, upperBound, step);
+  //
+  //  inductionVar = forLoop.getInductionVar();
+  //
+  //  return forLoop;
 }
 
 /// gather all patterns
@@ -1213,14 +1311,14 @@ void ConvertRiseToImperativePass::runOnModule() {
 
   //    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect,
   //    mlir::loop::LoopOpsDialect>();
-  target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
-                    ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
-                    linalg::FillOp, mlir::ReturnOp, mlir::rise::LambdaOp,
-                    mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
-                    mlir::rise::RiseFstIntermediateOp,
-                    mlir::rise::RiseSndIntermediateOp,
-                    mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
-                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
+  target.addLegalOp<
+      CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp, AffineForOp,
+      AffineTerminatorOp, AffineStoreOp, AffineLoadOp, ConstantIndexOp, AllocOp,
+      LoadOp, StoreOp, AddFOp, MulFOp, linalg::FillOp, mlir::ReturnOp,
+      mlir::rise::LambdaOp, mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
+      mlir::rise::RiseFstIntermediateOp, mlir::rise::RiseSndIntermediateOp,
+      mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
+      mlir::rise::ApplyOp, RiseContinuationTranslation>();
   //  target.addIllegalOp<RiseFunOp>();
   //  target.addDynamicallyLegalOp<RiseModuleOp>(
   //      [](RiseModuleOp op) { return op.lowered(); });

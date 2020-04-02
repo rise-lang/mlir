@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MM
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MM
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>)
@@ -22,17 +22,17 @@ func @mm() {
                 //Multiply
                 %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<data<tuple<float, float>> -> data<float>> {
                     %fstFun = rise.fst #rise.float #rise.float
-                       %sndFun = rise.snd #rise.float #rise.float
+                    %sndFun = rise.snd #rise.float #rise.float
 
-                       %fst = rise.apply %fstFun, %floatTuple
-                      %snd = rise.apply %sndFun, %floatTuple
+                    %fst = rise.apply %fstFun, %floatTuple
+                    %snd = rise.apply %sndFun, %floatTuple
 
-                      %mulFun = rise.mul #rise.float
-                      %result = rise.apply %mulFun, %snd, %fst
+                    %mulFun = rise.mul #rise.float
+                    %result = rise.apply %mulFun, %snd, %fst
 
-                     rise.return %result : !rise.data<float>
+                    rise.return %result : !rise.data<float>
                 }
-                %map10TuplesToInts = rise.map #rise.nat<4> #rise.tuple<float, float> #rise.float
+                %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<float, float> #rise.float
                 %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
                 //Reduction
@@ -42,16 +42,16 @@ func @mm() {
                     rise.return %doubled : !rise.data<float>
                 }
                 %initializer = rise.literal #rise.lit<float<0>>
-                %reduce10Ints = rise.reduce #rise.nat<4> #rise.float #rise.float
+                %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.float #rise.float
                 %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
 
                 rise.return %result : !rise.data<float>
             }
-            %m2 = rise.map #rise.nat<4> #rise.array<4, float> #rise.array<4, float>
+            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, float> #rise.array<4, float>
             %result = rise.apply %m2, %m2fun, %B
             rise.return %result : !rise.data<array<4, array<4, float>>>
         }
-        %m1 = rise.map #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
+        %m1 = rise.mapPar #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
         %result = rise.apply %m1, %m1fun, %A
     }
     //prepare output Array

@@ -48,6 +48,7 @@ void generateReadAccess(SmallVector<OutputPathType, 10> path, Value storeVal,
 
 void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
 LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
+Value createLoopForMap(Value mapOpValue, IndexType &inductionVar, PatternRewriter &rewriter);
 void printPath(SmallVector<OutputPathType, 10> input);
 void printUses(Value val);
 } // namespace rise

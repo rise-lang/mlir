@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(memref<1xf32>)
@@ -29,7 +29,7 @@ func @simple_dot() {
              rise.return %result : !rise.data<float>
             }
 
-        %map10TuplesToInts = rise.map #rise.nat<4> #rise.tuple<float, float> #rise.float
+        %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<float, float> #rise.float
         %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
         //Reduction
@@ -39,7 +39,7 @@ func @simple_dot() {
             rise.return %doubled : !rise.data<float>
         }
         %initializer = rise.literal #rise.lit<float<0>>
-        %reduce10Ints = rise.reduce #rise.nat<4> #rise.float #rise.float
+        %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.float #rise.float
         %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
 
         rise.return %result : !rise.data<float>

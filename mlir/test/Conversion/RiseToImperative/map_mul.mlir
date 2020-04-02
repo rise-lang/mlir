@@ -12,7 +12,7 @@ func @array_times_5() {
             %multiplied = rise.apply %mulFun, %in, %cst5
             rise.return %multiplied : !rise.data<float>
         }
-        %mapFun = rise.map #rise.nat<4> #rise.float #rise.float
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.float #rise.float
         %multipliedArray = rise.apply %mapFun, %times5, %array
 
         rise.return %multipliedArray : !rise.data<array<4, float>>

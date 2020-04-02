@@ -11,10 +11,10 @@ func @mapMapId() {
             %doubled = rise.apply %addFun, %summand, %summand //: !rise.fun<data<float> -> fun<data<float> -> data<float>>>, %summand, %summand
             rise.return %doubled : !rise.data<float>
         }
-        %map1 = rise.map #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
+        %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
 
         %mapInnerLambda = rise.lambda (%arraySlice) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
-           %map2 = rise.map #rise.nat<4> #rise.float #rise.float
+           %map2 = rise.mapSeq #rise.nat<4> #rise.float #rise.float
            %res = rise.apply %map2, %doubleFun, %arraySlice
            rise.return %res : !rise.data<array<4, float>>
         }

@@ -17,7 +17,7 @@ func @simple_fst() {
             rise.return %fst : !rise.data<float>
         }
 
-        %mapFun = rise.map #rise.nat<4> #rise.tuple<float, float> #rise.float
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<float, float> #rise.float
         %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
 
         rise.return %fstArray : !rise.data<array<4, float>>

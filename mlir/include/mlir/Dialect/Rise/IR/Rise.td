@@ -84,7 +84,7 @@ def RiseContinuationTranslation : Rise_Op<"cont"> {
   let summary = "rise cont";
   let description =
       "A marker where to continue with the lowering to imperative";
-  let arguments = (ins AnyType:$cont);
+  let arguments = (ins AnyType : $cont);
   let results = (outs AnyType);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
@@ -100,46 +100,45 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
 
 def RiseIdxOp : Rise_Op<"codegen.idx"> {
   let summary = "rise idx";
-  let arguments = (ins AnyMemRef:$arg0, AnyType:$arg1);
-  let results = (outs AnyType:$output);
+  let arguments = (ins AnyMemRef : $arg0, AnyType : $arg1);
+  let results = (outs AnyType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {
   let summary = "rise bin_op";
-  let arguments = (ins StrAttr:$op, AnyType:$arg0, AnyType:$arg1);
-  let results = (outs AnyType:$output);
-  //let parser = [{ return parse$cppClass(parser, result); }];
+  let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
+  let results = (outs AnyType : $output);
+  // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def RiseZipIntermediateOp : Rise_Op<"codegen.zip"> {
   let summary = "rise zip_interm";
-  let arguments = (ins AnyType:$lhs, AnyType:$rhs);
-  let results = (outs AnyType:$output);
-  //let parser = [{ return parse$cppClass(parser, result); }];
+  let arguments = (ins AnyType : $lhs, AnyType : $rhs);
+  let results = (outs AnyType : $output);
+  // let parser = [{ return parse$cppClass(parser, result); }];
 }
 def RiseFstIntermediateOp : Rise_Op<"codegen.fst"> {
   let summary = "rise fst_interm";
-  let arguments = (ins AnyType:$value);
-  let results = (outs AnyType:$output);
-  //let parser = [{ return parse$cppClass(parser, result); }];
+  let arguments = (ins AnyType : $value);
+  let results = (outs AnyType : $output);
+  // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def RiseSndIntermediateOp : Rise_Op<"codegen.snd"> {
   let summary = "rise snd_interm";
-  let arguments = (ins AnyType:$value);
-  let results = (outs AnyType:$output);
-  //let parser = [{ return parse$cppClass(parser, result); }];
+  let arguments = (ins AnyType : $value);
+  let results = (outs AnyType : $output);
+  // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def RiseAssignOp : Rise_Op<"codegen.assign"> {
   let summary = "rise assign";
-  let arguments = (ins AnyType:$value, AnyType:$assignee);
-  //let parser = [{ return parse$cppClass(parser, result); }];
+  let arguments = (ins AnyType : $value, AnyType : $assignee);
+  // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-
-//def RiseOutOp : Rise_Op<"out"> {
+// def RiseOutOp : Rise_Op<"out"> {
 //  let summary = "rise out";
 //  let arguments = (ins AnyType:$input);
 //  let results = (outs DataType:$output);
@@ -148,8 +147,8 @@ def RiseAssignOp : Rise_Op<"codegen.assign"> {
 
 def RiseInOp : Rise_Op<"in"> {
   let summary = "rise in";
-  let arguments = (ins AnyMemRef:$input);
-  let results = (outs DataTypeWrapper:$output);
+  let arguments = (ins AnyMemRef : $input);
+  let results = (outs DataTypeWrapper : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -194,20 +193,32 @@ def ApplyOp : Rise_Op<"apply", [NoSideEffect]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def MapOp : Rise_Op<"map", [NoSideEffect]> {
-  let summary = "map";
+def MapSeqOp : Rise_Op<"mapSeq", [NoSideEffect]> {
+  let summary = "mapSeq";
   let description =
       "This operation returns a function which expects a function from s to t "
-      "and an array of length n. The function is to be applied to all elements "
-      "of the array.";
+      "and an array of length n. The function is to be applied sequentially to "
+      "all elements of the array.";
   let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
   let parser = [{ return parse$cppClass(parser, result); }];
 
-  let results = (outs FunType : $mapFun);
+  let results = (outs FunType : $mapSeqFun);
 }
 
-def ReduceOp : Rise_Op<"reduce", [NoSideEffect]> {
-  let summary = "reduce";
+def MapParOp : Rise_Op<"mapPar", [NoSideEffect]> {
+  let summary = "mapPar";
+  let description =
+      "This operation returns a function which expects a function from s to t "
+      "and an array of length n. The function is to be applied to all elements "
+      "of the array in parallel.";
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
+  let parser = [{ return parse$cppClass(parser, result); }];
+
+  let results = (outs FunType : $mapParFun);
+}
+
+def ReduceSeqOp : Rise_Op<"reduceSeq", [NoSideEffect]> {
+  let summary = "reduceSeq";
   let description =
       "This operation returns a function which expects an accumulator function "
       "from s to t, an accumulator of type t, and an array of size n. It "

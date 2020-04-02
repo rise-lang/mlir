@@ -17,7 +17,7 @@ func @simple_snd() {
             rise.return %snd : !rise.data<float>
         }
 
-        %mapFun = rise.map #rise.nat<4> #rise.tuple<float, float> #rise.float
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<float, float> #rise.float
         %sndArray = rise.apply %mapFun, %projectToSecond, %zipped
 
         rise.return %sndArray : !rise.data<array<4, float>>
@@ -34,4 +34,3 @@ func @simple_snd() {
 // SIMPLE_SND: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_SND: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_SND: [10, 10, 10, 10]
-

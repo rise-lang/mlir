@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_reduction -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_1D_REDUCTION
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_reduction -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_1D_REDUCTION
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(memref<1xf32>)
 func @simple_reduction() {
@@ -12,7 +12,7 @@ func @simple_reduction() {
             rise.return %doubled : !rise.data<float>
         }
         %initializer = rise.literal #rise.lit<float<0>>
-        %reduce4Ints = rise.reduce #rise.nat<4> #rise.float #rise.float
+        %reduce4Ints = rise.reduceSeq #rise.nat<4> #rise.float #rise.float
         %result = rise.apply %reduce4Ints, %reductionAdd, %initializer, %array0
 
         rise.return %result : !rise.data<float>

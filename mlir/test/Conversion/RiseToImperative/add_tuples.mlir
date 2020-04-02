@@ -24,7 +24,7 @@ func @simple_add_tuples() {
             rise.return %result : !rise.data<float>
         }
 
-        %mapFun = rise.map #rise.nat<4> #rise.tuple<float, float> #rise.float
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<float, float> #rise.float
         %sumArray = rise.apply %mapFun, %tupleAddFun, %zipped
 
         rise.return %sumArray : !rise.data<array<4, float>>
