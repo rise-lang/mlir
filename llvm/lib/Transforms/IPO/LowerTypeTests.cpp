@@ -735,6 +735,9 @@ static bool isKnownTypeIdMember(Metadata *TypeId, const DataLayout &DL,
 /// replace the call with.
 Value *LowerTypeTestsModule::lowerTypeTestCall(Metadata *TypeId, CallInst *CI,
                                                const TypeIdLowering &TIL) {
+  // Delay lowering if the resolution is currently unknown.
+  if (TIL.TheKind == TypeTestResolution::Unknown)
+    return nullptr;
   if (TIL.TheKind == TypeTestResolution::Unsat)
     return ConstantInt::getFalse(M.getContext());
 
@@ -1043,8 +1046,10 @@ void LowerTypeTestsModule::importTypeTest(CallInst *CI) {
 
   TypeIdLowering TIL = importTypeId(TypeIdStr->getString());
   Value *Lowered = lowerTypeTestCall(TypeIdStr, CI, TIL);
-  CI->replaceAllUsesWith(Lowered);
-  CI->eraseFromParent();
+  if (Lowered) {
+    CI->replaceAllUsesWith(Lowered);
+    CI->eraseFromParent();
+  }
 }
 
 // ThinLTO backend: the function F has a jump table entry; update this module
@@ -1055,7 +1060,7 @@ void LowerTypeTestsModule::importFunction(
   assert(F->getType()->getAddressSpace() == 0);
 
   GlobalValue::VisibilityTypes Visibility = F->getVisibility();
-  std::string Name = F->getName();
+  std::string Name = std::string(F->getName());
 
   if (F->isDeclarationForLinker() && isJumpTableCanonical) {
     // Non-dso_local functions may be overriden at run time,
@@ -1167,8 +1172,10 @@ void LowerTypeTestsModule::lowerTypeTestCalls(
     for (CallInst *CI : TIUI.CallSites) {
       ++NumTypeTestCallsLowered;
       Value *Lowered = lowerTypeTestCall(TypeId, CI, TIL);
-      CI->replaceAllUsesWith(Lowered);
-      CI->eraseFromParent();
+      if (Lowered) {
+        CI->replaceAllUsesWith(Lowered);
+        CI->eraseFromParent();
+      }
     }
   }
 }
@@ -1523,13 +1530,13 @@ void LowerTypeTestsModule::buildBitSetsFromFunctionsNative(
           F->getType());
       if (Functions[I]->isExported()) {
         if (IsJumpTableCanonical) {
-          ExportSummary->cfiFunctionDefs().insert(F->getName());
+          ExportSummary->cfiFunctionDefs().insert(std::string(F->getName()));
         } else {
           GlobalAlias *JtAlias = GlobalAlias::create(
               F->getValueType(), 0, GlobalValue::ExternalLinkage,
               F->getName() + ".cfi_jt", CombinedGlobalElemPtr, &M);
           JtAlias->setVisibility(GlobalValue::HiddenVisibility);
-          ExportSummary->cfiFunctionDecls().insert(F->getName());
+          ExportSummary->cfiFunctionDecls().insert(std::string(F->getName()));
         }
       }
       if (!IsJumpTableCanonical) {
@@ -1821,9 +1828,10 @@ bool LowerTypeTestsModule::lower() {
       // have the same name, but it's not the one we are looking for.
       if (F.hasLocalLinkage())
         continue;
-      if (ImportSummary->cfiFunctionDefs().count(F.getName()))
+      if (ImportSummary->cfiFunctionDefs().count(std::string(F.getName())))
         Defs.push_back(&F);
-      else if (ImportSummary->cfiFunctionDecls().count(F.getName()))
+      else if (ImportSummary->cfiFunctionDecls().count(
+                   std::string(F.getName())))
         Decls.push_back(&F);
     }
 

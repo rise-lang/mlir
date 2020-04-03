@@ -420,7 +420,14 @@ def AArch64fccmp     : SDNode<"AArch64ISD::FCCMP", SDT_AArch64FCCMP>;
 
 def AArch64threadpointer : SDNode<"AArch64ISD::THREAD_POINTER", SDTPtrLeaf>;
 
-def AArch64fcmp      : SDNode<"AArch64ISD::FCMP", SDT_AArch64FCmp>;
+def AArch64fcmp         : SDNode<"AArch64ISD::FCMP", SDT_AArch64FCmp>;
+def AArch64strict_fcmp  : SDNode<"AArch64ISD::STRICT_FCMP", SDT_AArch64FCmp,
+                                 [SDNPHasChain]>;
+def AArch64strict_fcmpe : SDNode<"AArch64ISD::STRICT_FCMPE", SDT_AArch64FCmp,
+                                 [SDNPHasChain]>;
+def AArch64any_fcmp     : PatFrags<(ops node:$lhs, node:$rhs),
+                                   [(AArch64strict_fcmp node:$lhs, node:$rhs),
+                                    (AArch64fcmp node:$lhs, node:$rhs)]>;
 
 def AArch64dup       : SDNode<"AArch64ISD::DUP", SDT_AArch64Dup>;
 def AArch64duplane8  : SDNode<"AArch64ISD::DUPLANE8", SDT_AArch64DupLane>;
@@ -461,7 +468,7 @@ def AArch64urshri : SDNode<"AArch64ISD::URSHR_I", SDT_AArch64vshift>;
 
 def AArch64not: SDNode<"AArch64ISD::NOT", SDT_AArch64unvec>;
 def AArch64bit: SDNode<"AArch64ISD::BIT", SDT_AArch64trivec>;
-def AArch64bsl: SDNode<"AArch64ISD::BSL", SDT_AArch64trivec>;
+def AArch64bsp: SDNode<"AArch64ISD::BSP", SDT_AArch64trivec>;
 
 def AArch64cmeq: SDNode<"AArch64ISD::CMEQ", SDT_AArch64binvec>;
 def AArch64cmge: SDNode<"AArch64ISD::CMGE", SDT_AArch64binvec>;
@@ -3318,10 +3325,10 @@ defm FCVTNS : FPToIntegerUnscaled<0b00, 0b000, "fcvtns", int_aarch64_neon_fcvtns
 defm FCVTNU : FPToIntegerUnscaled<0b00, 0b001, "fcvtnu", int_aarch64_neon_fcvtnu>;
 defm FCVTPS : FPToIntegerUnscaled<0b01, 0b000, "fcvtps", int_aarch64_neon_fcvtps>;
 defm FCVTPU : FPToIntegerUnscaled<0b01, 0b001, "fcvtpu", int_aarch64_neon_fcvtpu>;
-defm FCVTZS : FPToIntegerUnscaled<0b11, 0b000, "fcvtzs", fp_to_sint>;
-defm FCVTZU : FPToIntegerUnscaled<0b11, 0b001, "fcvtzu", fp_to_uint>;
-defm FCVTZS : FPToIntegerScaled<0b11, 0b000, "fcvtzs", fp_to_sint>;
-defm FCVTZU : FPToIntegerScaled<0b11, 0b001, "fcvtzu", fp_to_uint>;
+defm FCVTZS : FPToIntegerUnscaled<0b11, 0b000, "fcvtzs", any_fp_to_sint>;
+defm FCVTZU : FPToIntegerUnscaled<0b11, 0b001, "fcvtzu", any_fp_to_uint>;
+defm FCVTZS : FPToIntegerScaled<0b11, 0b000, "fcvtzs", any_fp_to_sint>;
+defm FCVTZU : FPToIntegerScaled<0b11, 0b001, "fcvtzu", any_fp_to_uint>;
 
 multiclass FPToIntegerIntPats<Intrinsic round, string INST> {
   def : Pat<(i32 (round f16:$Rn)), (!cast<Instruction>(INST # UWHr) $Rn)>;
@@ -3393,8 +3400,8 @@ def : Pat<(i64 (llround f64:$Rn)),
 // Scaled integer to floating point conversion instructions.
 //===----------------------------------------------------------------------===//
 
-defm SCVTF : IntegerToFP<0, "scvtf", sint_to_fp>;
-defm UCVTF : IntegerToFP<1, "ucvtf", uint_to_fp>;
+defm SCVTF : IntegerToFP<0, "scvtf", any_sint_to_fp>;
+defm UCVTF : IntegerToFP<1, "ucvtf", any_uint_to_fp>;
 
 //===----------------------------------------------------------------------===//
 // Unscaled integer to floating point conversion instruction.
@@ -3559,8 +3566,8 @@ def : Pat<(f64 (fma FPR64:$Rn, (fneg FPR64:$Rm), (fneg FPR64:$Ra))),
 // Floating point comparison instructions.
 //===----------------------------------------------------------------------===//
 
-defm FCMPE : FPComparison<1, "fcmpe">;
-defm FCMP  : FPComparison<0, "fcmp", AArch64fcmp>;
+defm FCMPE : FPComparison<1, "fcmpe", AArch64strict_fcmpe>;
+defm FCMP  : FPComparison<0, "fcmp", AArch64any_fcmp>;
 
 //===----------------------------------------------------------------------===//
 // Floating point conditional comparison instructions.
@@ -3620,10 +3627,6 @@ let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
      def CATCHRET : Pseudo<(outs), (ins am_brcond:$dst, am_brcond:$src), [(catchret bb:$dst, bb:$src)]>,
                     Sched<[]>;
 }
-
-let hasSideEffects = 1, hasCtrlDep = 1, isCodeGenOnly = 1,
-    usesCustomInserter = 1 in
-def CATCHPAD : Pseudo<(outs), (ins), [(catchpad)]>, Sched<[]>;
 
 //===----------------------------------------------------------------------===//
 // Floating point immediate move.
@@ -3952,33 +3955,36 @@ defm : SIMDThreeSameVectorExtraPatterns<"UQSUB", usubsat>;
 defm AND : SIMDLogicalThreeVector<0, 0b00, "and", and>;
 defm BIC : SIMDLogicalThreeVector<0, 0b01, "bic",
                                   BinOpFrag<(and node:$LHS, (vnot node:$RHS))> >;
-defm BIF : SIMDLogicalThreeVector<1, 0b11, "bif">;
-defm BIT : SIMDLogicalThreeVectorTied<1, 0b10, "bit", AArch64bit>;
-defm BSL : SIMDLogicalThreeVectorTied<1, 0b01, "bsl",
-    TriOpFrag<(or (and node:$LHS, node:$MHS), (and (vnot node:$LHS), node:$RHS))>>;
 defm EOR : SIMDLogicalThreeVector<1, 0b00, "eor", xor>;
 defm ORN : SIMDLogicalThreeVector<0, 0b11, "orn",
                                   BinOpFrag<(or node:$LHS, (vnot node:$RHS))> >;
 defm ORR : SIMDLogicalThreeVector<0, 0b10, "orr", or>;
 
+// Pseudo bitwise select pattern BSP.
+// It is expanded into BSL/BIT/BIF after register allocation.
+defm BSP : SIMDLogicalThreeVectorPseudo<TriOpFrag<(or (and node:$LHS, node:$MHS),
+                                                      (and (vnot node:$LHS), node:$RHS))>>;
+defm BSL : SIMDLogicalThreeVectorTied<1, 0b01, "bsl">;
+defm BIT : SIMDLogicalThreeVectorTied<1, 0b10, "bit", AArch64bit>;
+defm BIF : SIMDLogicalThreeVectorTied<1, 0b11, "bif">;
 
-def : Pat<(AArch64bsl (v8i8 V64:$Rd), V64:$Rn, V64:$Rm),
-          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
-def : Pat<(AArch64bsl (v4i16 V64:$Rd), V64:$Rn, V64:$Rm),
-          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
-def : Pat<(AArch64bsl (v2i32 V64:$Rd), V64:$Rn, V64:$Rm),
-          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
-def : Pat<(AArch64bsl (v1i64 V64:$Rd), V64:$Rn, V64:$Rm),
-          (BSLv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(AArch64bsp (v8i8 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSPv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(AArch64bsp (v4i16 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSPv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(AArch64bsp (v2i32 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSPv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
+def : Pat<(AArch64bsp (v1i64 V64:$Rd), V64:$Rn, V64:$Rm),
+          (BSPv8i8 V64:$Rd, V64:$Rn, V64:$Rm)>;
 
-def : Pat<(AArch64bsl (v16i8 V128:$Rd), V128:$Rn, V128:$Rm),
-          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
-def : Pat<(AArch64bsl (v8i16 V128:$Rd), V128:$Rn, V128:$Rm),
-          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
-def : Pat<(AArch64bsl (v4i32 V128:$Rd), V128:$Rn, V128:$Rm),
-          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
-def : Pat<(AArch64bsl (v2i64 V128:$Rd), V128:$Rn, V128:$Rm),
-          (BSLv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(AArch64bsp (v16i8 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSPv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(AArch64bsp (v8i16 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSPv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(AArch64bsp (v4i32 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSPv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
+def : Pat<(AArch64bsp (v2i64 V128:$Rd), V128:$Rn, V128:$Rm),
+          (BSPv16i8 V128:$Rd, V128:$Rn, V128:$Rm)>;
 
 def : InstAlias<"mov{\t$dst.16b, $src.16b|.16b\t$dst, $src}",
                 (ORRv16i8 V128:$dst, V128:$src, V128:$src), 1>;
@@ -5630,6 +5636,11 @@ def : Pat<(v2f64 (fmul V128:$Rn, (AArch64dup (f64 FPR64:$Rm)))),
 
 defm SQDMULH : SIMDIndexedHS<0, 0b1100, "sqdmulh", int_aarch64_neon_sqdmulh>;
 defm SQRDMULH : SIMDIndexedHS<0, 0b1101, "sqrdmulh", int_aarch64_neon_sqrdmulh>;
+
+defm SQDMULH : SIMDIndexedHSPatterns<int_aarch64_neon_sqdmulh_lane,
+                                     int_aarch64_neon_sqdmulh_laneq>;
+defm SQRDMULH : SIMDIndexedHSPatterns<int_aarch64_neon_sqrdmulh_lane,
+                                      int_aarch64_neon_sqrdmulh_laneq>;
 
 // Generated by MachineCombine
 defm MLA   : SIMDVectorIndexedHSTied<1, 0b0000, "mla", null_frag>;

@@ -107,7 +107,15 @@ void GISelKnownBits::computeKnownBitsImpl(Register R, KnownBits &Known,
   if (DstTy.isVector())
     return; // TODO: Handle vectors.
 
-  if (Depth == getMaxDepth())
+  // Depth may get bigger than max depth if it gets passed to a different
+  // GISelKnownBits object.
+  // This may happen when say a generic part uses a GISelKnownBits object
+  // with some max depth, but then we hit TL.computeKnownBitsForTargetInstr
+  // which creates a new GISelKnownBits object with a different and smaller
+  // depth. If we just check for equality, we would never exit if the depth
+  // that is passed down to the target specific GISelKnownBits object is
+  // already bigger than its max depth.
+  if (Depth >= getMaxDepth())
     return;
 
   if (!DemandedElts)
@@ -286,7 +294,7 @@ void GISelKnownBits::computeKnownBitsImpl(Register R, KnownBits &Known,
   case TargetOpcode::G_ANYEXT: {
     computeKnownBitsImpl(MI.getOperand(1).getReg(), Known, DemandedElts,
                          Depth + 1);
-    Known = Known.zext(BitWidth, true /* ExtendedBitsAreKnownZero */);
+    Known = Known.zext(BitWidth);
     break;
   }
   case TargetOpcode::G_LOAD: {
@@ -352,9 +360,9 @@ void GISelKnownBits::computeKnownBitsImpl(Register R, KnownBits &Known,
                                ? DL.getIndexSizeInBits(SrcTy.getAddressSpace())
                                : SrcTy.getSizeInBits();
     assert(SrcBitWidth && "SrcBitWidth can't be zero");
-    Known = Known.zextOrTrunc(SrcBitWidth, true);
+    Known = Known.zextOrTrunc(SrcBitWidth);
     computeKnownBitsImpl(SrcReg, Known, DemandedElts, Depth + 1);
-    Known = Known.zextOrTrunc(BitWidth, true);
+    Known = Known.zextOrTrunc(BitWidth);
     if (BitWidth > SrcBitWidth)
       Known.Zero.setBitsFrom(SrcBitWidth);
     break;

@@ -290,7 +290,7 @@ public:
   /// Otherwie split the flat vector \p MatrixVal containing a matrix with
   /// shape \p SI into column vectors.
   ColumnMatrixTy getMatrix(Value *MatrixVal, const ShapeInfo &SI,
-                           IRBuilder<> Builder) {
+                           IRBuilder<> &Builder) {
     VectorType *VType = dyn_cast<VectorType>(MatrixVal->getType());
     assert(VType && "MatrixVal must be a vector type");
     assert(VType->getNumElements() == SI.NumRows * SI.NumColumns &&
@@ -584,13 +584,13 @@ public:
   }
 
   LoadInst *createColumnLoad(Value *ColumnPtr, Type *EltType,
-                             IRBuilder<> Builder) {
+                             IRBuilder<> &Builder) {
     return Builder.CreateAlignedLoad(
         ColumnPtr, Align(DL.getABITypeAlignment(EltType)), "col.load");
   }
 
   StoreInst *createColumnStore(Value *ColumnValue, Value *ColumnPtr,
-                               Type *EltType, IRBuilder<> Builder) {
+                               Type *EltType, IRBuilder<> &Builder) {
     return Builder.CreateAlignedStore(ColumnValue, ColumnPtr,
                                       DL.getABITypeAlign(EltType));
   }
@@ -690,7 +690,7 @@ public:
   /// Extract a column vector of \p NumElts starting at index (\p I, \p J) from
   /// the matrix \p LM represented as a vector of column vectors.
   Value *extractVector(const ColumnMatrixTy &LM, unsigned I, unsigned J,
-                       unsigned NumElts, IRBuilder<> Builder) {
+                       unsigned NumElts, IRBuilder<> &Builder) {
     Value *Col = LM.getColumn(J);
     Value *Undef = UndefValue::get(Col->getType());
     Constant *Mask = createSequentialMask(Builder, I, NumElts, 0);
@@ -699,7 +699,7 @@ public:
 
   // Set elements I..I+NumElts-1 to Block
   Value *insertVector(Value *Col, unsigned I, Value *Block,
-                      IRBuilder<> Builder) {
+                      IRBuilder<> &Builder) {
 
     // First, bring Block to the same size as Col
     unsigned BlockNumElts =
@@ -946,13 +946,23 @@ public:
     /// matrix instructions.
     const MapVector<Value *, ColumnMatrixTy> &Inst2ColumnMatrix;
 
+    /// Mapping from values to the leaves of all expressions that the value is
+    /// part of.
+    const DenseMap<Value *, SmallPtrSet<Value *, 2>> &Shared;
+
+    /// Leaf node of the expression to linearize.
+    Value *Leaf;
+
     /// Used to keep track of sub-expressions that get reused while linearizing
     /// the expression. Re-used sub-expressions are marked as (reused).
     SmallPtrSet<Value *, 8> ReusedExprs;
 
     ExprLinearizer(const DataLayout &DL,
-                   const MapVector<Value *, ColumnMatrixTy> &Inst2ColumnMatrix)
-        : Str(), Stream(Str), DL(DL), Inst2ColumnMatrix(Inst2ColumnMatrix) {}
+                   const MapVector<Value *, ColumnMatrixTy> &Inst2ColumnMatrix,
+                   const DenseMap<Value *, SmallPtrSet<Value *, 2>> &Shared,
+                   Value *Leaf)
+        : Str(), Stream(Str), DL(DL), Inst2ColumnMatrix(Inst2ColumnMatrix),
+          Shared(Shared), Leaf(Leaf) {}
 
     void indent(unsigned N) {
       LineLength += N;
@@ -973,7 +983,7 @@ public:
         indent(Indent);
     }
 
-    void write(const std::string &S) {
+    void write(StringRef S) {
       LineLength += S.size();
       Stream << S;
     }
@@ -1100,7 +1110,7 @@ public:
           TmpStream << "scalar";
       }
       TmpStream.flush();
-      Tmp = StringRef(Tmp).trim();
+      Tmp = std::string(StringRef(Tmp).trim());
       LineLength += Tmp.size();
       Stream << Tmp;
     }
@@ -1108,10 +1118,29 @@ public:
     /// Linearize expression \p Expr starting at an indentation of \p Indent.
     /// Expressions that are re-used multiple times are prefixed with (reused)
     /// at the re-used root instruction.
-    void linearizeExpr(Value *Expr, unsigned Indent, bool ParentReused) {
+    void linearizeExpr(Value *Expr, unsigned Indent, bool ParentReused,
+                       bool ParentShared) {
       auto *I = cast<Instruction>(Expr);
       maybeIndent(Indent);
       SmallVector<Value *, 8> Ops;
+
+      // Is Expr shared with other expression leaves?
+      bool ExprShared = false;
+
+      // Deal with shared subtrees. Mark them as shared, if required.
+      if (!ParentShared) {
+        auto SI = Shared.find(Expr);
+        assert(SI != Shared.end() && SI->second.find(Leaf) != SI->second.end());
+
+        for (Value *S : SI->second) {
+          if (S == Leaf)
+            continue;
+          DebugLoc DL = cast<Instruction>(S)->getDebugLoc();
+          write("shared with remark at line " + std::to_string(DL.getLine()) +
+                " column " + std::to_string(DL.getCol()) + " (");
+        }
+        ExprShared = SI->second.size() > 1;
+      }
 
       bool Reused = !ReusedExprs.insert(Expr).second;
       if (Reused && !ParentReused)
@@ -1144,7 +1173,7 @@ public:
 
         maybeIndent(Indent + 1);
         if (isMatrix(Op))
-          linearizeExpr(Op, Indent + 1, Reused);
+          linearizeExpr(Op, Indent + 1, Reused, ExprShared);
         else
           write(Op);
         if (Op != Ops.back())
@@ -1171,7 +1200,6 @@ public:
   ///
   /// TODO:
   ///  * Summarize number of vector instructions generated for each expression.
-  ///  * Account for shared sub-expressions.
   ///  * Propagate matrix remarks up the inlining chain.
   struct RemarkGenerator {
     const MapVector<Value *, ColumnMatrixTy> &Inst2ColumnMatrix;
@@ -1194,9 +1222,27 @@ public:
       return Leaves;
     }
 
+    /// Recursively traverse expression \p V starting at \p Leaf and add \p Leaf
+    /// to all visited expressions in \p Shared.
+    void collectSharedInfo(Value *Leaf, Value *V,
+                           DenseMap<Value *, SmallPtrSet<Value *, 2>> &Shared) {
+
+      if (Inst2ColumnMatrix.find(V) == Inst2ColumnMatrix.end())
+        return;
+
+      auto I = Shared.insert({V, {}});
+      I.first->second.insert(Leaf);
+
+      for (Value *Op : cast<Instruction>(V)->operand_values())
+        collectSharedInfo(Leaf, Op, Shared);
+      return;
+    }
+
     /// Calculate the number of exclusive and shared op counts for expression
     /// starting at \p V. Expressions used multiple times are counted once.
-    OpInfoTy sumOpInfos(Value *Root, SmallPtrSetImpl<Value *> &ReusedExprs) {
+    std::pair<OpInfoTy, OpInfoTy>
+    sumOpInfos(Value *Root, SmallPtrSetImpl<Value *> &ReusedExprs,
+               DenseMap<Value *, SmallPtrSet<Value *, 2>> &Shared) {
       auto CM = Inst2ColumnMatrix.find(Root);
       if (CM == Inst2ColumnMatrix.end())
         return {};
@@ -1205,10 +1251,21 @@ public:
       if (!ReusedExprs.insert(Root).second)
         return {};
 
-      OpInfoTy Count = CM->second.getOpInfo();
-      for (Value *Op : cast<Instruction>(Root)->operand_values())
-        Count += sumOpInfos(Op, ReusedExprs);
-      return Count;
+      OpInfoTy SharedCount;
+      OpInfoTy Count;
+
+      auto I = Shared.find(Root);
+      if (I->second.size() == 1)
+        Count = CM->second.getOpInfo();
+      else
+        SharedCount = CM->second.getOpInfo();
+
+      for (Value *Op : cast<Instruction>(Root)->operand_values()) {
+        auto C = sumOpInfos(Op, ReusedExprs, Shared);
+        Count += C.first;
+        SharedCount += C.second;
+      }
+      return {Count, SharedCount};
     }
 
     void emitRemarks() {
@@ -1218,26 +1275,47 @@ public:
       // Find leafs of matrix expressions.
       auto Leaves = getExpressionLeaves();
 
+      DenseMap<Value *, SmallPtrSet<Value *, 2>> Shared;
+
+      for (Value *Leaf : Leaves)
+        collectSharedInfo(Leaf, Leaf, Shared);
+
       // Generate remarks for each leaf.
       for (auto *L : Leaves) {
         SmallPtrSet<Value *, 8> ReusedExprs;
-        auto Counts = sumOpInfos(L, ReusedExprs);
+        OpInfoTy Counts, SharedCounts;
+        std::tie(Counts, SharedCounts) = sumOpInfos(L, ReusedExprs, Shared);
+
         OptimizationRemark Rem(DEBUG_TYPE, "matrix-lowered",
                                cast<Instruction>(L)->getDebugLoc(),
                                cast<Instruction>(L)->getParent());
+
         Rem << "Lowered with ";
         Rem << ore::NV("NumStores", Counts.NumStores) << " stores, "
             << ore::NV("NumLoads", Counts.NumLoads) << " loads, "
             << ore::NV("NumComputeOps", Counts.NumComputeOps) << " compute ops";
 
-        Rem << ("\n" + linearize(L, DL));
+        if (SharedCounts.NumStores > 0 || SharedCounts.NumLoads > 0 ||
+            SharedCounts.NumComputeOps > 0) {
+          Rem << ",\nadditionally "
+              << ore::NV("NumStores", SharedCounts.NumStores) << " stores, "
+              << ore::NV("NumLoads", SharedCounts.NumLoads) << " loads, "
+              << ore::NV("NumFPOps", SharedCounts.NumComputeOps)
+              << " compute ops"
+              << " are shared with other expressions";
+        }
+
+        Rem << ("\n" + linearize(L, Shared, DL));
         ORE.emit(Rem);
       }
     }
 
-    std::string linearize(Value *L, const DataLayout &DL) {
-      ExprLinearizer Lin(DL, Inst2ColumnMatrix);
-      Lin.linearizeExpr(L, 0, false);
+    std::string
+    linearize(Value *L,
+              const DenseMap<Value *, SmallPtrSet<Value *, 2>> &Shared,
+              const DataLayout &DL) {
+      ExprLinearizer Lin(DL, Inst2ColumnMatrix, Shared, L);
+      Lin.linearizeExpr(L, 0, false, false);
       return Lin.getResult();
     }
   };

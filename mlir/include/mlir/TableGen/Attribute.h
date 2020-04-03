@@ -25,6 +25,7 @@ class Record;
 
 namespace mlir {
 namespace tblgen {
+class Type;
 
 // Wrapper class with helper methods for accessing attribute constraints defined
 // in TableGen.
@@ -53,6 +54,10 @@ public:
 
   // Returns the return type for this attribute.
   StringRef getReturnType() const;
+
+  // Return the type constraint corresponding to the type of this attribute, or
+  // None if this is not a TypedAttr.
+  llvm::Optional<Type> getValueType() const;
 
   // Returns the template getter method call which reads this attribute's
   // storage and returns the value as of the desired return type.
@@ -133,6 +138,9 @@ public:
 
   // Returns the symbol of this enum attribute case.
   StringRef getSymbol() const;
+
+  // Returns the textual representation of this enum attribute case.
+  StringRef getStr() const;
 
   // Returns the value of this enum attribute case.
   int64_t getValue() const;

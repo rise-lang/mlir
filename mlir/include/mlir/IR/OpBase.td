@@ -259,12 +259,14 @@ class Dialect {
 class Type<Pred condition, string descr = ""> :
     TypeConstraint<condition, descr> {
   string typeDescription = "";
+  string builderCall = "";
 }
 
 // Allows providing an alternative name and description to an existing type def.
 class TypeAlias<Type t, string description = t.description> :
     Type<t.predicate, description> {
   let typeDescription = t.typeDescription;
+  let builderCall = t.builderCall;
 }
 
 // A type of a specific dialect.
@@ -289,7 +291,6 @@ class Variadic<Type type> : TypeConstraint<type.predicate, type.description> {
 // making some Types and some Attrs buildable.
 class BuildableType<code builder> {
   // The builder call to invoke (if specified) to construct the BuildableType.
-  // Format: this will be affixed to the builder.
   code builderCall = builder;
 }
 
@@ -312,13 +313,14 @@ class AnyTypeOf<list<Type> allowedTypes, string description = ""> : Type<
 def AnyInteger : Type<CPred<"$_self.isa<IntegerType>()">, "integer">;
 
 // Index type.
-def Index : Type<CPred<"$_self.isa<IndexType>()">, "index">;
+def Index : Type<CPred<"$_self.isa<IndexType>()">, "index">,
+            BuildableType<"$_builder.getIndexType()">;
 
 // Integer type of a specific width.
 class I<int width>
     : Type<CPred<"$_self.isInteger(" # width # ")">,
                   width # "-bit integer">,
-      BuildableType<"getIntegerType(" # width # ")"> {
+      BuildableType<"$_builder.getIntegerType(" # width # ")"> {
   int bitwidth = width;
 }
 
@@ -341,7 +343,7 @@ def AnyFloat : Type<CPred<"$_self.isa<FloatType>()">, "floating-point">;
 class F<int width>
     : Type<CPred<"$_self.isF" # width # "()">,
                 width # "-bit float">,
-      BuildableType<"getF" # width # "Type()"> {
+      BuildableType<"$_builder.getF" # width # "Type()"> {
   int bitwidth = width;
 }
 
@@ -354,7 +356,7 @@ def F32 : F<32>;
 def F64 : F<64>;
 
 def BF16 : Type<CPred<"$_self.isBF16()">, "bfloat16 type">,
-           BuildableType<"getBF16Type()">;
+           BuildableType<"$_builder.getBF16Type()">;
 
 class Complex<Type type>
     : Type<And<[
@@ -369,7 +371,9 @@ def AnyComplex : Type<CPred<"$_self.isa<ComplexType>()">, "complex-type">;
 
 class OpaqueType<string dialect, string name, string description>
   : Type<CPred<"isOpaqueTypeWithName($_self, \""#dialect#"\", \""#name#"\")">,
-         description>;
+         description>,
+    BuildableType<"OpaqueType::get($_builder.getIdentifier(\"" # dialect #
+                  "\"), \"" # name # "\", $_builder.getContext())">;
 
 // Function Type
 
@@ -481,8 +485,8 @@ class 3DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [3]>;
 class 4DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [4]>;
 
 // Unranked Memref type
-def AnyUnrankedMemRef : 
-    ShapedContainerType<[AnyType], 
+def AnyUnrankedMemRef :
+    ShapedContainerType<[AnyType],
                         IsUnrankedMemRefTypePred, "unranked.memref">;
 // Memref type.
 
@@ -627,6 +631,10 @@ class Attr<Pred condition, string descr = ""> :
   // Requires a constBuilderCall defined.
   string defaultValue = ?;
 
+  // The value type of this attribute. This corresponds to the mlir::Type that
+  // this attribute returns via `getType()`.
+  Type valueType = ?;
+
   // Whether the attribute is optional. Typically requires a custom
   // convertFromStorage method to handle the case where the attribute is
   // not present.
@@ -658,6 +666,7 @@ class DefaultValuedAttr<Attr attr, string val> :
   let convertFromStorage = attr.convertFromStorage;
   let constBuilderCall = attr.constBuilderCall;
   let defaultValue = val;
+  let valueType = attr.valueType;
 
   let baseAttr = attr;
 }
@@ -671,6 +680,7 @@ class OptionalAttr<Attr attr> : Attr<attr.predicate, attr.description> {
   let returnType = "Optional<" # attr.returnType #">";
   let convertFromStorage = "$_self ? " # returnType # "(" #
                            attr.convertFromStorage # ") : (llvm::None)";
+  let valueType = attr.valueType;
   let isOptional = 1;
 
   let baseAttr = attr;
@@ -679,14 +689,15 @@ class OptionalAttr<Attr attr> : Attr<attr.predicate, attr.description> {
 //===----------------------------------------------------------------------===//
 // Primitive attribute kinds
 
-// A generic attribute that must be constructed around a specific type
+// A generic attribute that must be constructed around a specific buildable type
 // `attrValType`. Backed by MLIR attribute kind `attrKind`.
-class TypedAttrBase<BuildableType attrValType, string attrKind,
-                    Pred condition, string descr> :
+class TypedAttrBase<Type attrValType, string attrKind, Pred condition,
+                    string descr> :
     Attr<condition, descr> {
-  let constBuilderCall = "$_builder.get" # attrKind # "($_builder." #
+  let constBuilderCall = "$_builder.get" # attrKind # "(" #
                          attrValType.builderCall # ", $0)";
   let storageType = attrKind;
+  let valueType = attrValType;
 }
 
 // Any attribute.
@@ -808,39 +819,47 @@ def UnitAttr : Attr<CPred<"$_self.isa<UnitAttr>()">, "unit attribute"> {
 // Enum attribute kinds
 
 // Additional information for an enum attribute case.
-class EnumAttrCaseInfo<string sym, int val> {
-  // The C++ enumerant symbol
+class EnumAttrCaseInfo<string sym, int intVal, string strVal> {
+  // The C++ enumerant symbol.
   string symbol = sym;
 
-  // The C++ enumerant value
+  // The C++ enumerant value.
   // If less than zero, there will be no explicit discriminator values assigned
   // to enumerators in the generated enum class.
-  int value = val;
+  int value = intVal;
+
+  // The string representation of the enumerant. May be the same as symbol.
+  string str = strVal;
 }
 
 // An enum attribute case stored with StringAttr.
 class StrEnumAttrCase<string sym, int val = -1> :
-    EnumAttrCaseInfo<sym, val>,
+    EnumAttrCaseInfo<sym, val, sym>,
     StringBasedAttr<
       CPred<"$_self.cast<StringAttr>().getValue() == \"" # sym # "\"">,
       "case " # sym>;
 
-// An enum attribute case stored with IntegerAttr.
-class IntEnumAttrCaseBase<I intType, string sym, int val> :
-    EnumAttrCaseInfo<sym, val>,
-    IntegerAttrBase<intType, "case " # sym> {
+// An enum attribute case stored with IntegerAttr, which has an integer value,
+// its representation as a string and a C++ symbol name which may be different.
+class IntEnumAttrCaseBase<I intType, string sym, string strVal, int intVal> :
+    EnumAttrCaseInfo<sym, intVal, strVal>,
+    IntegerAttrBase<intType, "case " # strVal> {
   let predicate =
-    CPred<"$_self.cast<IntegerAttr>().getInt() == " # val>;
+    CPred<"$_self.cast<IntegerAttr>().getInt() == " # intVal>;
 }
 
-class I32EnumAttrCase<string sym, int val> : IntEnumAttrCaseBase<I32, sym, val>;
-class I64EnumAttrCase<string sym, int val> : IntEnumAttrCaseBase<I64, sym, val>;
+// Cases of integer enum attributes with a specific type. By default, the string
+// representation is the same as the C++ symbol name.
+class I32EnumAttrCase<string sym, int val, string str = sym>
+    : IntEnumAttrCaseBase<I32, sym, str, val>;
+class I64EnumAttrCase<string sym, int val, string str = sym>
+    : IntEnumAttrCaseBase<I64, sym, str, val>;
 
 // A bit enum case stored with 32-bit IntegerAttr. `val` here is *not* the
 // ordinal number of the bit that is set. It is the 32-bit integer with only
 // one bit set.
 class BitEnumAttrCase<string sym, int val> :
-    EnumAttrCaseInfo<sym, val>,
+    EnumAttrCaseInfo<sym, val, sym>,
     IntegerAttrBase<I32, "case " # sym> {
   let predicate = CPred<
     "$_self.cast<IntegerAttr>().getValue().getZExtValue() & " # val # "u">;
@@ -1023,6 +1042,26 @@ class IntElementsAttr<int width> : ElementsAttrBase<
 def I32ElementsAttr : IntElementsAttr<32>;
 def I64ElementsAttr : IntElementsAttr<64>;
 
+// A `width`-bit integer elements attribute. The attribute should be ranked and
+// has a shape as specified in `dims`.
+class RankedIntElementsAttr<int width, list<int> dims> : IntElementsAttr<width> {
+  // Check that this has the specified shape.
+  let predicate = And<[
+    IntElementsAttr<width>.predicate,
+    CPred<"$_self.cast<DenseIntElementsAttr>().getType().getShape() == "
+        "ArrayRef<int64_t>({" # StrJoinInt<dims>.result # "})">]>;
+
+  let description = width # "-bit int elements attribute of shape [" #
+                    StrJoinInt<dims>.result # "]";
+
+  let constBuilderCall = "DenseIntElementsAttr::get("
+    "RankedTensorType::get({" # StrJoinInt<dims>.result #
+    "}, $_builder.getIntegerType(" # width # ")), makeArrayRef($0))";
+}
+
+class RankedI32ElementsAttr<list<int> dims> : RankedIntElementsAttr<32, dims>;
+class RankedI64ElementsAttr<list<int> dims> : RankedIntElementsAttr<64, dims>;
+
 class FloatElementsAttr<int width> : ElementsAttrBase<
   CPred<"$_self.isa<DenseFPElementsAttr>() &&"
       "$_self.cast<DenseElementsAttr>().getType()."
@@ -1091,6 +1130,8 @@ class TypedArrayAttrBase<Attr element, string description>: ArrayAttrBase<
                           "; })">]>,
     description> {
   let constBuilderCall = "$_builder.getArrayAttr($0)";
+
+  Attr elementAttr = element;
 }
 
 def I32ArrayAttr : TypedArrayAttrBase<I32Attr,
@@ -1217,6 +1258,7 @@ class Confined<Attr attr, list<AttrConstraint> constraints> : Attr<
   let convertFromStorage = attr.convertFromStorage;
   let constBuilderCall = attr.constBuilderCall;
   let defaultValue = attr.defaultValue;
+  let valueType = attr.valueType;
   let isOptional = attr.isOptional;
 
   let baseAttr = attr;
@@ -1250,7 +1292,7 @@ class ArrayCount<int n> : AttrConstraint<
 class IntArrayNthElemEq<int index, int value> : AttrConstraint<
     And<[
       CPred<"$_self.cast<ArrayAttr>().size() > " # index>,
-      CPred<"$_self.cast<ArrayAttr>().getValue()[" # index # "]"
+      CPred<"$_self.cast<ArrayAttr>()[" # index # "]"
         ".cast<IntegerAttr>().getInt() == " # value>
        ]>,
     "whose " # index # "-th element must be " # value>;
@@ -1258,7 +1300,7 @@ class IntArrayNthElemEq<int index, int value> : AttrConstraint<
 class IntArrayNthElemMinValue<int index, int min> : AttrConstraint<
     And<[
       CPred<"$_self.cast<ArrayAttr>().size() > " # index>,
-      CPred<"$_self.cast<ArrayAttr>().getValue()[" # index # "]"
+      CPred<"$_self.cast<ArrayAttr>()[" # index # "]"
         ".cast<IntegerAttr>().getInt() >= " # min>
         ]>,
     "whose " # index # "-th element must be at least " # min>;
@@ -1461,6 +1503,10 @@ class OpInterface<string name> : OpInterfaceTrait<name> {
 
   // The list of methods defined by this interface.
   list<InterfaceMethod> methods = [];
+
+  // An optional code block containing extra declarations to place in the
+  // interface declaration.
+  code extraClassDeclaration = "";
 }
 
 // Whether to declare the op interface methods in the op's header. This class
@@ -1571,6 +1617,9 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
   // Custom printer.
   code printer = ?;
 
+  // Custom assembly format.
+  string assemblyFormat = ?;
+
   // Custom verifier.
   code verifier = ?;
 
@@ -1646,7 +1695,9 @@ class AllMatchSameOperatorTrait<list<string> names, string operator,
                                 string description> :
     PredOpTrait<
         "all of {" # StrJoin<names>.result # "} have same " # description,
-        AllMatchSameOperatorPred<names, operator>>;
+        AllMatchSameOperatorPred<names, operator>> {
+  list<string> values = names;
+}
 
 class AllElementCountsMatch<list<string> names> :
     AllMatchSameOperatorTrait<names, ElementCount<"_self">.result,

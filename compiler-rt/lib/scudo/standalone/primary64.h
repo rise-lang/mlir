@@ -40,11 +40,15 @@ namespace scudo {
 // released if the platform allows for it.
 
 template <class SizeClassMapT, uptr RegionSizeLog,
+          s32 MinReleaseToOsIntervalMs = INT32_MIN,
+          s32 MaxReleaseToOsIntervalMs = INT32_MAX,
           bool MaySupportMemoryTagging = false>
 class SizeClassAllocator64 {
 public:
   typedef SizeClassMapT SizeClassMap;
   typedef SizeClassAllocator64<SizeClassMap, RegionSizeLog,
+                               MinReleaseToOsIntervalMs,
+                               MaxReleaseToOsIntervalMs,
                                MaySupportMemoryTagging>
       ThisT;
   typedef SizeClassAllocatorLocalCache<ThisT> CacheT;
@@ -86,12 +90,11 @@ public:
       // memory accesses which ends up being fairly costly. The current lower
       // limit is mostly arbitrary and based on empirical observations.
       // TODO(kostyak): make the lower limit a runtime option
-      Region->CanRelease = (ReleaseToOsInterval >= 0) &&
-                           (I != SizeClassMap::BatchClassId) &&
+      Region->CanRelease = (I != SizeClassMap::BatchClassId) &&
                            (getSizeByClassId(I) >= (PageSize / 32));
       Region->RandState = getRandomU32(&Seed);
     }
-    ReleaseToOsIntervalMs = ReleaseToOsInterval;
+    setReleaseToOsIntervalMs(ReleaseToOsInterval);
 
     if (SupportsMemoryTagging)
       UseMemoryTagging = systemSupportsMemoryTagging();
@@ -187,11 +190,18 @@ public:
       getStats(Str, I, 0);
   }
 
+  void setReleaseToOsIntervalMs(s32 Interval) {
+    if (Interval >= MaxReleaseToOsIntervalMs) {
+      Interval = MaxReleaseToOsIntervalMs;
+    } else if (Interval <= MinReleaseToOsIntervalMs) {
+      Interval = MinReleaseToOsIntervalMs;
+    }
+    atomic_store(&ReleaseToOsIntervalMs, Interval, memory_order_relaxed);
+  }
+
   uptr releaseToOS() {
     uptr TotalReleasedBytes = 0;
     for (uptr I = 0; I < NumClasses; I++) {
-      if (I == SizeClassMap::BatchClassId)
-        continue;
       RegionInfo *Region = getRegionInfo(I);
       ScopedLock L(Region->Mutex);
       TotalReleasedBytes += releaseToOSMaybe(Region, I, /*Force=*/true);
@@ -210,7 +220,7 @@ private:
   static const uptr PrimarySize = RegionSize * NumClasses;
 
   // Call map for user memory with at least this size.
-  static const uptr MapSizeIncrement = 1UL << 17;
+  static const uptr MapSizeIncrement = 1UL << 18;
   // Fill at most this number of batches from the newly map'd memory.
   static const u32 MaxNumBatches = 8U;
 
@@ -244,7 +254,7 @@ private:
   uptr PrimaryBase;
   RegionInfo *RegionInfoArray;
   MapPlatformData Data;
-  s32 ReleaseToOsIntervalMs;
+  atomic_s32 ReleaseToOsIntervalMs;
   bool UseMemoryTagging;
 
   RegionInfo *getRegionInfo(uptr ClassId) const {
@@ -378,6 +388,10 @@ private:
                 getRegionBaseByClassId(ClassId));
   }
 
+  s32 getReleaseToOsIntervalMs() {
+    return atomic_load(&ReleaseToOsIntervalMs, memory_order_relaxed);
+  }
+
   NOINLINE uptr releaseToOSMaybe(RegionInfo *Region, uptr ClassId,
                                  bool Force = false) {
     const uptr BlockSize = getSizeByClassId(ClassId);
@@ -397,11 +411,11 @@ private:
     }
 
     if (!Force) {
-      const s32 IntervalMs = ReleaseToOsIntervalMs;
+      const s32 IntervalMs = getReleaseToOsIntervalMs();
       if (IntervalMs < 0)
         return 0;
       if (Region->ReleaseInfo.LastReleaseAtNs +
-              static_cast<uptr>(IntervalMs) * 1000000ULL >
+              static_cast<u64>(IntervalMs) * 1000000 >
           getMonotonicTime()) {
         return 0; // Memory was returned recently.
       }

@@ -24,11 +24,15 @@
 
 #ifdef GWP_ASAN_HOOKS
 #include "gwp_asan/guarded_pool_allocator.h"
+#include "gwp_asan/optional/backtrace.h"
+#include "gwp_asan/optional/segv_handler.h"
 #endif // GWP_ASAN_HOOKS
 
 extern "C" inline void EmptyCallback() {}
 
 namespace scudo {
+
+enum class Option { ReleaseInterval };
 
 template <class Params, void (*PostInitCallback)(void) = EmptyCallback>
 class Allocator {
@@ -141,8 +145,9 @@ public:
         static_cast<u32>(getFlags()->quarantine_max_chunk_size);
 
     Stats.initLinkerInitialized();
-    Primary.initLinkerInitialized(getFlags()->release_to_os_interval_ms);
-    Secondary.initLinkerInitialized(&Stats);
+    const s32 ReleaseToOsIntervalMs = getFlags()->release_to_os_interval_ms;
+    Primary.initLinkerInitialized(ReleaseToOsIntervalMs);
+    Secondary.initLinkerInitialized(&Stats, ReleaseToOsIntervalMs);
 
     Quarantine.init(
         static_cast<uptr>(getFlags()->quarantine_size_kb << 10),
@@ -168,8 +173,13 @@ public:
     // Allocator::disable calling GWPASan.disable). Disable GWP-ASan's atfork
     // handler.
     Opt.InstallForkHandlers = false;
-    Opt.Printf = Printf;
+    Opt.Backtrace = gwp_asan::options::getBacktraceFunction();
     GuardedAlloc.init(Opt);
+
+    if (Opt.InstallSignalHandlers)
+      gwp_asan::crash_handler::installSignalHandlers(
+          &GuardedAlloc, Printf, gwp_asan::options::getPrintBacktraceFunction(),
+          Opt.Backtrace);
 #endif // GWP_ASAN_HOOKS
   }
 
@@ -179,6 +189,8 @@ public:
     TSDRegistry.unmapTestOnly();
     Primary.unmapTestOnly();
 #ifdef GWP_ASAN_HOOKS
+    if (getFlags()->GWP_ASAN_InstallSignalHandlers)
+      gwp_asan::crash_handler::uninstallSignalHandlers();
     GuardedAlloc.uninitTestOnly();
 #endif // GWP_ASAN_HOOKS
   }
@@ -257,6 +269,17 @@ public:
       bool UnlockRequired;
       auto *TSD = TSDRegistry.getTSDAndLock(&UnlockRequired);
       Block = TSD->Cache.allocate(ClassId);
+      // If the allocation failed, the most likely reason with a 64-bit primary
+      // is the region being full. In that event, retry once using the
+      // immediately larger class (except if the failing class was already the
+      // largest). This will waste some memory but will allow the application to
+      // not fail.
+      if (SCUDO_ANDROID) {
+        if (UNLIKELY(!Block)) {
+          if (ClassId < SizeClassMap::LargestClassId)
+            Block = TSD->Cache.allocate(++ClassId);
+        }
+      }
       if (UnlockRequired)
         TSD->unlock();
     } else {
@@ -566,6 +589,7 @@ public:
   void releaseToOS() {
     initThreadMaybe();
     Primary.releaseToOS();
+    Secondary.releaseToOS();
   }
 
   // Iterate over all chunks and call a callback for all busy chunks located
@@ -602,8 +626,14 @@ public:
     return Options.MayReturnNull;
   }
 
-  // TODO(kostyak): implement this as a "backend" to mallopt.
-  bool setOption(UNUSED uptr Option, UNUSED uptr Value) { return false; }
+  bool setOption(Option O, sptr Value) {
+    if (O == Option::ReleaseInterval) {
+      Primary.setReleaseToOsIntervalMs(static_cast<s32>(Value));
+      Secondary.setReleaseToOsIntervalMs(static_cast<s32>(Value));
+      return true;
+    }
+    return false;
+  }
 
   // Return the usable size for a given chunk. Technically we lie, as we just
   // report the actual size of a chunk. This is done to counteract code actively

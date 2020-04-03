@@ -128,7 +128,7 @@ enum class ConstraintKind { NoConstraint, ReadOnly, ReadWrite };
 struct MemoryRegion {
   MemoryRegion(StringRef name, uint64_t origin, uint64_t length, uint32_t flags,
                uint32_t negFlags)
-      : name(name), origin(origin), length(length), flags(flags),
+      : name(std::string(name)), origin(origin), length(length), flags(flags),
         negFlags(negFlags) {}
 
   std::string name;
@@ -206,6 +206,12 @@ struct ByteCommand : BaseCommand {
 
   // Size of this data command.
   unsigned size;
+};
+
+struct InsertCommand {
+  OutputSection *os;
+  bool isAfter;
+  StringRef where;
 };
 
 struct PhdrsCommand {
@@ -311,10 +317,9 @@ public:
   // A list of symbols referenced by the script.
   std::vector<llvm::StringRef> referencedSymbols;
 
-  // Used to implement INSERT [AFTER|BEFORE]. Contains commands that need
-  // to be inserted into SECTIONS commands list.
-  llvm::DenseMap<StringRef, std::vector<BaseCommand *>> insertAfterCommands;
-  llvm::DenseMap<StringRef, std::vector<BaseCommand *>> insertBeforeCommands;
+  // Used to implement INSERT [AFTER|BEFORE]. Contains output sections that need
+  // to be reordered.
+  std::vector<InsertCommand> insertCommands;
 };
 
 extern LinkerScript *script;

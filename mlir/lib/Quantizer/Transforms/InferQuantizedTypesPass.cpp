@@ -141,11 +141,11 @@ void InferQuantizedTypesPass::runWithConfig(SolverContext &solverContext,
   // TODO: Only dump the GraphViz if a flag is set and move to a utility.
   // GraphViz.
   if (!solverContext.getDebugCAGDotPath().empty()) {
-    auto actFileName =
-        llvm::WriteGraph(const_cast<const CAGSlice *>(&cag), "CAG",
-                         /*ShortNames=*/false,
-                         /*Title=*/"CAG",
-                         /*Filename=*/solverContext.getDebugCAGDotPath());
+    auto actFileName = llvm::WriteGraph(
+        const_cast<const CAGSlice *>(&cag), "CAG",
+        /*ShortNames=*/false,
+        /*Title=*/"CAG",
+        /*Filename=*/std::string(solverContext.getDebugCAGDotPath()));
     llvm::errs() << "Wrote graphviz file: " << actFileName << "\n";
   }
 
@@ -281,6 +281,11 @@ std::unique_ptr<OpPassBase<ModuleOp>>
 mlir::quantizer::createInferQuantizedTypesPass(
     SolverContext &solverContext, const TargetConfiguration &config) {
   return std::make_unique<InferQuantizedTypesPass>(solverContext, config);
+}
+void mlir::quantizer::registerInferQuantizedTypesPass() {
+  // Do nothing, this will be enough to force link this file and the static
+  // registration will kick-in. This is temporary while we're refactoring pass
+  // registration to move away from static constructors.
 }
 
 static PassRegistration<InferQuantizedTypesPass>

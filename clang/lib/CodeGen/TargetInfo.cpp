@@ -726,11 +726,19 @@ ABIArgInfo DefaultABIInfo::classifyReturnType(QualType RetTy) const {
 //===----------------------------------------------------------------------===//
 
 class WebAssemblyABIInfo final : public SwiftABIInfo {
+public:
+  enum ABIKind {
+    MVP = 0,
+    ExperimentalMV = 1,
+  };
+
+private:
   DefaultABIInfo defaultInfo;
+  ABIKind Kind;
 
 public:
-  explicit WebAssemblyABIInfo(CodeGen::CodeGenTypes &CGT)
-      : SwiftABIInfo(CGT), defaultInfo(CGT) {}
+  explicit WebAssemblyABIInfo(CodeGen::CodeGenTypes &CGT, ABIKind Kind)
+      : SwiftABIInfo(CGT), defaultInfo(CGT), Kind(Kind) {}
 
 private:
   ABIArgInfo classifyReturnType(QualType RetTy) const;
@@ -761,8 +769,9 @@ private:
 
 class WebAssemblyTargetCodeGenInfo final : public TargetCodeGenInfo {
 public:
-  explicit WebAssemblyTargetCodeGenInfo(CodeGen::CodeGenTypes &CGT)
-      : TargetCodeGenInfo(new WebAssemblyABIInfo(CGT)) {}
+  explicit WebAssemblyTargetCodeGenInfo(CodeGen::CodeGenTypes &CGT,
+                                        WebAssemblyABIInfo::ABIKind K)
+      : TargetCodeGenInfo(new WebAssemblyABIInfo(CGT, K)) {}
 
   void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
                            CodeGen::CodeGenModule &CGM) const override {
@@ -813,6 +822,20 @@ ABIArgInfo WebAssemblyABIInfo::classifyArgumentType(QualType Ty) const {
     // though watch out for things like bitfields.
     if (const Type *SeltTy = isSingleElementStruct(Ty, getContext()))
       return ABIArgInfo::getDirect(CGT.ConvertType(QualType(SeltTy, 0)));
+    // For the experimental multivalue ABI, fully expand all other aggregates
+    if (Kind == ABIKind::ExperimentalMV) {
+      const RecordType *RT = Ty->getAs<RecordType>();
+      assert(RT);
+      bool HasBitField = false;
+      for (auto *Field : RT->getDecl()->fields()) {
+        if (Field->isBitField()) {
+          HasBitField = true;
+          break;
+        }
+      }
+      if (!HasBitField)
+        return ABIArgInfo::getExpand();
+    }
   }
 
   // Otherwise just do the default thing.
@@ -832,6 +855,9 @@ ABIArgInfo WebAssemblyABIInfo::classifyReturnType(QualType RetTy) const {
       // ABIArgInfo::getDirect().
       if (const Type *SeltTy = isSingleElementStruct(RetTy, getContext()))
         return ABIArgInfo::getDirect(CGT.ConvertType(QualType(SeltTy, 0)));
+      // For the experimental multivalue ABI, return all other aggregates
+      if (Kind == ABIKind::ExperimentalMV)
+        return ABIArgInfo::getDirect();
     }
   }
 
@@ -6591,10 +6617,11 @@ namespace {
 
 class SystemZABIInfo : public SwiftABIInfo {
   bool HasVector;
+  bool IsSoftFloatABI;
 
 public:
-  SystemZABIInfo(CodeGenTypes &CGT, bool HV)
-    : SwiftABIInfo(CGT), HasVector(HV) {}
+  SystemZABIInfo(CodeGenTypes &CGT, bool HV, bool SF)
+    : SwiftABIInfo(CGT), HasVector(HV), IsSoftFloatABI(SF) {}
 
   bool isPromotableIntegerType(QualType Ty) const;
   bool isCompoundType(QualType Ty) const;
@@ -6626,8 +6653,8 @@ public:
 
 class SystemZTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
-  SystemZTargetCodeGenInfo(CodeGenTypes &CGT, bool HasVector)
-    : TargetCodeGenInfo(new SystemZABIInfo(CGT, HasVector)) {}
+  SystemZTargetCodeGenInfo(CodeGenTypes &CGT, bool HasVector, bool SoftFloatABI)
+    : TargetCodeGenInfo(new SystemZABIInfo(CGT, HasVector, SoftFloatABI)) {}
 };
 
 }
@@ -6666,6 +6693,9 @@ bool SystemZABIInfo::isVectorArgumentType(QualType Ty) const {
 }
 
 bool SystemZABIInfo::isFPArgumentType(QualType Ty) const {
+  if (IsSoftFloatABI)
+    return false;
+
   if (const BuiltinType *BT = Ty->getAs<BuiltinType>())
     switch (BT->getKind()) {
     case BuiltinType::Float:
@@ -6751,7 +6781,7 @@ Address SystemZABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   } else {
     if (AI.getCoerceToType())
       ArgTy = AI.getCoerceToType();
-    InFPRs = ArgTy->isFloatTy() || ArgTy->isDoubleTy();
+    InFPRs = (!IsSoftFloatABI && (ArgTy->isFloatTy() || ArgTy->isDoubleTy()));
     IsVector = ArgTy->isVectorTy();
     UnpaddedSize = TyInfo.first;
     DirectAlign = TyInfo.second;
@@ -7482,13 +7512,10 @@ void TCETargetCodeGenInfo::setTargetAttributes(
 namespace {
 
 class HexagonABIInfo : public ABIInfo {
-
-
 public:
   HexagonABIInfo(CodeGenTypes &CGT) : ABIInfo(CGT) {}
 
 private:
-
   ABIArgInfo classifyReturnType(QualType RetTy) const;
   ABIArgInfo classifyArgumentType(QualType RetTy) const;
 
@@ -7501,14 +7528,14 @@ private:
 class HexagonTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   HexagonTargetCodeGenInfo(CodeGenTypes &CGT)
-    :TargetCodeGenInfo(new HexagonABIInfo(CGT)) {}
+    : TargetCodeGenInfo(new HexagonABIInfo(CGT)) {}
 
   int getDwarfEHStackPointer(CodeGen::CodeGenModule &M) const override {
     return 29;
   }
 };
 
-}
+} // namespace
 
 void HexagonABIInfo::computeInfo(CGFunctionInfo &FI) const {
   if (!getCXXABI().classifyReturnType(FI))
@@ -7523,8 +7550,8 @@ ABIArgInfo HexagonABIInfo::classifyArgumentType(QualType Ty) const {
     if (const EnumType *EnumTy = Ty->getAs<EnumType>())
       Ty = EnumTy->getDecl()->getIntegerType();
 
-    return (Ty->isPromotableIntegerType() ? ABIArgInfo::getExtend(Ty)
-                                          : ABIArgInfo::getDirect());
+    return Ty->isPromotableIntegerType() ? ABIArgInfo::getExtend(Ty)
+                                         : ABIArgInfo::getDirect();
   }
 
   if (CGCXXABI::RecordArgABI RAA = getRecordArgABI(Ty, getCXXABI()))
@@ -7535,53 +7562,56 @@ ABIArgInfo HexagonABIInfo::classifyArgumentType(QualType Ty) const {
     return ABIArgInfo::getIgnore();
 
   uint64_t Size = getContext().getTypeSize(Ty);
-  if (Size > 64)
-    return getNaturalAlignIndirect(Ty, /*ByVal=*/true);
+  if (Size <= 64) {
     // Pass in the smallest viable integer type.
-  else if (Size > 32)
-      return ABIArgInfo::getDirect(llvm::Type::getInt64Ty(getVMContext()));
-  else if (Size > 16)
-      return ABIArgInfo::getDirect(llvm::Type::getInt32Ty(getVMContext()));
-  else if (Size > 8)
-      return ABIArgInfo::getDirect(llvm::Type::getInt16Ty(getVMContext()));
-  else
-      return ABIArgInfo::getDirect(llvm::Type::getInt8Ty(getVMContext()));
+    if (!llvm::isPowerOf2_64(Size))
+      Size = llvm::NextPowerOf2(Size);
+    return ABIArgInfo::getDirect(llvm::Type::getIntNTy(getVMContext(), Size));
+  }
+  return getNaturalAlignIndirect(Ty, /*ByVal=*/true);
 }
 
 ABIArgInfo HexagonABIInfo::classifyReturnType(QualType RetTy) const {
   if (RetTy->isVoidType())
     return ABIArgInfo::getIgnore();
 
-  // Large vector types should be returned via memory.
-  if (RetTy->isVectorType() && getContext().getTypeSize(RetTy) > 64)
-    return getNaturalAlignIndirect(RetTy);
+  const TargetInfo &T = CGT.getTarget();
+  uint64_t Size = getContext().getTypeSize(RetTy);
+
+  if (RetTy->getAs<VectorType>()) {
+    // HVX vectors are returned in vector registers or register pairs.
+    if (T.hasFeature("hvx")) {
+      assert(T.hasFeature("hvx-length64b") || T.hasFeature("hvx-length128b"));
+      uint64_t VecSize = T.hasFeature("hvx-length64b") ? 64*8 : 128*8;
+      if (Size == VecSize || Size == 2*VecSize)
+        return ABIArgInfo::getDirectInReg();
+    }
+
+    // Large vector types should be returned via memory.
+    if (Size > 64)
+      return getNaturalAlignIndirect(RetTy);
+  }
 
   if (!isAggregateTypeForABI(RetTy)) {
     // Treat an enum type as its underlying type.
     if (const EnumType *EnumTy = RetTy->getAs<EnumType>())
       RetTy = EnumTy->getDecl()->getIntegerType();
 
-    return (RetTy->isPromotableIntegerType() ? ABIArgInfo::getExtend(RetTy)
-                                             : ABIArgInfo::getDirect());
+    return RetTy->isPromotableIntegerType() ? ABIArgInfo::getExtend(RetTy)
+                                            : ABIArgInfo::getDirect();
   }
 
   if (isEmptyRecord(getContext(), RetTy, true))
     return ABIArgInfo::getIgnore();
 
-  // Aggregates <= 8 bytes are returned in r0; other aggregates
+  // Aggregates <= 8 bytes are returned in registers, other aggregates
   // are returned indirectly.
-  uint64_t Size = getContext().getTypeSize(RetTy);
   if (Size <= 64) {
     // Return in the smallest viable integer type.
-    if (Size <= 8)
-      return ABIArgInfo::getDirect(llvm::Type::getInt8Ty(getVMContext()));
-    if (Size <= 16)
-      return ABIArgInfo::getDirect(llvm::Type::getInt16Ty(getVMContext()));
-    if (Size <= 32)
-      return ABIArgInfo::getDirect(llvm::Type::getInt32Ty(getVMContext()));
-    return ABIArgInfo::getDirect(llvm::Type::getInt64Ty(getVMContext()));
+    if (!llvm::isPowerOf2_64(Size))
+      Size = llvm::NextPowerOf2(Size);
+    return ABIArgInfo::getDirect(llvm::Type::getIntNTy(getVMContext(), Size));
   }
-
   return getNaturalAlignIndirect(RetTy, /*ByVal=*/true);
 }
 
@@ -9850,8 +9880,12 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
   }
 
   case llvm::Triple::wasm32:
-  case llvm::Triple::wasm64:
-    return SetCGInfo(new WebAssemblyTargetCodeGenInfo(Types));
+  case llvm::Triple::wasm64: {
+    WebAssemblyABIInfo::ABIKind Kind = WebAssemblyABIInfo::MVP;
+    if (getTarget().getABI() == "experimental-mv")
+      Kind = WebAssemblyABIInfo::ExperimentalMV;
+    return SetCGInfo(new WebAssemblyTargetCodeGenInfo(Types, Kind));
+  }
 
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
@@ -9926,8 +9960,9 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
   }
 
   case llvm::Triple::systemz: {
-    bool HasVector = getTarget().getABI() == "vector";
-    return SetCGInfo(new SystemZTargetCodeGenInfo(Types, HasVector));
+    bool SoftFloat = CodeGenOpts.FloatABI == "soft";
+    bool HasVector = !SoftFloat && getTarget().getABI() == "vector";
+    return SetCGInfo(new SystemZTargetCodeGenInfo(Types, HasVector, SoftFloat));
   }
 
   case llvm::Triple::tce:

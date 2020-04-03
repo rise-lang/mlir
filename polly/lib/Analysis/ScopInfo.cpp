@@ -916,6 +916,12 @@ void MemoryAccess::realignParams() {
   isl::set Ctx = Statement->getParent()->getContext();
   InvalidDomain = InvalidDomain.gist_params(Ctx);
   AccessRelation = AccessRelation.gist_params(Ctx);
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  isl::space CtxSpace = Ctx.get_space();
+  InvalidDomain = InvalidDomain.align_params(CtxSpace);
+  AccessRelation = AccessRelation.align_params(CtxSpace);
 }
 
 const std::string MemoryAccess::getReductionOperatorStr() const {
@@ -1174,6 +1180,12 @@ void ScopStmt::realignParams() {
   isl::set Ctx = Parent.getContext();
   InvalidDomain = InvalidDomain.gist_params(Ctx);
   Domain = Domain.gist_params(Ctx);
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  isl::space CtxSpace = Ctx.get_space();
+  InvalidDomain = InvalidDomain.align_params(CtxSpace);
+  Domain = Domain.align_params(CtxSpace);
 }
 
 ScopStmt::ScopStmt(Scop &parent, Region &R, StringRef Name,
@@ -1465,7 +1477,7 @@ StringMap<std::string> KnownNames = {
 static std::string getCallParamName(CallInst *Call) {
   std::string Result;
   raw_string_ostream OS(Result);
-  std::string Name = Call->getCalledFunction()->getName();
+  std::string Name = Call->getCalledFunction()->getName().str();
 
   auto Iterator = KnownNames.find(Name);
   if (Iterator != KnownNames.end())
@@ -1496,7 +1508,7 @@ void Scop::createParameterId(const SCEV *Parameter) {
       // we use this name as it is likely to be unique and more useful than just
       // a number.
       if (Val->hasName())
-        ParameterName = Val->getName();
+        ParameterName = Val->getName().str();
       else if (LoadInst *LI = dyn_cast<LoadInst>(Val)) {
         auto *LoadOrigin = LI->getPointerOperand()->stripInBoundsOffsets();
         if (LoadOrigin->hasName()) {
@@ -1595,6 +1607,8 @@ void Scop::realignParams() {
 
   // Align the parameters of all data structures to the model.
   Context = Context.align_params(Space);
+  AssumedContext = AssumedContext.align_params(Space);
+  InvalidContext = InvalidContext.align_params(Space);
 
   // Bound the size of the fortran array dimensions.
   Context = boundFortranArrayParams(Context, arrays());
@@ -1606,6 +1620,10 @@ void Scop::realignParams() {
     Stmt.realignParams();
   // Simplify the schedule according to the context too.
   Schedule = Schedule.gist_domain_params(getContext());
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  Schedule = Schedule.align_params(Space);
 }
 
 static isl::set simplifyAssumptionContext(isl::set AssumptionContext,

@@ -20,6 +20,7 @@
 #include "mlir/ExecutionEngine/OptUtils.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Module.h"
+#include "mlir/InitAllDialects.h"
 #include "mlir/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -87,7 +88,7 @@ std::unique_ptr<toy::ModuleAST> parseInputFile(llvm::StringRef filename) {
     return nullptr;
   }
   auto buffer = fileOrErr.get()->getBuffer();
-  LexerBuffer lexer(buffer.begin(), buffer.end(), filename);
+  LexerBuffer lexer(buffer.begin(), buffer.end(), std::string(filename));
   Parser parser(lexer);
   return parser.parseModule();
 }
@@ -239,6 +240,7 @@ int runJit(mlir::ModuleOp module) {
 }
 
 int main(int argc, char **argv) {
+  mlir::registerAllDialects();
   mlir::registerPassManagerCLOptions();
   cl::ParseCommandLineOptions(argc, argv, "toy compiler\n");
 

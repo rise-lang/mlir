@@ -205,7 +205,7 @@ raw_ostream &operator<<(raw_ostream &OS, const SymbolMap &Symbols) {
 
 raw_ostream &operator<<(raw_ostream &OS,
                         const SymbolDependenceMap::value_type &KV) {
-  return OS << "(" << KV.first << ", " << KV.second << ")";
+  return OS << "(" << KV.first->getName() << ", " << KV.second << ")";
 }
 
 raw_ostream &operator<<(raw_ostream &OS, const SymbolDependenceMap &Deps) {
@@ -838,7 +838,7 @@ JITDylib::defineMaterializing(SymbolFlagsMap SymbolFlags) {
             Symbols.erase(SI);
 
           // FIXME: Return all duplicates.
-          return make_error<DuplicateDefinition>(*Name);
+          return make_error<DuplicateDefinition>(std::string(*Name));
         }
 
         // Otherwise just make a note to discard this symbol after the loop.
@@ -940,6 +940,11 @@ void JITDylib::addDependencies(const SymbolStringPtr &Name,
   assert(Symbols.count(Name) && "Name not in symbol table");
   assert(Symbols[Name].isInMaterializationPhase() &&
          "Can not add dependencies for a symbol that is not materializing");
+
+  LLVM_DEBUG({
+      dbgs() << "In " << getName() << " adding dependencies for "
+             << *Name << ": " << Dependencies << "\n";
+    });
 
   // If Name is already in an error state then just bail out.
   if (Symbols[Name].getFlags().hasError())
@@ -1815,7 +1820,7 @@ Error JITDylib::defineImpl(MaterializationUnit &MU) {
 
   // If there were any duplicate definitions then bail out.
   if (!Duplicates.empty())
-    return make_error<DuplicateDefinition>(**Duplicates.begin());
+    return make_error<DuplicateDefinition>(std::string(**Duplicates.begin()));
 
   // Discard any overridden defs in this MU.
   for (auto &S : MUDefsOverridden)

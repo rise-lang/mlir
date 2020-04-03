@@ -80,7 +80,8 @@ namespace llvm {
     static constexpr size_t strLen(const char *Str) {
 #if __cplusplus > 201402L
       return std::char_traits<char>::length(Str);
-#elif __has_builtin(__builtin_strlen) || defined(__GNUC__) || defined(_MSC_VER)
+#elif __has_builtin(__builtin_strlen) || defined(__GNUC__) || \
+    (defined(_MSC_VER) && _MSC_VER >= 1916)
       return __builtin_strlen(Str);
 #else
       const char *Begin = Str;
@@ -264,17 +265,14 @@ namespace llvm {
     /// The declaration here is extra complicated so that `stringRef = {}`
     /// and `stringRef = "abc"` continue to select the move assignment operator.
     template <typename T>
-    typename std::enable_if<std::is_same<T, std::string>::value,
-                            StringRef>::type &
+    std::enable_if_t<std::is_same<T, std::string>::value, StringRef> &
     operator=(T &&Str) = delete;
 
     /// @}
     /// @name Type Conversions
     /// @{
 
-    operator std::string() const {
-      return str();
-    }
+    explicit operator std::string() const { return str(); }
 
 #if __cplusplus > 201402L
     operator std::string_view() const {
@@ -509,7 +507,7 @@ namespace llvm {
     /// this returns true to signify the error.  The string is considered
     /// erroneous if empty or if it overflows T.
     template <typename T>
-    typename std::enable_if<std::numeric_limits<T>::is_signed, bool>::type
+    std::enable_if_t<std::numeric_limits<T>::is_signed, bool>
     getAsInteger(unsigned Radix, T &Result) const {
       long long LLVal;
       if (getAsSignedInteger(*this, Radix, LLVal) ||
@@ -520,7 +518,7 @@ namespace llvm {
     }
 
     template <typename T>
-    typename std::enable_if<!std::numeric_limits<T>::is_signed, bool>::type
+    std::enable_if_t<!std::numeric_limits<T>::is_signed, bool>
     getAsInteger(unsigned Radix, T &Result) const {
       unsigned long long ULLVal;
       // The additional cast to unsigned long long is required to avoid the
@@ -543,7 +541,7 @@ namespace llvm {
     /// The portion of the string representing the discovered numeric value
     /// is removed from the beginning of the string.
     template <typename T>
-    typename std::enable_if<std::numeric_limits<T>::is_signed, bool>::type
+    std::enable_if_t<std::numeric_limits<T>::is_signed, bool>
     consumeInteger(unsigned Radix, T &Result) {
       long long LLVal;
       if (consumeSignedInteger(*this, Radix, LLVal) ||
@@ -554,7 +552,7 @@ namespace llvm {
     }
 
     template <typename T>
-    typename std::enable_if<!std::numeric_limits<T>::is_signed, bool>::type
+    std::enable_if_t<!std::numeric_limits<T>::is_signed, bool>
     consumeInteger(unsigned Radix, T &Result) {
       unsigned long long ULLVal;
       if (consumeUnsignedInteger(*this, Radix, ULLVal) ||

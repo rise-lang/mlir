@@ -75,6 +75,14 @@ StringRef tblgen::Attribute::getReturnType() const {
   return getValueAsString(init);
 }
 
+// Return the type constraint corresponding to the type of this attribute, or
+// None if this is not a TypedAttr.
+llvm::Optional<tblgen::Type> tblgen::Attribute::getValueType() const {
+  if (auto *defInit = dyn_cast<llvm::DefInit>(def->getValueInit("valueType")))
+    return tblgen::Type(defInit->getDef());
+  return llvm::None;
+}
+
 StringRef tblgen::Attribute::getConvertFromStorageCall() const {
   const auto *init = def->getValueInit("convertFromStorage");
   return getValueAsString(init);
@@ -152,6 +160,10 @@ bool tblgen::EnumAttrCase::isStrCase() const {
 
 StringRef tblgen::EnumAttrCase::getSymbol() const {
   return def->getValueAsString("symbol");
+}
+
+StringRef tblgen::EnumAttrCase::getStr() const {
+  return def->getValueAsString("str");
 }
 
 int64_t tblgen::EnumAttrCase::getValue() const {

@@ -1866,6 +1866,7 @@ Parser::ParseCXXTypeConstructExpression(const DeclSpec &DS) {
          && "Expected '(' or '{'!");
 
   if (Tok.is(tok::l_brace)) {
+    PreferredType.enterTypeCast(Tok.getLocation(), TypeRep.get());
     ExprResult Init = ParseBraceInitializer();
     if (Init.isInvalid())
       return Init;
@@ -2323,7 +2324,7 @@ bool Parser::ParseUnqualifiedIdTemplateId(CXXScopeSpec &SS,
         // before 'getAs' and treat this as a dependent template name.
         std::string Name;
         if (Id.getKind() == UnqualifiedIdKind::IK_Identifier)
-          Name = Id.Identifier->getName();
+          Name = std::string(Id.Identifier->getName());
         else {
           Name = "operator ";
           if (Id.getKind() == UnqualifiedIdKind::IK_OperatorFunctionId)
@@ -3485,6 +3486,7 @@ ExprResult Parser::ParseRequiresExpression() {
           // We need to consume the typename to allow 'requires { typename a; }'
           SourceLocation TypenameKWLoc = ConsumeToken();
           if (TryAnnotateCXXScopeToken()) {
+            TPA.Commit();
             SkipUntil(tok::semi, tok::r_brace, SkipUntilFlags::StopBeforeMatch);
             break;
           }

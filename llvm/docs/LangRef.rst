@@ -1820,27 +1820,42 @@ example:
     not introduce any new floating-point instructions that may trap.
 
 ``"denormal-fp-math"``
-  This indicates the denormal (subnormal) handling that may be assumed
-   for the default floating-point environment. This may be one of
-   ``"ieee"``, ``"preserve-sign"``, or ``"positive-zero"``.  If this
-   is attribute is not specified, the default is ``"ieee"``. If the
-   mode is ``"preserve-sign"``, or ``"positive-zero"``, denormal
-   outputs may be flushed to zero by standard floating point
-   operations. It is not mandated that flushing to zero occurs, but if
-   a denormal output is flushed to zero, it must respect the sign
-   mode. Not all targets support all modes. While this indicates the
-   expected floating point mode the function will be executed with,
-   this does not make any attempt to ensure the mode is
-   consistent. User or platform code is expected to set the floating
-   point mode appropriately before function entry.
+    This indicates the denormal (subnormal) handling that may be
+    assumed for the default floating-point environment. This is a
+    comma separated pair. The elements may be one of ``"ieee"``,
+    ``"preserve-sign"``, or ``"positive-zero"``. The first entry
+    indicates the flushing mode for the result of floating point
+    operations. The second indicates the handling of denormal inputs
+    to floating point instructions. For compatability with older
+    bitcode, if the second value is omitted, both input and output
+    modes will assume the same mode.
+
+    If this is attribute is not specified, the default is
+    ``"ieee,ieee"``.
+
+    If the output mode is ``"preserve-sign"``, or ``"positive-zero"``,
+    denormal outputs may be flushed to zero by standard floating-point
+    operations. It is not mandated that flushing to zero occurs, but if
+    a denormal output is flushed to zero, it must respect the sign
+    mode. Not all targets support all modes. While this indicates the
+    expected floating point mode the function will be executed with,
+    this does not make any attempt to ensure the mode is
+    consistent. User or platform code is expected to set the floating
+    point mode appropriately before function entry.
+
+   If the input mode is ``"preserve-sign"``, or ``"positive-zero"``, a
+   floating-point operation must treat any input denormal value as
+   zero. In some situations, if an instruction does not respect this
+   mode, the input may need to be converted to 0 as if by
+   ``@llvm.canonicalize`` during lowering for correctness.
 
 ``"denormal-fp-math-f32"``
-   Same as ``"denormal-fp-math"``, but only controls the behavior of
-   the 32-bit float type (or vectors of 32-bit floats). If both are
-   are present, this overrides ``"denormal-fp-math"``. Not all targets
-   support separately setting the denormal mode per type, and no
-   attempt is made to diagnose unsupported uses. Currently this
-   attribute is respected by the AMDGPU and NVPTX backends.
+    Same as ``"denormal-fp-math"``, but only controls the behavior of
+    the 32-bit float type (or vectors of 32-bit floats). If both are
+    are present, this overrides ``"denormal-fp-math"``. Not all targets
+    support separately setting the denormal mode per type, and no
+    attempt is made to diagnose unsupported uses. Currently this
+    attribute is respected by the AMDGPU and NVPTX backends.
 
 ``"thunk"``
     This attribute indicates that the function will delegate to some other
@@ -1864,6 +1879,77 @@ example:
     the function. The instrumentation checks that the return address for the
     function has not changed between the function prolog and eiplog. It is
     currently x86_64-specific.
+
+Call Site Attributes
+----------------------
+
+In addition to function attributes the following call site only
+attributes are supported:
+
+``vector-function-abi-variant``
+    This attribute can be attached to a :ref:`call <i_call>` to list
+    the vector functions associated to the function. Notice that the
+    attribute cannot be attached to a :ref:`invoke <i_invoke>` or a
+    :ref:`callbr <i_callbr>` instruction. The attribute consists of a
+    comma separated list of mangled names. The order of the list does
+    not imply preference (it is logically a set). The compiler is free
+    to pick any listed vector function of its choosing.
+
+    The syntax for the mangled names is as follows:::
+
+        _ZGV<isa><mask><vlen><parameters>_<scalar_name>[(<vector_redirection>)]
+
+    When present, the attribute informs the compiler that the function
+    ``<scalar_name>`` has a corresponding vector variant that can be
+    used to perform the concurrent invocation of ``<scalar_name>`` on
+    vectors. The shape of the vector function is described by the
+    tokens between the prefix ``_ZGV`` and the ``<scalar_name>``
+    token. The standard name of the vector function is
+    ``_ZGV<isa><mask><vlen><parameters>_<scalar_name>``. When present,
+    the optional token ``(<vector_redirection>)`` informs the compiler
+    that a custom name is provided in addition to the standard one
+    (custom names can be provided for example via the use of ``declare
+    variant`` in OpenMP 5.0). The declaration of the variant must be
+    present in the IR Module. The signature of the vector variant is
+    determined by the rules of the Vector Function ABI (VFABI)
+    specifications of the target. For Arm and X86, the VFABI can be
+    found at https://github.com/ARM-software/abi-aa and
+    https://software.intel.com/en-us/articles/vector-simd-function-abi,
+    respectively.
+
+    For X86 and Arm targets, the values of the tokens in the standard
+    name are those that are defined in the VFABI. LLVM has an internal
+    ``<isa>`` token that can be used to create scalar-to-vector
+    mappings for functions that are not directly associated to any of
+    the target ISAs (for example, some of the mappings stored in the
+    TargetLibraryInfo). Valid values for the ``<isa>`` token are:::
+
+        <isa>:= b | c | d | e  -> X86 SSE, AVX, AVX2, AVX512
+              | n | s          -> Armv8 Advanced SIMD, SVE
+              | __LLVM__       -> Internal LLVM Vector ISA
+
+    For all targets currently supported (x86, Arm and Internal LLVM),
+    the remaining tokens can have the following values:::
+
+        <mask>:= M | N         -> mask | no mask
+
+        <vlen>:= number        -> number of lanes
+               | x             -> VLA (Vector Length Agnostic)
+
+        <parameters>:= v              -> vector
+                     | l | l <number> -> linear
+                     | R | R <number> -> linear with ref modifier
+                     | L | L <number> -> linear with val modifier
+                     | U | U <number> -> linear with uval modifier
+                     | ls <pos>       -> runtime linear
+                     | Rs <pos>       -> runtime linear with ref modifier
+                     | Ls <pos>       -> runtime linear with val modifier
+                     | Us <pos>       -> runtime linear with uval modifier
+                     | u              -> uniform
+
+        <scalar_name>:= name of the scalar function
+
+        <vector_redirection>:= optional, custom name of the vector function
 
 .. _glattrs:
 
@@ -6138,7 +6224,9 @@ The following behaviors are supported:
    * - 2
      - **Warning**
            Emits a warning if two values disagree. The result value will be the
-           operand for the flag from the first module being linked.
+           operand for the flag from the first module being linked, or the max
+           if the other module uses **Max** (in which case the resulting flag
+           will be **Max**).
 
    * - 3
      - **Require**
@@ -15522,9 +15610,9 @@ Each of these intrinsics corresponds to a normal floating-point operation. The
 data arguments and the return value are the same as the corresponding FP
 operation.
 
-The rounding mode argument is a metadata string specifying what 
-assumptions, if any, the optimizer can make when transforming constant 
-values. Some constrained FP intrinsics omit this argument. If required 
+The rounding mode argument is a metadata string specifying what
+assumptions, if any, the optimizer can make when transforming constant
+values. Some constrained FP intrinsics omit this argument. If required
 by the intrinsic, this argument must be one of the following strings:
 
 ::
@@ -15840,7 +15928,7 @@ Syntax:
 Overview:
 """""""""
 
-The '``llvm.experimental.constrained.fptoui``' intrinsic converts a 
+The '``llvm.experimental.constrained.fptoui``' intrinsic converts a
 floating-point ``value`` to its unsigned integer equivalent of type ``ty2``.
 
 Arguments:
@@ -15873,7 +15961,7 @@ Syntax:
 Overview:
 """""""""
 
-The '``llvm.experimental.constrained.fptosi``' intrinsic converts 
+The '``llvm.experimental.constrained.fptosi``' intrinsic converts
 :ref:`floating-point <t_floating>` ``value`` to type ``ty2``.
 
 Arguments:
@@ -15881,7 +15969,7 @@ Arguments:
 
 The first argument to the '``llvm.experimental.constrained.fptosi``'
 intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector
-<t_vector>` of floating point values. 
+<t_vector>` of floating point values.
 
 The second argument specifies the exception behavior as described above.
 
@@ -15990,7 +16078,7 @@ intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector
 <t_vector>` of floating point values. This argument must be larger in size
 than the result.
 
-The second and third arguments specify the rounding mode and exception 
+The second and third arguments specify the rounding mode and exception
 behavior as described above.
 
 Semantics:
@@ -16014,7 +16102,7 @@ Syntax:
 Overview:
 """""""""
 
-The '``llvm.experimental.constrained.fpext``' intrinsic extends a 
+The '``llvm.experimental.constrained.fpext``' intrinsic extends a
 floating-point ``value`` to a larger floating-point value.
 
 Arguments:
@@ -16142,7 +16230,7 @@ performed by '``llvm.experimental.constrained.fcmps``' will raise an
 exception if either operand is a NAN (QNAN or SNAN).
 
 '``llvm.experimental.constrained.fmuladd``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
@@ -17031,7 +17119,7 @@ Syntax:
       declare <inttype>
       @llvm.experimental.constrained.llround(<fptype> <op1>,
                                              metadata <exception behavior>)
-      
+
 Overview:
 """""""""
 

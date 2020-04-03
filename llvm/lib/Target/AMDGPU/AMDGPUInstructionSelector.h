@@ -87,6 +87,7 @@ private:
   bool selectG_TRUNC(MachineInstr &I) const;
   bool selectG_SZA_EXT(MachineInstr &I) const;
   bool selectG_CONSTANT(MachineInstr &I) const;
+  bool selectG_FNEG(MachineInstr &I) const;
   bool selectG_AND_OR_XOR(MachineInstr &I) const;
   bool selectG_ADD_SUB(MachineInstr &I) const;
   bool selectG_UADDO_USUBO_UADDE_USUBE(MachineInstr &I) const;
@@ -118,7 +119,7 @@ private:
   bool selectG_STORE(MachineInstr &I) const;
   bool selectG_SELECT(MachineInstr &I) const;
   bool selectG_BRCOND(MachineInstr &I) const;
-  bool selectG_FRAME_INDEX(MachineInstr &I) const;
+  bool selectG_FRAME_INDEX_GLOBAL_VALUE(MachineInstr &I) const;
   bool selectG_PTR_MASK(MachineInstr &I) const;
   bool selectG_EXTRACT_VECTOR_ELT(MachineInstr &I) const;
   bool selectG_INSERT_VECTOR_ELT(MachineInstr &I) const;
@@ -174,10 +175,14 @@ private:
                        unsigned OffsetBits) const;
 
   std::pair<Register, unsigned>
-  selectDS1Addr1OffsetImpl(MachineOperand &Src) const;
-
+  selectDS1Addr1OffsetImpl(MachineOperand &Root) const;
   InstructionSelector::ComplexRendererFns
   selectDS1Addr1Offset(MachineOperand &Root) const;
+
+  std::pair<Register, unsigned>
+  selectDS64Bit4ByteAlignedImpl(MachineOperand &Root) const;
+  InstructionSelector::ComplexRendererFns
+  selectDS64Bit4ByteAligned(MachineOperand &Root) const;
 
   std::pair<Register, int64_t>
   getPtrBaseWithConstantOffset(Register Root,
@@ -210,6 +215,12 @@ private:
 
   InstructionSelector::ComplexRendererFns
   selectMUBUFOffset(MachineOperand &Root) const;
+
+  InstructionSelector::ComplexRendererFns
+  selectMUBUFOffsetAtomic(MachineOperand &Root) const;
+
+  InstructionSelector::ComplexRendererFns
+  selectMUBUFAddr64Atomic(MachineOperand &Root) const;
 
   void renderTruncImm32(MachineInstrBuilder &MIB, const MachineInstr &MI,
                         int OpIdx = -1) const;

@@ -184,6 +184,13 @@ TEST(EnumConstant, Matches) {
   EXPECT_TRUE(notMatches("enum X {};", Matcher));
 }
 
+TEST(TagDecl, MatchesTagDecls) {
+  EXPECT_TRUE(matches("struct X {};", tagDecl(hasName("X"))));
+  EXPECT_TRUE(matches("class C {};", tagDecl(hasName("C"))));
+  EXPECT_TRUE(matches("union U {};", tagDecl(hasName("U"))));
+  EXPECT_TRUE(matches("enum E {};", tagDecl(hasName("E"))));
+}
+
 TEST(Matcher, UnresolvedLookupExpr) {
   // FIXME: The test is known to be broken on Windows with delayed template
   // parsing.
@@ -1449,6 +1456,12 @@ TEST(TypeMatching, MatchesTypedefTypes) {
 TEST(TypeMatching, MatchesTemplateSpecializationType) {
   EXPECT_TRUE(matches("template <typename T> class A{}; A<int> a;",
                       templateSpecializationType()));
+}
+
+TEST(TypeMatching, MatchesDeucedTemplateSpecializationType) {
+  EXPECT_TRUE(matches("template <typename T> class A{ public: A(T) {} }; A a(1);",
+                      deducedTemplateSpecializationType(),
+                      LanguageMode::Cxx17OrLater));
 }
 
 TEST(TypeMatching, MatchesRecordType) {

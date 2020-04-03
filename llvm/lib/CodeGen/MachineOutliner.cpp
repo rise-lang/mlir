@@ -1260,7 +1260,7 @@ bool MachineOutliner::outline(Module &M,
                   MOP.getReg(), true, /* isDef = true */
                   true /* isImp = true */));
           }
-          if (MI.isCall())
+          if (MI.isCandidateForCallSiteEntry())
             MI.getMF()->eraseCallSiteInfo(&MI);
         };
         // Copy over the defs in the outlined range.
@@ -1377,7 +1377,7 @@ void MachineOutliner::emitInstrCountChangedRemark(
     if (!MF)
       continue;
 
-    std::string Fname = F.getName();
+    std::string Fname = std::string(F.getName());
     unsigned FnCountAfter = MF->getInstructionCount();
     unsigned FnCountBefore = 0;
 

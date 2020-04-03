@@ -5,6 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+///
+/// \file
+/// This file implements the GCNRegPressure class.
+///
+//===----------------------------------------------------------------------===//
 
 #include "GCNRegPressure.h"
 #include "AMDGPUSubtarget.h"
@@ -124,7 +129,7 @@ void GCNRegPressure::inc(unsigned Reg,
     assert(PrevMask < NewMask);
 
     Value[Kind == SGPR_TUPLE ? SGPR32 : Kind == AGPR_TUPLE ? AGPR32 : VGPR32] +=
-      Sign * (~PrevMask & NewMask).getNumLanes();
+      Sign * SIRegisterInfo::getNumCoveredRegs(~PrevMask & NewMask);
 
     if (PrevMask.none()) {
       assert(NewMask.any());
@@ -216,7 +221,7 @@ static LaneBitmask getUsedRegMask(const MachineOperand &MO,
     return MRI.getTargetRegisterInfo()->getSubRegIndexLaneMask(SubReg);
 
   auto MaxMask = MRI.getMaxLaneMaskForVReg(MO.getReg());
-  if (MaxMask == LaneBitmask::getLane(0)) // cannot have subregs
+  if (SIRegisterInfo::getNumCoveredRegs(MaxMask) > 1) // cannot have subregs
     return MaxMask;
 
   // For a tentative schedule LIS isn't updated yet but livemask should remain
