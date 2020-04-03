@@ -61,7 +61,7 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 
     //arguments have to fit the given lambda type
     argumentTypes.push_back(funType.getInput());
-    for (int i = 1; i < arguments.size(); i++) {
+    for (size_t i = 1; i < arguments.size(); i++) {
         if (funType.getOutput().isa<FunType>()) {
             funType = funType.getOutput().dyn_cast<FunType>();
             argumentTypes.push_back(funType.getInput());
@@ -86,7 +86,6 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 // ApplyOp
 //===----------------------------------------------------------------------===//
 ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
-    auto &builder = parser.getBuilder();
     OpAsmParser::OperandType funOperand;
     FunType funType;
     SmallVector<OpAsmParser::OperandType, 4> arguments;
@@ -115,7 +114,7 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     //get types of arguments from the function type and determine
     //the result type of this apply operation
     argumentTypes.push_back(funType.getInput());
-    for (int i = 1; i < arguments.size(); i++) {
+    for (size_t i = 1; i < arguments.size(); i++) {
         if (funType.getOutput().isa<FunType>()) {
             funType = funType.getOutput().dyn_cast<FunType>();
             argumentTypes.push_back(funType.getInput());
@@ -362,8 +361,6 @@ ParseResult parseMultOp(OpAsmParser &parser, OperationState &result) {
 // ReturnOp
 //===----------------------------------------------------------------------===//
 ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
-    auto &builder = parser.getBuilder();
-
     OpAsmParser::OperandType value;
     Type type;
     result.setOperandListToResizable();
