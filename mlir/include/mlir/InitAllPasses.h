@@ -118,7 +118,6 @@ inline void registerAllPasses() {
 
   // Rise
   rise::createConvertRiseToImperativePass();
-  rise::createConvertRiseToStandardPass();
 
   // SPIR-V
   spirv::createDecorateSPIRVCompositeTypeLayoutPass();
