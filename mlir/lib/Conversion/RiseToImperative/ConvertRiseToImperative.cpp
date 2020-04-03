@@ -278,22 +278,41 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     rewriter.create<linalg::FillOp>(initializer.getLoc(), acc.getResult(),
                                     contInit);
 
+    // zero constant for indexing
     auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
 
-    //    auto lowerBound =
-    //    rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0); auto
-    //    upperBound = rewriter.create<ConstantIndexOp>(
-    //        appliedFun->getLoc(), n.getValue().getIntValue());
-    //    auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
-    //
-    //    auto forLoop =
-    //        rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound,
-    //        step);
+    Value loopInductionVar;
+    Block *forLoopBody;
 
-    auto forLoop =
-        rewriter.create<AffineForOp>(loc, 0, n.getValue().getIntValue(), 1);
+    // lowering to a specific loop depending on the lowering target dialect
+    std::string loweringTarget;
+    if (StringAttr loweringTargetAttr =
+            appliedFun->getAttrOfType<StringAttr>("to")) {
+      loweringTarget = loweringTargetAttr.getValue().str();
+    } else {
+      // default lowering target
+      loweringTarget = "loop";
+    }
 
-    rewriter.setInsertionPointToStart(forLoop.getBody());
+    if (loweringTarget == "loop") {
+      auto lowerBound =
+          rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
+      auto upperBound = rewriter.create<ConstantIndexOp>(
+          appliedFun->getLoc(), n.getValue().getIntValue());
+      auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+
+      auto forLoop =
+          rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    } else if (loweringTarget == "affine") {
+      auto forLoop =
+          rewriter.create<AffineForOp>(loc, 0, n.getValue().getIntValue(), 1);
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    }
+
+    rewriter.setInsertionPointToStart(forLoopBody);
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
     if (!reductionLambda) {
       reductionLambda = expandToLambda(reductionFun, rewriter);
@@ -310,7 +329,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
           MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                      forLoop.getInductionVar());
+                                      loopInductionVar);
       //      std::cout << "contArray is of MemrefType";
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "contArray is not of MemrefType";
@@ -336,7 +355,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
-    rewriter.setInsertionPointAfter(forLoop);
+    rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
 
     // This generated idx is not consistent with the bible
     // I just generate a 0 as index for the simplest case.
@@ -375,15 +394,41 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
-    auto lowerBound = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
-    auto upperBound = rewriter.create<ConstantIndexOp>(
-        appliedFun->getLoc(), n.getValue().getIntValue());
-    auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+    // zero constant for indexing
+    auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
 
-    auto forLoop = rewriter.create<mlir::loop::ForOp>(
-        appliedFun->getLoc(), lowerBound, upperBound, step);
+    Value loopInductionVar;
+    Block *forLoopBody;
 
-    rewriter.setInsertionPointToStart(forLoop.getBody());
+    // lowering to a specific loop depending on the lowering target dialect
+    std::string loweringTarget;
+    if (StringAttr loweringTargetAttr =
+            appliedFun->getAttrOfType<StringAttr>("to")) {
+      loweringTarget = loweringTargetAttr.getValue().str();
+    } else {
+      // default lowering target
+      loweringTarget = "loop";
+    }
+
+    if (loweringTarget == "loop") {
+      auto lowerBound =
+          rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
+      auto upperBound = rewriter.create<ConstantIndexOp>(
+          appliedFun->getLoc(), n.getValue().getIntValue());
+      auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+
+      auto forLoop = rewriter.create<mlir::loop::ForOp>(
+          appliedFun->getLoc(), lowerBound, upperBound, step);
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    } else if (loweringTarget == "affine") {
+      auto forLoop = rewriter.create<AffineForOp>(
+          appliedFun->getLoc(), 0, n.getValue().getIntValue(), 1);
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    }
+
+    rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
     if (!fLambda) {
@@ -399,7 +444,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
           MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                      forLoop.getInductionVar());
+                                      loopInductionVar);
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
@@ -414,7 +459,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     MemRefType outIndexOpResult =
         MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
     auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           forLoop.getInductionVar());
+                                           loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
@@ -427,9 +472,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
-    rewriter.setInsertionPointAfter(forLoop);
+    rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return contArray;
-
   } else if (isa<MapParOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of MapPar";
 
@@ -444,12 +488,49 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
-    auto forLoop = rewriter.create<AffineForOp>(appliedFun->getLoc(), 0,
-                                                n.getValue().getIntValue(), 1);
+    Value loopInductionVar;
+    Block *forLoopBody;
 
-    rewriter.setInsertionPointToStart(forLoop.getBody());
-    //    rewriter.create<AffineTerminatorOp>(loc);
-    //    rewriter.setInsertionPointToStart(forLoop.getBody());
+    // lowering to a specific loop depending on the lowering target dialect
+    std::string loweringTarget;
+    if (StringAttr loweringTargetAttr =
+            appliedFun->getAttrOfType<StringAttr>("to")) {
+      loweringTarget = loweringTargetAttr.getValue().str();
+    } else {
+      // default lowering target
+      loweringTarget = "loop";
+    }
+
+    // TODO: These have no parallel semantics yet
+    if (loweringTarget == "loop") {
+      auto lowerBound =
+          rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
+      auto upperBound = rewriter.create<ConstantIndexOp>(
+          appliedFun->getLoc(), n.getValue().getIntValue());
+      auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
+
+      auto forLoop = rewriter.create<mlir::loop::ForOp>(
+          appliedFun->getLoc(), lowerBound, upperBound, step);
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    } else if (loweringTarget == "affine") {
+      auto forLoop = rewriter.create<AffineForOp>(
+                appliedFun->getLoc(), 0, n.getValue().getIntValue(), 1);
+
+      // TODO: Not working as intended
+//      auto lbMap = AffineMap::getConstantMap(0, rewriter.getContext());
+//      auto ubMap = AffineMap::getConstantMap(n.getValue().getIntValue(),
+//                                             rewriter.getContext());
+//
+//      auto parallelOp = rewriter.create<AffineParallelOp>(appliedFun->getLoc(),
+//                                                          lbMap, ValueRange{}, ubMap, ValueRange{});
+//      loopInductionVar = *parallelOp.getLowerBoundsOperands().begin();
+//      forLoopBody = parallelOp.getBody();
+      loopInductionVar = forLoop.getInductionVar();
+      forLoopBody = forLoop.getBody();
+    }
+
+    rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
     if (!fLambda) {
@@ -465,7 +546,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
           MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                      forLoop.getInductionVar());
+                                      loopInductionVar);
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
@@ -480,12 +561,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     MemRefType outIndexOpResult =
         MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
     auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           forLoop.getInductionVar());
+                                           loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-    //    std::cout << "deleting apply dependency for lambda" << std::flush;
     fxi.getResult().dropAllUses();
     fxi.erase();
     //    rewriter.eraseOp(fxi);
@@ -493,9 +573,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     lambdaCopy.getResult().dropAllUses();
     rewriter.eraseOp(lambdaCopy);
 
-    rewriter.setInsertionPointAfter(forLoop);
+    rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return contArray;
-
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Fst";
 
@@ -507,7 +586,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto assignment = rewriter.create<RiseAssignOp>(
         appliedFun->getLoc(), fstIntermOp.getResult(), out);
     return fstIntermOp.getResult();
-
   } else if (SndOp sndOp = dyn_cast<SndOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Snd";
 
@@ -519,7 +597,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto assignment = rewriter.create<RiseAssignOp>(
         appliedFun->getLoc(), sndIntermOp.getResult(), out);
     return sndIntermOp.getResult();
-
   } else if (isa<LambdaOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Lambda";
 
@@ -537,7 +614,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     }
 
     return AccT(lastApply, out, rewriter);
-
   } else if (isa<AddOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Add";
 
@@ -558,7 +634,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
                                                     newAddOp.getResult(), out);
 
     return newAddOp;
-
   } else if (isa<MulOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Mul";
 
@@ -582,7 +657,6 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     emitError(appliedFun->getLoc()) << "We should never get here";
     //    auto tmp = AccT(expression, cast<ApplyOp>(appliedFun), rewriter);
-
   } else {
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
@@ -1291,38 +1365,21 @@ void mlir::populateRiseToImpConversionPatterns(
 /// The pass:
 void ConvertRiseToImperativePass::runOnModule() {
   auto module = getModule();
-
-  // TODO: Initialize RiseTypeConverter here and use it below.
-  //    std::unique_ptr<RiseTypeConverter> converter =
-  //    makeRiseToStandardTypeConverter(&getContext());
-
   OwningRewritePatternList patterns;
-  //    LinalgTypeConverter converter(&getContext());
-  //    populateAffineToStdConversionPatterns(patterns, &getContext());
-  //    populateLoopToStdConversionPatterns(patterns, &getContext());
-  //    populateStdToLLVMConversionPatterns(converter, patterns);
-  //    populateVectorToLLVMConversionPatterns(converter, patterns);
-  //    populateLinalgToStandardConversionPatterns(patterns, &getContext());
-  //    populateLinalgToLLVMConversionPatterns(converter, patterns,
-  //    &getContext());
+
   populateRiseToImpConversionPatterns(patterns, &getContext());
 
   ConversionTarget target(getContext());
 
-  //    target.addLegalDialect<StandardOpsDialect, AffineOpsDialect,
-  //    mlir::loop::LoopOpsDialect>();
-  target.addLegalOp<
-      CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp, AffineForOp,
-      AffineTerminatorOp, AffineStoreOp, AffineLoadOp, ConstantIndexOp, AllocOp,
-      LoadOp, StoreOp, AddFOp, MulFOp, linalg::FillOp, mlir::ReturnOp,
-      mlir::rise::LambdaOp, mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
-      mlir::rise::RiseFstIntermediateOp, mlir::rise::RiseSndIntermediateOp,
-      mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
-      mlir::rise::ApplyOp, RiseContinuationTranslation>();
-  //  target.addIllegalOp<RiseFunOp>();
-  //  target.addDynamicallyLegalOp<RiseModuleOp>(
-  //      [](RiseModuleOp op) { return op.lowered(); });
-  //  target.markOpRecursivelyLegal<RiseModuleOp>();
+  target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
+                    AffineForOp, AffineParallelOp, AffineTerminatorOp,
+                    AffineStoreOp, AffineLoadOp, ConstantIndexOp, AllocOp,
+                    LoadOp, StoreOp, AddFOp, MulFOp, linalg::FillOp,
+                    mlir::ReturnOp, mlir::rise::LambdaOp, mlir::rise::RiseIdxOp,
+                    mlir::rise::RiseBinaryOp, mlir::rise::RiseFstIntermediateOp,
+                    mlir::rise::RiseSndIntermediateOp,
+                    mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
+                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
 
   if (failed(applyPartialConversion(module, target, patterns)))
     signalPassFailure();
@@ -1336,62 +1393,3 @@ mlir::rise::createConvertRiseToImperativePass() {
 static PassRegistration<ConvertRiseToImperativePass>
     pass("convert-rise-to-imperative",
          "Compile all functional primitives of the rise dialect to imperative");
-
-// Old Stuff:
-
-// From Lambda:
-
-// A Lambda has only one block
-//  Block &block = lambda.region().front();
-//  // For now start at the back and just find the first apply
-//  ApplyOp lastApply;
-//  for (auto op = block.rbegin(); op != block.rend(); op++) {
-//    if (isa<ApplyOp>(*op)) {
-//      lastApply = cast<ApplyOp>(*op);
-//      break;
-//    }
-//  }
-//
-//  auto appliedFun = lastApply.getOperand(0);
-
-// Finding the return from the chunk of rise IR
-//  rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
-
-//  rewriter.setInsertionPoint(&lambda.getParentRegion()->front(),
-//  contLocation);
-
-//  rewriter.setInsertionPointToStart(&lambda.region().front());
-
-//    appliedFun.dropAllUses();
-//    rewriter.eraseOp(appliedFun.getDefiningOp());
-//
-//    lastApply.getResult().dropAllUses();
-//    rewriter.eraseOp(lastApply);
-//
-//    rewriter.eraseOp(returnOp);
-//  // Now the Lambda is lowered. Note: We should prob. indicate this somehow
-//  in
-//  // the Op. Maybe in an Attribute Next inline the lambda where it is being
-//  // applied.
-//  lambda.region().front().getOperations().splice(
-//      contLocation, lambda.region().front().getOperations());
-
-// Splice moves operations (from,
-//    lambda.getParentRegion()->front().getOperations().splice(
-//        ++contLocation, lambda.region().front().getOperations(), addition);
-//  std::cout << "\n empty: " << lambda.region().empty() << std::flush;
-//
-//    lambda.region().dropAllReferences();
-//    lambda.region().front().dropAllReferences();
-//    lambda.region().front().dropAllUses();
-//    lambda.region().front().getOperations().clear();
-//    lambda.region().front().eraseArgument(0);
-//
-//  std::cout << "\n empty: " << lambda.region().empty()
-//            << " no uses?: " << lambda.region().front().use_empty()
-//            << std::flush;
-//  // We have to associate the block arguments of the first block with the
-//  // arguments given to this function.
-//  // Look in Block merge how two blocks are merged.
-//  //  lambda.region().front().getArguments()
-//  return lambda.getResult();

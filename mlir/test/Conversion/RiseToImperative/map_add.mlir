@@ -11,7 +11,7 @@ func @array_times_2() {
             %doubled = rise.apply %addFun, %summand, %summand
             rise.return %doubled : !rise.data<float>
         }
-        %map4IntsToInts = rise.mapPar #rise.nat<4> #rise.float #rise.float
+        %map4IntsToInts = rise.mapSeq {to = "affine"} #rise.nat<4> #rise.float #rise.float
         %doubledArray = rise.apply %map4IntsToInts, %doubleFun, %array
 
         rise.return %doubledArray : !rise.data<array<4, float>>

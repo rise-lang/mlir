@@ -199,7 +199,7 @@ def MapSeqOp : Rise_Op<"mapSeq", [NoSideEffect]> {
       "This operation returns a function which expects a function from s to t "
       "and an array of length n. The function is to be applied sequentially to "
       "all elements of the array.";
-  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, OptionalAttr<StrAttr> : $to);
   let parser = [{ return parse$cppClass(parser, result); }];
 
   let results = (outs FunType : $mapSeqFun);
@@ -211,7 +211,7 @@ def MapParOp : Rise_Op<"mapPar", [NoSideEffect]> {
       "This operation returns a function which expects a function from s to t "
       "and an array of length n. The function is to be applied to all elements "
       "of the array in parallel.";
-  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, OptionalAttr<StrAttr> : $to);
   let parser = [{ return parse$cppClass(parser, result); }];
 
   let results = (outs FunType : $mapParFun);
@@ -225,7 +225,7 @@ def ReduceSeqOp : Rise_Op<"reduceSeq", [NoSideEffect]> {
       "returns "
       "a value of type t This can be used to reduce an array of size n with "
       "elements of type s to a value of type t";
-  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, OptionalAttr<StrAttr> : $to);
   let parser = [{ return parse$cppClass(parser, result); }];
 
   let results = (outs FunType : $reduceFun);
