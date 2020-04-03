@@ -341,8 +341,42 @@ ParseResult parseAddOp(OpAsmParser &parser, OperationState &result) {
     return success();
 }
 
+///sub: {t : data} → t → t → t
+ParseResult parseSubOp(OpAsmParser &parser, OperationState &result) {
+    auto &builder = parser.getBuilder();
+    DataTypeAttr t;
+
+    //type of summands
+    if (parser.parseAttribute(t, "t", result.attributes))
+        failure();
+
+    result.addTypes(FunType::get(builder.getContext(),
+                                 DataTypeWrapper::get(builder.getContext(), t.getValue()),
+                                 FunType::get(builder.getContext(),
+                                         DataTypeWrapper::get(builder.getContext(), t.getValue()),
+                                         DataTypeWrapper::get(builder.getContext(), t.getValue()))));
+    return success();
+}
+
 ///mult: {t : data} → t → t → t
 ParseResult parseMultOp(OpAsmParser &parser, OperationState &result) {
+    auto &builder = parser.getBuilder();
+    DataTypeAttr t;
+
+    //type of factors
+    if (parser.parseAttribute(t, "t", result.attributes))
+        failure();
+
+    result.addTypes(FunType::get(builder.getContext(),
+                                 DataTypeWrapper::get(builder.getContext(), t.getValue()),
+                                 FunType::get(builder.getContext(),
+                                              DataTypeWrapper::get(builder.getContext(), t.getValue()),
+                                              DataTypeWrapper::get(builder.getContext(), t.getValue()))));
+    return success();
+}
+
+///div: {t : data} → t → t → t
+ParseResult parseDivOp(OpAsmParser &parser, OperationState &result) {
     auto &builder = parser.getBuilder();
     DataTypeAttr t;
 

@@ -193,6 +193,16 @@ def AddOp : Rise_Op<"add", [NoSideEffect]> {
     let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def SubOp : Rise_Op<"sub", [NoSideEffect]> {
+    let summary = "rise sub operation";
+    let description = "This operation returns a function which expects two arguments of type "
+                      "t and returns their difference of type t. We will experiment with adopting "
+                      "the standard arithmetics operations.";
+    let arguments = (ins DataTypeAttr:$t);
+    let results = (outs FunType:$subFun);
+    let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def MultOp : Rise_Op<"mult", [NoSideEffect]> {
     let summary = "rise mult operation";
     let description = "This operation returns a function which expects two arguments of type "
@@ -200,6 +210,16 @@ def MultOp : Rise_Op<"mult", [NoSideEffect]> {
                       "the standard arithmetics operations.";
     let arguments = (ins DataTypeAttr:$t);
     let results = (outs FunType:$multFun);
+    let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def DivOp : Rise_Op<"div", [NoSideEffect]> {
+    let summary = "rise div operation";
+    let description = "This operation returns a function which expects two arguments of type "
+                  "t and returns their quotient of type t. We will experiment with adopting "
+                      "the standard arithmetics operations.";
+    let arguments = (ins DataTypeAttr:$t);
+    let results = (outs FunType:$divFun);
     let parser = [{ return parse$cppClass(parser, result); }];
 }
 

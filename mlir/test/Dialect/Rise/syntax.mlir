@@ -1,3 +1,5 @@
+// RUN: mlir-opt %s
+
 module {
     func @rise_id() {
     ^id:
@@ -26,6 +28,60 @@ module {
         }
         %addWithInt0 = rise.apply %addFun : !rise.fun<int -> !rise.fun<int -> int>>, %int0
         %result = rise.apply %addWithInt0 : !rise.fun<int -> int>, %int1
+
+        "rise.return"() : () -> ()
+    }
+
+    func @rise_sub_example() {
+        %int0 = rise.literal #rise.lit<int<7>>
+        %int1 = rise.literal #rise.lit<int<13>>
+
+        %subFun = rise.lambda (%op0) : !rise.fun<data<int> -> fun<data<int> -> data<int>>> {
+            %subWithOp0 = rise.lambda (%op1) : !rise.fun<data<int> -> data<int>> {
+                %subFun = rise.sub #rise.int
+                %difference = rise.apply %subFun : !rise.fun<data<int> -> fun<data<int> -> data<int>>>, %op0, %op1
+                rise.return %difference : !rise.data<int>
+            }
+            rise.return %subWithOp0 : !rise.fun<int -> int>
+        }
+        %subWithInt0 = rise.apply %subFun : !rise.fun<int -> !rise.fun<int -> int>>, %int0
+        %result = rise.apply %subWithInt0 : !rise.fun<int -> int>, %int1
+
+        "rise.return"() : () -> ()
+    }
+
+    func @rise_mult_example() {
+        %int0 = rise.literal #rise.lit<int<7>>
+        %int1 = rise.literal #rise.lit<int<13>>
+
+        %multFun = rise.lambda (%op0) : !rise.fun<data<int> -> fun<data<int> -> data<int>>> {
+            %multWithOp0 = rise.lambda (%op1) : !rise.fun<data<int> -> data<int>> {
+                %multFun = rise.mult #rise.int
+                %product = rise.apply %multFun : !rise.fun<data<int> -> fun<data<int> -> data<int>>>, %op0, %op1
+                rise.return %product : !rise.data<int>
+            }
+            rise.return %multWithOp0 : !rise.fun<int -> int>
+        }
+        %multWithInt0 = rise.apply %multFun : !rise.fun<int -> !rise.fun<int -> int>>, %int0
+        %result = rise.apply %multWithInt0 : !rise.fun<int -> int>, %int1
+
+        "rise.return"() : () -> ()
+    }
+
+    func @rise_div_example() {
+        %int0 = rise.literal #rise.lit<int<7>>
+        %int1 = rise.literal #rise.lit<int<13>>
+
+        %divFun = rise.lambda (%op0) : !rise.fun<data<int> -> fun<data<int> -> data<int>>> {
+            %divWithOp0 = rise.lambda (%op1) : !rise.fun<data<int> -> data<int>> {
+                %divFun = rise.div #rise.int
+                %quotient = rise.apply %divFun : !rise.fun<data<int> -> fun<data<int> -> data<int>>>, %op0, %op1
+                rise.return %quotient : !rise.data<int>
+            }
+            rise.return %divWithOp0 : !rise.fun<int -> int>
+        }
+        %divWithInt0 = rise.apply %divFun : !rise.fun<int -> !rise.fun<int -> int>>, %int0
+        %result = rise.apply %divWithInt0 : !rise.fun<int -> int>, %int1
 
         "rise.return"() : () -> ()
     }
