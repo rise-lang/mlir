@@ -36,6 +36,32 @@ namespace mlir {
 namespace rise {
 namespace detail {
 
+
+/// This class holds the implementation of the Rise ScalarType.
+struct RiseScalarStorage : public mlir::TypeStorage {
+  RiseScalarStorage(Type wrappedType) : wrappedType(wrappedType) {}
+  /// This defines how we unique this type in the context: Rise DataTypeWrapper
+  /// types are unique by the wrapped DataType
+  using KeyTy = Type;
+
+  bool operator==(const KeyTy &key) const { return key == KeyTy(wrappedType); }
+
+  static KeyTy getKey(DataType data) { return KeyTy(data); }
+
+  static llvm::hash_code hashKey(const KeyTy &key) {
+    return llvm::hash_value(key.getAsOpaquePointer());
+  }
+
+  static RiseScalarStorage *
+  construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
+    return new (allocator.allocate<RiseScalarStorage>())
+        RiseScalarStorage(key);
+  }
+
+  Type wrappedType;
+};
+
+
 /// This class holds the implementation of the Rise DataTypeWrapper.
 struct RiseDataTypeWrapperStorage : public mlir::TypeStorage {
   RiseDataTypeWrapperStorage(DataType data) : data(data) {}

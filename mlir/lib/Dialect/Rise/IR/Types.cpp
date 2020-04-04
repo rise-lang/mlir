@@ -36,6 +36,15 @@ namespace mlir {
 namespace rise {
 
 //===----------------------------------------------------------------------===//
+// ScalarType
+//===----------------------------------------------------------------------===//
+Type ScalarType::getWrappedType() { return getImpl()->wrappedType; }
+
+ScalarType ScalarType::get(mlir::MLIRContext *context, Type wrappedType) {
+  return Base::get(context, RiseTypeKind::RISE_SCALAR, wrappedType);
+}
+
+//===----------------------------------------------------------------------===//
 // DataTypeWrapper
 //===----------------------------------------------------------------------===//
 

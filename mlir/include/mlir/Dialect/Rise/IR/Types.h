@@ -34,6 +34,8 @@ struct RiseFunTypeStorage;
 struct RiseDataTypeWrapperStorage;
 struct RiseTupleTypeStorage;
 struct RiseNatStorage;
+
+struct RiseScalarStorage;
 } // namespace detail
 
 /// LLVM-style RTTI: one entry per subclass to allow dyn_cast/isa.
@@ -48,6 +50,7 @@ enum RiseTypeKind {
   RISE_FLOAT,
   RISE_TUPLE,
   RISE_ARRAY,
+  RISE_SCALAR
 };
 
 /// RISE type structure:
@@ -83,6 +86,26 @@ enum RiseTypeKind {
 /// prevents function types (which are a sub-type of RiseType) to be treated
 /// like DataTypes and, for example, be stored in an array.
 ///
+
+class ScalarType : public mlir::Type::TypeBase<ScalarType, Type,
+    detail::RiseScalarStorage> {
+public:
+  /// Inherit some necessary constructors from 'TypeBase'.
+  using Base::Base;
+
+//  static mlir::LogicalResult
+//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
+//                               mlir::MLIRContext *context, Nat size,
+//                               DataType elementType);
+
+  /// This method is used to get an instance of ArrayType.
+  static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
+
+  /// Support method to enable LLVM-style RTTI type casting.
+  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_SCALAR; }
+
+  Type getWrappedType();
+};
 
 class DataType : public Type::TypeBase<DataType, Type> {
 public:

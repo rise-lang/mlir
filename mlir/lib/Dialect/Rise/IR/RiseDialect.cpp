@@ -47,7 +47,8 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
       >();
   ///      Types:                              Nats:               Datatypes:
-  addTypes<FunType, DataTypeWrapper, Nat, Int, Float, Tuple, ArrayType>();
+  addTypes<FunType, DataTypeWrapper, Nat, Int, Float, Tuple, ArrayType,
+           ScalarType>();
   addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();
 }
 
@@ -58,6 +59,17 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
 
   if (typeString.startswith("!rise."))
     typeString.consume_front("!rise.");
+
+  // parsing of rise.scalar
+  Type wrappedType;
+  if (!failed(parser.parseOptionalKeyword("scalar"))) {
+    if (parser.parseLess() || parser.parseType(wrappedType) || parser.parseGreater()) {
+      // todo specify valid wrapped types
+      emitError(loc, "Rise Scalar badly structured! '" + typeString + "'");
+      return nullptr;
+    }
+    return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
+  }
 
   if (typeString.startswith("fun") || typeString.startswith("data")) {
     return parseRiseType(typeString, loc);
@@ -229,6 +241,9 @@ std::string static stringForType(Type type) {
   default: {
     return "unknown rise type";
   }
+  case RiseTypeKind ::RISE_SCALAR: {
+    return "scalar<";
+  }
   case RiseTypeKind::RISE_FLOAT: {
     return "float";
   }
@@ -262,7 +277,16 @@ std::string static stringForType(Type type) {
 /// Print a Rise type
 void RiseDialect::printType(mlir::Type type, DialectAsmPrinter &printer) const {
   raw_ostream &os = printer.getStream();
-  os << stringForType(type);
+
+  if (ScalarType scalarType = type.dyn_cast<ScalarType>()) {
+    os << stringForType(type);
+    printer.printType(scalarType.getWrappedType());
+    os << ">";
+  } else {
+    os << stringForType(type);
+  }
+
+
 }
 
 ///         rise.literal #rise.int<42>
@@ -366,55 +390,54 @@ DataType static getArrayStructure(mlir::MLIRContext *context,
 
 LiteralAttr RiseDialect::parseLiteralAttribute(DialectAsmParser &parser,
                                                mlir::Location loc) const {
-//  if (parser.parseKeyword("lit",
-//                          "Expected keyword 'lit' in Literal Attribute!") ||
-//      parser.parseLess())
-//    return nullptr;
+  //  if (parser.parseKeyword("lit",
+  //                          "Expected keyword 'lit' in Literal Attribute!") ||
+  //      parser.parseLess())
+  //    return nullptr;
 
   StringRef attrString = parser.getFullSymbolSpec();
-//  std::cout << "everything: " << attrString.str() << "\n" << std::flush;
+  //  std::cout << "everything: " << attrString.str() << "\n" << std::flush;
   if (!attrString.consume_front("lit<") || !attrString.consume_back(">")) {
     emitError(loc, "#rise.lit delimiter <...> mismatch");
     return nullptr;
   }
-//
-/// Beginning of improving to look of literals:
-// Will continue when the paper stuff is done.
-//
-//  StringRef valueString = attrString;
-//  DataType type;
-//  // Check if optional explicit type is given at the end
-//  if (attrString.contains("array")) {
-//    auto stringPair = attrString.split("array");
-//    valueString = stringPair.first;
-//    type = parseDataType("array" + stringPair.second.str(), loc);
-//  } else if (attrString.contains("int")) {
-//    auto stringPair = attrString.split("int");
-//    valueString = stringPair.first;
-//    type = Int::get(getContext());
-//  } else if (attrString.contains("float")) {
-//    auto stringPair = attrString.split("int");
-//    valueString = stringPair.first;
-//    type = Int::get(getContext());
-//  }
-//  valueString = valueString.trim(' ');
-//  valueString = valueString.trim(',');
-//  std::cout << "literalValue:" << valueString.str() << "\n" << std::flush;
-//
-//  // Assume we have an Array:
-//  ArrayRef<int64_t> shape = parser.parseRiseArrayShape();
-//
-//  std::cout << "y0:" << shape.back();
-//  for (int64_t shapeeuo : shape) {
-//    std::cout << "chapeau:" << shapeeuo << std::flush;
-//  }
-//
-//  for (int i = 0; i < shape.size(); i++) {
-//    std::cout << "chapeaus:" << shape[i] << std::flush;
-//  }
-//
-//  std::cout << "\n" << std::flush;
-
+  //
+  /// Beginning of improving to look of literals:
+  // Will continue when the paper stuff is done.
+  //
+  //  StringRef valueString = attrString;
+  //  DataType type;
+  //  // Check if optional explicit type is given at the end
+  //  if (attrString.contains("array")) {
+  //    auto stringPair = attrString.split("array");
+  //    valueString = stringPair.first;
+  //    type = parseDataType("array" + stringPair.second.str(), loc);
+  //  } else if (attrString.contains("int")) {
+  //    auto stringPair = attrString.split("int");
+  //    valueString = stringPair.first;
+  //    type = Int::get(getContext());
+  //  } else if (attrString.contains("float")) {
+  //    auto stringPair = attrString.split("int");
+  //    valueString = stringPair.first;
+  //    type = Int::get(getContext());
+  //  }
+  //  valueString = valueString.trim(' ');
+  //  valueString = valueString.trim(',');
+  //  std::cout << "literalValue:" << valueString.str() << "\n" << std::flush;
+  //
+  //  // Assume we have an Array:
+  //  ArrayRef<int64_t> shape = parser.parseRiseArrayShape();
+  //
+  //  std::cout << "y0:" << shape.back();
+  //  for (int64_t shapeeuo : shape) {
+  //    std::cout << "chapeau:" << shapeeuo << std::flush;
+  //  }
+  //
+  //  for (int i = 0; i < shape.size(); i++) {
+  //    std::cout << "chapeaus:" << shape[i] << std::flush;
+  //  }
+  //
+  //  std::cout << "\n" << std::flush;
 
   ////  // TODO: Work on valueString
   ////  int shapei = 0;
