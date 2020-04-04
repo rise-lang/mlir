@@ -3570,6 +3570,8 @@ Value OperationParser::resolveSSAUseUnsafe(SSAUseInfo useInfo) {
   if (useInfo.number < entries.size() && entries[useInfo.number].first) {
     auto result = entries[useInfo.number].first;
     return result;
+  } else {
+    return nullptr;
   }
 }
 
