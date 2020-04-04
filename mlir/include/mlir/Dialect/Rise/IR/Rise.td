@@ -49,6 +49,7 @@ def IntType : Type<CPred<"$_self.isa<Int>()">, "int type">;
 def FloatType : Type<CPred<"$_self.isa<Float>()">, "float type">;
 def TupleType : Type<CPred<"$_self.isa<Tuple>()">, "tuple type">;
 def ArrayType : Type<CPred<"$_self.isa<ArrayType>()">, "array type">;
+def ScalarType : Type<CPred<"$_self.isa<ScalarType>()">, "scalar type">;
 def DataType : Type<Or<[
   IntType.predicate, FloatType.predicate, TupleType.predicate,
   ArrayType.predicate
@@ -95,6 +96,20 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   //  let arguments = (ins AnyType:$out, Variadic<AnyType>:$inputs);
   let arguments = (ins StrAttr:$name, Variadic<AnyType>:$inputs);  // This is not really used. We have region arguments, not "normal" arguments.
   //  let results = (outs AnyType : $output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseWrapOp : Rise_Op<"wrap"> {
+  let summary = "rise wrap";
+  let arguments = (ins AnyType:$typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
+  let results = (outs ScalarType : $wrapped);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseUnWrapOp : Rise_Op<"unwrap"> {
+  let summary = "rise unwrap";
+  let arguments = (ins ScalarType:$scalarToUnwrap);  // This is not really used. We have region arguments, not "normal" arguments.
+  let results = (outs AnyType : $unwrapped);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

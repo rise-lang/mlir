@@ -99,6 +99,39 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
+// RiseWrapOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType operand;
+
+  if (parser.parseOperand(operand))
+    return failure();
+  parser.resolveOperandUnsafe(operand, result.operands);
+
+  result.addTypes(
+      ScalarType::get(builder.getContext(), result.operands.front().getType()));
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// RiseUnWrapOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseUnWrapOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType operand;
+
+  if (parser.parseOperand(operand))
+    return failure();
+  if (parser.resolveOperandUnsafe(operand, result.operands))
+    return failure();
+
+  Type outputType = result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
+  result.addTypes(outputType);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // RiseInOp
 //===----------------------------------------------------------------------===//
 ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
@@ -333,7 +366,7 @@ ParseResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
       bool validLowering = false;
       if (attributesFromDict.front().first.str() == "to") {
         if (StringAttr loweringAttr =
-            attributesFromDict.front().second.dyn_cast<StringAttr>()) {
+                attributesFromDict.front().second.dyn_cast<StringAttr>()) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
@@ -477,7 +510,7 @@ ParseResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
       bool validLowering = false;
       if (attributesFromDict.front().first.str() == "to") {
         if (StringAttr loweringAttr =
-            attributesFromDict.front().second.dyn_cast<StringAttr>()) {
+                attributesFromDict.front().second.dyn_cast<StringAttr>()) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
