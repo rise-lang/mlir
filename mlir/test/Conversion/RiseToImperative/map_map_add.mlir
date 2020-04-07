@@ -1,31 +1,37 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mapMapId -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MAP_MAP_ADD
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(memref<4x4xf32>)
+func @rise_fun(memref<4x4xf32>, memref<4x4xf32>)
 func @mapMapId() {
 
-    rise.fun "rise_fun" (%outArg:memref<4x4xf32>) {
-        %array2D = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
-        %doubleFun = rise.lambda (%summand) : !rise.fun<data<float> -> data<float>> {
-            %addFun = rise.add #rise.float
-            %doubled = rise.apply %addFun, %summand, %summand //: !rise.fun<data<float> -> fun<data<float> -> data<float>>>, %summand, %summand
-            rise.return %doubled : !rise.data<float>
+    rise.fun "rise_fun" (%outArg:memref<4x4xf32>, %inArg:memref<4x4xf32>) {
+        %array2D = rise.in %inArg : !rise.array<4, array<4, scalar<f32>>>
+        %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+            %summandUnwrapped = rise.unwrap %summand
+            %doubled = addf %summandUnwrapped, %summandUnwrapped : f32
+            %doubledWrapped = rise.wrap %doubled
+            rise.return %doubledWrapped : !rise.scalar<f32>
         }
-        %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
+        %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
 
-        %mapInnerLambda = rise.lambda (%arraySlice) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
-           %map2 = rise.mapSeq #rise.nat<4> #rise.float #rise.float
+        %mapInnerLambda = rise.lambda (%arraySlice) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
+           %map2 = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
            %res = rise.apply %map2, %doubleFun, %arraySlice
-           rise.return %res : !rise.data<array<4, float>>
+           rise.return %res : !rise.array<4, scalar<f32>>
         }
         %res = rise.apply %map1, %mapInnerLambda, %array2D
 
-        rise.return %res: !rise.data<array<4, array<4, float>>>
+        rise.return %res: !rise.array<4, array<4, scalar<f32>>>
     }
 
     //prepare output Array
     %outputArray = alloc() : memref<4x4xf32>
-    call @rise_fun(%outputArray) : (memref<4x4xf32>) -> ()
+
+    %inputArray = alloc() : memref<4x4xf32>
+    %cst = constant 5.0 : f32
+    linalg.fill(%inputArray, %cst) : memref<4x4xf32>, f32
+
+    call @rise_fun(%outputArray, %inputArray) : (memref<4x4xf32>, memref<4x4xf32>) -> ()
 
     %print_me = memref_cast %outputArray : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()

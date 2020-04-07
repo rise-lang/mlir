@@ -5,16 +5,17 @@ func @rise_fun(memref<4xf32>, memref<4xf32>)
 func @array_times_2() {
 
     rise.fun "rise_fun" (%outArg:memref<4xf32>, %in:memref<4xf32>) {
-        %array = rise.in %in : !rise.data<array<4, float>>
-        %doubleFun = rise.lambda (%summand) : !rise.fun<data<float> -> data<float>> {
-            %addFun = rise.add #rise.float
-            %doubled = rise.apply %addFun, %summand, %summand
-            rise.return %doubled : !rise.data<float>
+        %array = rise.in %in : !rise.array<4, scalar<f32>>
+        %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+            %summandUnwrapped = rise.unwrap %summand
+            %doubled = addf %summandUnwrapped, %summandUnwrapped : f32    // This section can contain arbitrary operations using the %summandUnwrapped. This is opaque to RISE
+            %doubledWrapped = rise.wrap %doubled
+            rise.return %doubledWrapped : !rise.scalar<f32>
         }
-        %map4IntsToInts = rise.mapSeq {to = "affine"} #rise.nat<4> #rise.float #rise.float
+        %map4IntsToInts = rise.mapSeq {to = "affine"} #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
         %doubledArray = rise.apply %map4IntsToInts, %doubleFun, %array
 
-        rise.return %doubledArray : !rise.data<array<4, float>>
+        rise.return %doubledArray : !rise.array<4, scalar<f32>>
     }
 
     //prepare output Array
@@ -34,3 +35,4 @@ func @array_times_2() {
 // ARRAY_TIMES_2: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // ARRAY_TIMES_2: [10, 10, 10, 10]
+

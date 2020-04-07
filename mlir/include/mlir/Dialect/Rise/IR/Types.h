@@ -87,26 +87,6 @@ enum RiseTypeKind {
 /// like DataTypes and, for example, be stored in an array.
 ///
 
-class ScalarType : public mlir::Type::TypeBase<ScalarType, Type,
-    detail::RiseScalarStorage> {
-public:
-  /// Inherit some necessary constructors from 'TypeBase'.
-  using Base::Base;
-
-//  static mlir::LogicalResult
-//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
-//                               mlir::MLIRContext *context, Nat size,
-//                               DataType elementType);
-
-  /// This method is used to get an instance of ArrayType.
-  static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
-
-  /// Support method to enable LLVM-style RTTI type casting.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_SCALAR; }
-
-  Type getWrappedType();
-};
-
 class DataType : public Type::TypeBase<DataType, Type> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
@@ -153,6 +133,27 @@ public:
   }
 };
 
+
+class ScalarType : public mlir::Type::TypeBase<ScalarType, DataType,
+    detail::RiseScalarStorage> {
+public:
+  /// Inherit some necessary constructors from 'TypeBase'.
+  using Base::Base;
+
+//  static mlir::LogicalResult
+//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
+//                               mlir::MLIRContext *context, Nat size,
+//                               DataType elementType);
+
+  /// This method is used to get an instance of ArrayType.
+  static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
+
+  /// Support method to enable LLVM-style RTTI type casting.
+  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_SCALAR; }
+
+  Type getWrappedType();
+};
+
 /// We will experiment with adopting the Integer types of the Standard dialect
 class Int : public Type::TypeBase<Int, DataType> {
 public:
@@ -194,17 +195,17 @@ public:
   static mlir::LogicalResult
   verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
                                mlir::MLIRContext *context, Nat size,
-                               DataType elementType);
+                               Type elementType);
 
   /// This method is used to get an instance of ArrayType.
   static ArrayType get(mlir::MLIRContext *context, Nat size,
-                       DataType elementType);
+                       Type elementType);
 
   /// Support method to enable LLVM-style RTTI type casting.
   static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_ARRAY; }
 
   Nat getSize();
-  DataType getElementType();
+  Type getElementType();
 };
 
 class Tuple : public mlir::Type::TypeBase<Tuple, DataType,
@@ -218,10 +219,10 @@ public:
   static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_TUPLE; }
 
   /// This method is used to get an instance of Tuple.
-  static Tuple get(mlir::MLIRContext *context, DataType first, DataType second);
+  static Tuple get(mlir::MLIRContext *context, Type first, Type second);
 
-  DataType getFirst();
-  DataType getSecond();
+  Type getFirst();
+  Type getSecond();
 };
 
 class FunType
@@ -237,11 +238,11 @@ public:
   }
 
   /// This method is used to get an instance of FunType
-  static FunType get(mlir::MLIRContext *context, RiseType input,
-                     RiseType output);
+  static FunType get(mlir::MLIRContext *context, Type input,
+                     Type output);
 
-  RiseType getInput();
-  RiseType getOutput();
+  Type getInput();
+  Type getOutput();
 };
 
 class DataTypeWrapper

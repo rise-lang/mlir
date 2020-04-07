@@ -65,7 +65,7 @@ def RiseType : Type<Or<[FunType.predicate, DataTypeWrapper.predicate]>>;
 def DataTypeAttr
     : Attr<CPred<"$_self.isa<DataTypeAttr>()">, "datatype attribute"> {
   let storageType = [{DataTypeAttr}];
-  let returnType = [{DataType}];
+  let returnType = [{Type}];
 }
 def NatAttr : Attr<CPred<"$_self.isa<NatAttr>()">, "nat attribute"> {
   let storageType = [{NatAttr}];
@@ -102,7 +102,7 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
 def RiseWrapOp : Rise_Op<"wrap"> {
   let summary = "rise wrap";
   let arguments = (ins AnyType:$typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
-  let results = (outs ScalarType : $wrapped);
+  let results = (outs AnyType : $wrapped);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -163,14 +163,14 @@ def RiseAssignOp : Rise_Op<"codegen.assign"> {
 def RiseInOp : Rise_Op<"in"> {
   let summary = "rise in";
   let arguments = (ins AnyMemRef : $input);
-  let results = (outs DataTypeWrapper : $output);
+  let results = (outs AnyType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
   let summary = "literal";
   let arguments = (ins LiteralAttr : $literal);
-  let results = (outs RiseType);
+  let results = (outs AnyType);
   //    let extraClassDeclaration = [{LiteralAttr getValue() { return
   //    getAttr("value"); }
   //        /// Returns true if a constant operation can be built with the given

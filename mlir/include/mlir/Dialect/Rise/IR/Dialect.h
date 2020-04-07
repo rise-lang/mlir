@@ -42,7 +42,9 @@ public:
 
   /// Hook for custom parsing of types
   mlir::Type parseType(DialectAsmParser &parser) const override;
-  RiseType parseRiseType(StringRef typeString, mlir::Location loc) const;
+  mlir::Type parseTypeInternal(DialectAsmParser &parser, StringRef typeString) const;
+  RiseType parseRiseType(DialectAsmParser &parser, StringRef typeString, mlir::Location loc) const;
+  FunType parseFunType(DialectAsmParser &parser) const;
   DataType parseDataType(StringRef typeString, mlir::Location loc) const;
   Nat parseNat(StringRef typeString, mlir::Location loc) const;
 

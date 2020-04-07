@@ -54,25 +54,74 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
 
 /// Parse a type registered to this dialect
 mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
-  StringRef typeString = parser.getFullSymbolSpec();
+  if (succeeded(parser.parseOptionalKeyword("fun"))) {
+    // parsing of !rise.fun
+
+    Type input;
+    Type output;
+    if (parser.parseLess())
+      return nullptr;
+    input = parseType(parser);
+    if (parser.parseArrow())
+      return nullptr;
+    output = parseType(parser);
+    if (parser.parseGreater())
+      return nullptr;
+    return FunType::get(parser.getBuilder().getContext(), input, output);
+
+  } else if (succeeded(parser.parseOptionalKeyword("tuple"))) {
+    // parsing of !rise.tuple
+
+    Type first;
+    Type second;
+    if (parser.parseLess())
+      return nullptr;
+    first = parseType(parser);
+    if (parser.parseComma())
+      return nullptr;
+    second = parseType(parser);
+    if (parser.parseGreater())
+      return nullptr;
+    return Tuple::get(parser.getBuilder().getContext(), first, second);
+
+  } else if (succeeded(parser.parseOptionalKeyword("array"))) {
+    Type elementType;
+    int elementCount;
+    if (parser.parseLess())
+      return nullptr;
+    parser.parseInteger(elementCount);
+    if (parser.parseComma())
+      return nullptr;
+    elementType = parseType(parser);
+    if (parser.parseGreater())
+      return nullptr;
+    return ArrayType::get(
+        parser.getBuilder().getContext(),
+        Nat::get(parser.getBuilder().getContext(), elementCount), elementType);
+
+  } else if (succeeded(parser.parseOptionalKeyword("scalar"))) {
+    // parsing of !rise.scalar
+
+    Type wrappedType;
+    if (parser.parseLess() || parser.parseType(wrappedType) ||
+        parser.parseGreater())
+      return nullptr;
+
+    // todo specify valid wrapped types
+    return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
+  }
+}
+
+/// Parse a type registered to this dialect
+mlir::Type RiseDialect::parseTypeInternal(DialectAsmParser &parser,
+                                          StringRef typeString) const {
   Location loc = parser.getEncodedSourceLoc(parser.getCurrentLocation());
 
   if (typeString.startswith("!rise."))
     typeString.consume_front("!rise.");
 
-  // parsing of rise.scalar
-  Type wrappedType;
-  if (!failed(parser.parseOptionalKeyword("scalar"))) {
-    if (parser.parseLess() || parser.parseType(wrappedType) || parser.parseGreater()) {
-      // todo specify valid wrapped types
-      emitError(loc, "Rise Scalar badly structured! '" + typeString + "'");
-      return nullptr;
-    }
-    return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
-  }
-
   if (typeString.startswith("fun") || typeString.startswith("data")) {
-    return parseRiseType(typeString, loc);
+    return parseRiseType(parser, typeString, loc);
   }
   if (typeString.startswith("array") || typeString.startswith("tuple") ||
       typeString.startswith("int") || typeString.startswith("float")) {
@@ -85,7 +134,8 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
   return nullptr;
 }
 
-RiseType RiseDialect::parseRiseType(StringRef typeString,
+RiseType RiseDialect::parseRiseType(DialectAsmParser &parser,
+                                    StringRef typeString,
                                     mlir::Location loc) const {
 
   if (typeString.startswith("fun")) {
@@ -132,8 +182,8 @@ RiseType RiseDialect::parseRiseType(StringRef typeString,
     if (outputDataString.startswith("!rise."))
       outputDataString.consume_front("!rise.");
 
-    RiseType inputData = parseRiseType(inputDataString, loc);
-    RiseType outputData = parseRiseType(outputDataString, loc);
+    Type inputData = parseTypeInternal(parser, inputDataString);
+    Type outputData = parseTypeInternal(parser, outputDataString);
 
     return FunType::get(getContext(), inputData, outputData);
   }
@@ -242,7 +292,7 @@ std::string static stringForType(Type type) {
     return "unknown rise type";
   }
   case RiseTypeKind ::RISE_SCALAR: {
-    return "scalar<";
+    return "scalar";
   }
   case RiseTypeKind::RISE_FLOAT: {
     return "float";
@@ -279,14 +329,30 @@ void RiseDialect::printType(mlir::Type type, DialectAsmPrinter &printer) const {
   raw_ostream &os = printer.getStream();
 
   if (ScalarType scalarType = type.dyn_cast<ScalarType>()) {
-    os << stringForType(type);
+    printer << "scalar<";
     printer.printType(scalarType.getWrappedType());
-    os << ">";
+    printer << ">";
+  } else if (FunType funType = type.dyn_cast<FunType>()) {
+    printer << "fun<";
+    printType(funType.getInput(), printer);
+    printer << " -> ";
+    printType(funType.getOutput(), printer);
+    printer << ">";
+  } else if (Tuple tuple = type.dyn_cast<Tuple>()) {
+    printer << "tuple<";
+    printType(tuple.getFirst(), printer);
+    printer << ", ";
+    printType(tuple.getSecond(), printer);
+    printer << ">";
+  } else if (ArrayType array = type.dyn_cast<ArrayType>()) {
+    printer << "array<";
+    printer << array.getSize().getIntValue();
+    printer << ", ";
+    printType(array.getElementType(), printer);
+    printer << ">";
   } else {
-    os << stringForType(type);
+    printer << stringForType(type);
   }
-
-
 }
 
 ///         rise.literal #rise.int<42>
@@ -294,21 +360,47 @@ void RiseDialect::printType(mlir::Type type, DialectAsmPrinter &printer) const {
 ///         rise.literal #rise.array<2.3, !rise.int, [[1,2,3],[4,5,6]]>
 mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
                                             Type type) const {
-  StringRef attrString = parser.getFullSymbolSpec();
-  Location loc = parser.getEncodedSourceLoc(parser.getCurrentLocation());
-  // we only have RiseTypeAttribute
-  if (attrString.startswith("lit<")) {
-    return parseLiteralAttribute(parser, loc);
+
+  if (succeeded(parser.parseOptionalKeyword("lit"))) {
+    if (parser.parseLess())
+      return nullptr;
+    double literalValue;
+    if (succeeded(parser.parseFloat(literalValue))) {
+      if (parser.parseGreater())
+        return nullptr;
+      return LiteralAttr::get(
+          getContext(),
+          ScalarType::get(getContext(), FloatType::getF32(getContext())),
+          std::to_string(literalValue));
+    }
+  } else if (succeeded(parser.parseOptionalKeyword("nat"))) {
+    if (parser.parseLess())
+      return nullptr;
+    int natValue;
+    if (parser.parseInteger(natValue) || parser.parseGreater())
+      return nullptr;
+    return NatAttr::get(getContext(), Nat::get(getContext(), natValue));
+  } else {
+    // we have a DataType Attribute
+    Type type = parseType(parser);
+    return DataTypeAttr::get(getContext(), type);
   }
-  if (attrString.startswith("array") || attrString.startswith("tuple") ||
-      attrString.startswith("int") || attrString.startswith("float")) {
-    return parseDataTypeAttribute(attrString, loc);
-  }
-  if (attrString.startswith("nat")) {
-    return parseNatAttribute(attrString, loc);
-  }
-  emitError(loc, "Invalid Rise attribute '" + attrString + "'");
-  return nullptr;
+
+  //  StringRef attrString = parser.getFullSymbolSpec();
+  //  Location loc = parser.getEncodedSourceLoc(parser.getCurrentLocation());
+  //  // we only have RiseTypeAttribute
+  //  if (attrString.startswith("lit<")) {
+  //    return parseLiteralAttribute(parser, loc);
+  //  }
+  //  if (attrString.startswith("array") || attrString.startswith("tuple") ||
+  //      attrString.startswith("int") || attrString.startswith("float")) {
+  //    return parseDataTypeAttribute(attrString, loc);
+  //  }
+  //  if (attrString.startswith("nat")) {
+  //    return parseNatAttribute(attrString, loc);
+  //  }
+  //  emitError(loc, "Invalid Rise attribute '" + attrString + "'");
+  //  return nullptr;
 }
 
 DataTypeAttr RiseDialect::parseDataTypeAttribute(StringRef attrString,

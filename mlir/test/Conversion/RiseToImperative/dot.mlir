@@ -1,53 +1,64 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(memref<1xf32>)
+func @rise_fun(memref<1xf32>, memref<4xf32>, memref<4xf32>)
 func @simple_dot() {
 
-    rise.fun "rise_fun" (%outArg:memref<1xf32>) {
+    rise.fun "rise_fun" (%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
 
         //Arrays
-        %array0 = rise.literal #rise.lit<array<4, float, [5,5,5,5]>>
-        %array1 = rise.literal #rise.lit<array<4, float, [5,5,5,5]>>
+        %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
+        %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
 
         //Zipping
-        %zipFun = rise.zip #rise.nat<4> #rise.float #rise.float
+        %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
         %zippedArrays = rise.apply %zipFun, %array0, %array1
 
         //Multiply
+        %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+            %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+            %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
-        %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<data<tuple<float, float>> -> data<float>> {
-            %fstFun = rise.fst #rise.float #rise.float
-               %sndFun = rise.snd #rise.float #rise.float
+            %fst = rise.apply %fstFun, %floatTuple
+            %snd = rise.apply %sndFun, %floatTuple
 
-               %fst = rise.apply %fstFun, %floatTuple
-              %snd = rise.apply %sndFun, %floatTuple
+            %fst_unwrapped = rise.unwrap %fst
+            %snd_unwrapped = rise.unwrap %snd
+            %result = mulf %fst_unwrapped, %snd_unwrapped :f32
+            %result_wrapped = rise.wrap %result
 
-              %mulFun = rise.mul #rise.float
-              %result = rise.apply %mulFun, %snd, %fst
+            rise.return %result_wrapped : !rise.scalar<f32>
+        }
 
-             rise.return %result : !rise.data<float>
-            }
-
-        %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<float, float> #rise.float
+        %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
         %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
         //Reduction
-        %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<data<float> -> fun<data<float> -> data<float>>> {
-            %addFun = rise.add #rise.float
-            %doubled = rise.apply %addFun, %summand0, %summand1
-            rise.return %doubled : !rise.data<float>
+        %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
+            %summand0_unwrapped = rise.unwrap %summand0
+            %summand1_unwrapped = rise.unwrap %summand1
+            %result = addf %summand0_unwrapped, %summand1_unwrapped : f32
+            %result_wrapped = rise.wrap %result
+            rise.return %result_wrapped : !rise.scalar<f32>
         }
-        %initializer = rise.literal #rise.lit<float<0>>
-        %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.float #rise.float
+        %initializer = rise.literal #rise.lit<0.0>
+        %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
         %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
 
-        rise.return %result : !rise.data<float>
+        rise.return %result : !rise.scalar<f32>
     }
 
     //prepare output Array
     %outputArray = alloc() : memref<1xf32>
-    call @rise_fun(%outputArray) : (memref<1xf32>) -> ()
+    %inArg0 = alloc() : memref<4xf32>
+    %cst_5 = constant 5.0 : f32
+    linalg.fill(%inArg0, %cst_5) : memref<4xf32>, f32
+
+    %inArg1 = alloc() : memref<4xf32>
+    %cst_10 = constant 10.0 : f32
+    linalg.fill(%inArg1, %cst_10) : memref<4xf32>, f32
+
+    call @rise_fun(%outputArray, %inArg0, %inArg1) : (memref<1xf32>, memref<4xf32>, memref<4xf32>) -> ()
 
     %print_me = memref_cast %outputArray : memref<1xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()

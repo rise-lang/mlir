@@ -126,7 +126,8 @@ ParseResult parseRiseUnWrapOp(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperandUnsafe(operand, result.operands))
     return failure();
 
-  Type outputType = result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
+  Type outputType =
+      result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
   result.addTypes(outputType);
   return success();
 }
@@ -144,7 +145,7 @@ ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
   parser.resolveOperandUnsafe(operand, result.operands);
   // parse Memref and create one of our types for it.
 
-  DataTypeWrapper riseType;
+  Type riseType;
   if (parser.parseColonType(riseType))
     return failure();
 
@@ -342,7 +343,7 @@ ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseAttribute(attr, "literal", result.attributes))
     return failure();
 
-  result.addTypes(DataTypeWrapper::get(builder.getContext(), attr.getType()));
+  result.addTypes(attr.getType());
   return success();
 }
 
@@ -406,17 +407,11 @@ ParseResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(FunType::get(
       builder.getContext(),
-      FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(), s.getValue()),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue())),
+      FunType::get(builder.getContext(), s.getValue(), t.getValue()),
       FunType::get(
           builder.getContext(),
-          DataTypeWrapper::get(
-              builder.getContext(),
-              ArrayType::get(builder.getContext(), n.getValue(), s.getValue())),
-          DataTypeWrapper::get(builder.getContext(),
-                               ArrayType::get(builder.getContext(),
-                                              n.getValue(), t.getValue())))));
+          ArrayType::get(builder.getContext(), n.getValue(), s.getValue()),
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -476,17 +471,11 @@ ParseResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(FunType::get(
       builder.getContext(),
-      FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(), s.getValue()),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue())),
+      FunType::get(builder.getContext(), s.getValue(), t.getValue()),
       FunType::get(
           builder.getContext(),
-          DataTypeWrapper::get(
-              builder.getContext(),
-              ArrayType::get(builder.getContext(), n.getValue(), s.getValue())),
-          DataTypeWrapper::get(builder.getContext(),
-                               ArrayType::get(builder.getContext(),
-                                              n.getValue(), t.getValue())))));
+          ArrayType::get(builder.getContext(), n.getValue(), s.getValue()),
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -551,21 +540,13 @@ ParseResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
   result.addTypes(FunType::get(
       builder.getContext(),
       FunType::get(
-          builder.getContext(),
-          DataTypeWrapper::get(builder.getContext(), s.getValue()),
-          FunType::get(
-              builder.getContext(),
-              DataTypeWrapper::get(builder.getContext(), t.getValue()),
-              DataTypeWrapper::get(builder.getContext(), t.getValue()))),
-      FunType::get(
-          builder.getContext(),
-          DataTypeWrapper::get(builder.getContext(), t.getValue()),
-          FunType::get(
-              builder.getContext(),
-              DataTypeWrapper::get(builder.getContext(),
-                                   ArrayType::get(builder.getContext(),
-                                                  n.getValue(), s.getValue())),
-              DataTypeWrapper::get(builder.getContext(), t.getValue())))));
+          builder.getContext(), s.getValue(),
+          FunType::get(builder.getContext(), t.getValue(), t.getValue())),
+      FunType::get(builder.getContext(), t.getValue(),
+                   FunType::get(builder.getContext(),
+                                ArrayType::get(builder.getContext(),
+                                               n.getValue(), s.getValue()),
+                                t.getValue()))));
 
   return success();
 }
@@ -595,19 +576,13 @@ ParseResult parseZipOp(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(FunType::get(
       builder.getContext(),
-      DataTypeWrapper::get(
-          builder.getContext(),
-          ArrayType::get(builder.getContext(), n.getValue(), s.getValue())),
+      ArrayType::get(builder.getContext(), n.getValue(), s.getValue()),
       FunType::get(
           builder.getContext(),
-          DataTypeWrapper::get(
-              builder.getContext(),
-              ArrayType::get(builder.getContext(), n.getValue(), t.getValue())),
-          DataTypeWrapper::get(
-              builder.getContext(),
-              ArrayType::get(builder.getContext(), n.getValue(),
-                             Tuple::get(builder.getContext(), s.getValue(),
-                                        t.getValue()))))));
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()),
+          ArrayType::get(
+              builder.getContext(), n.getValue(),
+              Tuple::get(builder.getContext(), s.getValue(), t.getValue())))));
   return success();
 }
 
@@ -625,15 +600,11 @@ ParseResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseAttribute(t, "t", result.attributes))
     failure();
 
-  result.addTypes(FunType::get(
-      builder.getContext(),
-      DataTypeWrapper::get(builder.getContext(), s.getValue()),
-      FunType::get(
-          builder.getContext(),
-          DataTypeWrapper::get(builder.getContext(), t.getValue()),
-          DataTypeWrapper::get(
-              builder.getContext(),
-              Tuple::get(builder.getContext(), s.getValue(), t.getValue())))));
+  result.addTypes(
+      FunType::get(builder.getContext(), s.getValue(),
+                   FunType::get(builder.getContext(), t.getValue(),
+                                Tuple::get(builder.getContext(), s.getValue(),
+                                           t.getValue()))));
   return success();
 }
 
@@ -653,10 +624,8 @@ ParseResult parseFstOp(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(
       FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(),
-                                        Tuple::get(builder.getContext(),
-                                                   s.getValue(), t.getValue())),
-                   DataTypeWrapper::get(builder.getContext(), s.getValue())));
+                   Tuple::get(builder.getContext(), s.getValue(), t.getValue()),
+                   s.getValue()));
   return success();
 }
 
@@ -676,10 +645,8 @@ ParseResult parseSndOp(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(
       FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(),
-                                        Tuple::get(builder.getContext(),
-                                                   s.getValue(), t.getValue())),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue())));
+                   Tuple::get(builder.getContext(), s.getValue(), t.getValue()),
+                   t.getValue()));
   return success();
 }
 
@@ -697,11 +664,8 @@ ParseResult parseAddOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(FunType::get(
-      builder.getContext(),
-      DataTypeWrapper::get(builder.getContext(), t.getValue()),
-      FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue()),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue()))));
+      builder.getContext(), t.getValue(),
+      FunType::get(builder.getContext(), t.getValue(), t.getValue())));
   return success();
 }
 
@@ -715,11 +679,8 @@ ParseResult parseMulOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(FunType::get(
-      builder.getContext(),
-      DataTypeWrapper::get(builder.getContext(), t.getValue()),
-      FunType::get(builder.getContext(),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue()),
-                   DataTypeWrapper::get(builder.getContext(), t.getValue()))));
+      builder.getContext(), t.getValue(),
+      FunType::get(builder.getContext(), t.getValue(), t.getValue())));
   return success();
 }
 
@@ -727,8 +688,6 @@ ParseResult parseMulOp(OpAsmParser &parser, OperationState &result) {
 // ReturnOp
 //===----------------------------------------------------------------------===//
 ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
-  auto &builder = parser.getBuilder();
-
   OpAsmParser::OperandType value;
   Type type;
   result.setOperandListToResizable();

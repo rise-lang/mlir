@@ -6,52 +6,53 @@ func @mm() {
 
     rise.fun "rise_fun" (%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf32>) {
         //Arrays
-//        %A = rise.in %inA : !rise.data<array<4, array<4, float>>>
-//        %B = rise.in %inB : !rise.data<array<4, array<4, float>>>
+        %A = rise.in %inA : !rise.array<4, array<4, scalar<f32>>>
+        %B = rise.in %inB : !rise.array<4, array<4, scalar<f32>>>
 
-        %A = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
-        %B = rise.literal #rise.lit<array<4.4, !rise.float, [[5,5,5,5], [5,5,5,5], [5,5,5,5], [5,5,5,5]]>>
-
-        %m1fun = rise.lambda (%arow) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
-            %m2fun = rise.lambda (%bcol) : !rise.fun<data<array<4, float>> -> data<array<4, float>>> {
+        %m1fun = rise.lambda (%arow) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
+            %m2fun = rise.lambda (%bcol) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
 
                 //Zipping
-                %zipFun = rise.zip #rise.nat<4> #rise.float #rise.float
+                %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
                 %zippedArrays = rise.apply %zipFun, %arow, %bcol
 
                 //Multiply
-                %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<data<tuple<float, float>> -> data<float>> {
-                    %fstFun = rise.fst #rise.float #rise.float
-                    %sndFun = rise.snd #rise.float #rise.float
+                %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+                    %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+                    %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
                     %fst = rise.apply %fstFun, %floatTuple
                     %snd = rise.apply %sndFun, %floatTuple
 
-                    %mulFun = rise.mul #rise.float
-                    %result = rise.apply %mulFun, %snd, %fst
+                    %fst_unwrapped = rise.unwrap %fst
+                    %snd_unwrapped = rise.unwrap %snd
+                    %result = mulf %fst_unwrapped, %snd_unwrapped :f32
+                    %result_wrapped = rise.wrap %result
 
-                    rise.return %result : !rise.data<float>
+                    rise.return %result_wrapped : !rise.scalar<f32>
                 }
-                %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<float, float> #rise.float
+                %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
                 %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
                 //Reduction
-                %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<data<float> -> fun<data<float> -> data<float>>> {
-                    %addFun = rise.add #rise.float
-                    %doubled = rise.apply %addFun, %summand0, %summand1
-                    rise.return %doubled : !rise.data<float>
+                %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
+                    %summand0_unwrapped = rise.unwrap %summand0
+                    %summand1_unwrapped = rise.unwrap %summand1
+                    %result = addf %summand0_unwrapped, %summand1_unwrapped : f32
+                    %result_wrapped = rise.wrap %result
+                    rise.return %result_wrapped : !rise.scalar<f32>
                 }
-                %initializer = rise.literal #rise.lit<float<0>>
-                %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.float #rise.float
+                %initializer = rise.literal #rise.lit<0.0>
+                %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
                 %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
 
-                rise.return %result : !rise.data<float>
+                rise.return %result : !rise.scalar<f32>
             }
-            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, float> #rise.array<4, float>
+            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
             %result = rise.apply %m2, %m2fun, %B
-            rise.return %result : !rise.data<array<4, array<4, float>>>
+            rise.return %result : !rise.array<4, array<4, scalar<f32>>>
         }
-        %m1 = rise.mapPar #rise.nat<4> #rise.array<4, !rise.float> #rise.array<4, !rise.float>
+        %m1 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
         %result = rise.apply %m1, %m1fun, %A
     }
     //prepare output Array

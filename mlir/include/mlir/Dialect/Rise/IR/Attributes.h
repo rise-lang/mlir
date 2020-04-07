@@ -74,9 +74,9 @@ class DataTypeAttr
 public:
   using Base::Base;
 
-  static DataTypeAttr get(MLIRContext *context, DataType value);
+  static DataTypeAttr get(MLIRContext *context, Type value);
 
-  DataType getValue() const;
+  Type getValue() const;
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
   static bool kindof(unsigned kind) {

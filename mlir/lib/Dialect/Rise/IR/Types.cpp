@@ -69,25 +69,25 @@ Nat Nat::get(mlir::MLIRContext *context, int intValue) {
 // FunType
 //===----------------------------------------------------------------------===//
 
-FunType FunType::get(mlir::MLIRContext *context, RiseType input,
-                     RiseType output) {
+FunType FunType::get(mlir::MLIRContext *context, Type input,
+                     Type output) {
   return Base::get(context, RiseTypeKind::RISE_FUNTYPE, input, output);
 }
 
-RiseType FunType::getInput() { return getImpl()->input; }
+Type FunType::getInput() { return getImpl()->input; }
 
-RiseType FunType::getOutput() { return getImpl()->output; }
+Type FunType::getOutput() { return getImpl()->output; }
 
 //===----------------------------------------------------------------------===//
 // TupleType
 //===----------------------------------------------------------------------===//
-Tuple rise::Tuple::get(mlir::MLIRContext *context, DataType first,
-                       DataType second) {
+Tuple rise::Tuple::get(mlir::MLIRContext *context, Type first,
+                       Type second) {
   return Base::get(context, RiseTypeKind::RISE_TUPLE, first, second);
 }
 
-DataType rise::Tuple::getFirst() { return getImpl()->getFirst(); }
-DataType rise::Tuple::getSecond() { return getImpl()->getSecond(); }
+Type rise::Tuple::getFirst() { return getImpl()->getFirst(); }
+Type rise::Tuple::getSecond() { return getImpl()->getSecond(); }
 
 //===----------------------------------------------------------------------===//
 // ArrayType
@@ -95,17 +95,17 @@ DataType rise::Tuple::getSecond() { return getImpl()->getSecond(); }
 
 Nat ArrayType::getSize() { return getImpl()->getSize(); }
 
-DataType ArrayType::getElementType() { return getImpl()->getElementType(); }
+Type ArrayType::getElementType() { return getImpl()->getElementType(); }
 
 ArrayType ArrayType::get(mlir::MLIRContext *context, Nat size,
-                         DataType elementType) {
+                         Type elementType) {
   return Base::get(context, RiseTypeKind::RISE_ARRAY, size, elementType);
 }
 
 mlir::LogicalResult
 ArrayType::verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
                                         mlir::MLIRContext *context, Nat size,
-                                        DataType elementType) {
+                                        Type elementType) {
   /// For some reason this method is called without a valid location in
   /// StorageUniquerSupport Hence we can not provide proper location information
   /// on error

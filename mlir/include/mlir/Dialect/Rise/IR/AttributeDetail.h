@@ -54,8 +54,8 @@ struct LiteralAttributeStorage : public mlir::AttributeStorage {
 
 /// Implementation of the DataTypeAttr
 struct DataTypeAttributeStorage : public mlir::AttributeStorage {
-  DataTypeAttributeStorage(DataType value) : value(value) {}
-  using KeyTy = DataType;
+  DataTypeAttributeStorage(Type value) : value(value) {}
+  using KeyTy = Type;
 
   /// Key equality function.
   bool operator==(const KeyTy &key) const { return key == KeyTy(value); }
@@ -71,7 +71,7 @@ struct DataTypeAttributeStorage : public mlir::AttributeStorage {
         DataTypeAttributeStorage(key);
   }
 
-  DataType value;
+  Type value;
 };
 
 /// Implementation of the NatAttr
