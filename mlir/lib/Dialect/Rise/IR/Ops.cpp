@@ -115,9 +115,9 @@ ParseResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// RiseUnWrapOp
+// RiseUnwrapOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseUnWrapOp(OpAsmParser &parser, OperationState &result) {
+ParseResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 

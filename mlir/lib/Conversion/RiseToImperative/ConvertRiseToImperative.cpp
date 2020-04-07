@@ -142,7 +142,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
   auto result =
-      AccT(lastApply, riseFun.getBody().front().getArgument(0), rewriter);
+      AccT(returnOp, riseFun.getBody().front().getArgument(0), rewriter);
 
   emitRemark(riseFun.getLoc()) << "AccT finished. Starting CodeGen.";
 
@@ -160,8 +160,9 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     codeGen(assign, {}, rewriter);
   }
 
-  //   cleanup
-  //   erase intermediate operations. We remove them back to front right now,
+  //   cleanup:
+  //   erase intermediate operations.
+  //   We remove them back to front right now,
   //   this should be alright in terms of dependencies.
   riseFun.walk([&erasureList](Operation *inst) {
     if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
@@ -220,6 +221,95 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
 /// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
+
+// TODO: continue here!
+//       AccT should not take a Lambda anymore but prob. just an Operation.
+//       maybe always a rise.return? Then from there check whether we have an
+//       apply
+//    -> continue as before.
+//       or have a wrap operation
+//    -> stuff between the wraps and unwraps has to be copied into the
+//    translated stuff.
+
+mlir::Value mlir::rise::AccT(ReturnOp returnOp, Value out,
+                             PatternRewriter &rewriter) {
+  if (!returnOp.getOperand(0).isa<OpResult>()) {
+    emitRemark(returnOp.getLoc())
+        << "Directly returning an argument is not supported in lowering to "
+           "imperative currently";
+    return nullptr;
+  }
+  if (ApplyOp apply =
+          dyn_cast<ApplyOp>(returnOp.getOperand(0).getDefiningOp())) {
+    return AccT(apply, out, rewriter);
+  } else if (RiseWrapOp wrapOp =
+                 dyn_cast<RiseWrapOp>(returnOp.getOperand(0).getDefiningOp())) {
+    // TODO: think about possible implications of this lowering approach to
+    // branching.
+    emitRemark(returnOp.getLoc())
+        << "AccT of RiseWrapOp. Copy operations from this block to result.";
+
+    // This might not give the correct Block when there are multiple blocks
+    // here!
+    Block &currentBlock = returnOp.getParentRegion()->front();
+
+//    // First do ConT for all values, which are unwrapped:
+//    SmallVector<RiseUnwrapOp *, 10> unwraps;
+//    currentBlock.walk([&unwraps](Operation *op) {
+//      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(op))
+//        unwraps.push_back(&unwrapOp);
+//    });
+//    std::cout << "collected all unwraps! " << unwraps.size() << "\n"
+//              << std::flush;
+//    for (RiseUnwrapOp *unwrapOp : unwraps) {
+//      // TODO: continue here, for some reason the unwrap op has no argument
+//      if (unwrapOp->unwrapped())
+//        std::cout << "hi!\n" << std::flush;
+//
+//      Value conT =
+//          ConT(unwrapOp->unwrapped(), rewriter.getInsertionPoint(), rewriter);
+//      unwrapOp->getResult().replaceAllUsesWith(conT);
+//    }
+//    std::cout << "did cont unwraps!" << std::flush;
+    // transfer operations until returnOp from lambda into result
+    rewriter.getInsertionBlock()->getOperations().splice(
+        rewriter.getInsertionPoint(), currentBlock.getOperations(),
+        currentBlock.getOperations().begin(), Block::iterator(returnOp));
+    rewriter.create<RiseAssignOp>(wrapOp.getLoc(), wrapOp.getOperand(), out);
+
+    // wrapOp not needed anymore!
+    rewriter.eraseOp(wrapOp);
+
+    //    currentBlock.walk([&](Operation *op) {
+    //      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(op)) {
+    //        // The operand of an unwrapUp is the result of a RiseIdxOp at
+    //        // this point in lowering We keep unwraps. They are removed in
+    //        // codeGen
+    //
+    //        std::cout << "unwrap: "
+    //                  << unwrapOp.getOperand()
+    //                         .getDefiningOp()
+    //                         ->getName()
+    //                         .getStringRef()
+    //                         .str()
+    //                  << "\n"
+    //                  << std::flush;
+    //        rewriter.clone(*unwrapOp);
+    //      } else if (RiseWrapOp wrapOp = dyn_cast<RiseWrapOp>(op)) {
+    //        //        rewriter.clone(*wrapOp);
+    //      } else if (isa<rise::ReturnOp>(op)) {
+    //      } else {
+    //        //        rewriter.clone(*op);
+    //      }
+    //    });
+
+    return returnOp.getOperand(0);
+  } else {
+    std::cout << "something went wrong! \n" << std::flush;
+    return nullptr;
+  }
+}
+
 mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
                              PatternRewriter &rewriter) {
   // lower outsideArgs first
@@ -515,17 +605,21 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
       forLoopBody = forLoop.getBody();
     } else if (loweringTarget == "affine") {
       auto forLoop = rewriter.create<AffineForOp>(
-                appliedFun->getLoc(), 0, n.getValue().getIntValue(), 1);
+          appliedFun->getLoc(), 0, n.getValue().getIntValue(), 1);
 
       // TODO: Not working as intended
-//      auto lbMap = AffineMap::getConstantMap(0, rewriter.getContext());
-//      auto ubMap = AffineMap::getConstantMap(n.getValue().getIntValue(),
-//                                             rewriter.getContext());
-//
-//      auto parallelOp = rewriter.create<AffineParallelOp>(appliedFun->getLoc(),
-//                                                          lbMap, ValueRange{}, ubMap, ValueRange{});
-//      loopInductionVar = *parallelOp.getLowerBoundsOperands().begin();
-//      forLoopBody = parallelOp.getBody();
+      //      auto lbMap = AffineMap::getConstantMap(0, rewriter.getContext());
+      //      auto ubMap = AffineMap::getConstantMap(n.getValue().getIntValue(),
+      //                                             rewriter.getContext());
+      //
+      //      auto parallelOp =
+      //      rewriter.create<AffineParallelOp>(appliedFun->getLoc(),
+      //                                                          lbMap,
+      //                                                          ValueRange{},
+      //                                                          ubMap,
+      //                                                          ValueRange{});
+      //      loopInductionVar = *parallelOp.getLowerBoundsOperands().begin();
+      //      forLoopBody = parallelOp.getBody();
       loopInductionVar = forLoop.getInductionVar();
       forLoopBody = forLoop.getBody();
     }
@@ -603,17 +697,17 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     LambdaOp lambda = cast<LambdaOp>(appliedFun);
     Substitute(lambda, applyOperands);
 
-    // Find last Apply inside Lambda:
-    ApplyOp lastApply;
+    // Find return in Lambda Region to start new AccT
+    rise::ReturnOp returnOp;
     for (auto op = lambda.region().front().rbegin();
          op != lambda.region().front().rend(); op++) {
-      if (isa<ApplyOp>(*op)) {
-        lastApply = cast<ApplyOp>(*op);
+      if (isa<ReturnOp>(*op)) {
+        returnOp = cast<ReturnOp>(*op);
         break;
       }
     }
 
-    return AccT(lastApply, out, rewriter);
+    return AccT(returnOp, out, rewriter);
   } else if (isa<AddOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Add";
 
@@ -670,6 +764,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
   Location loc = contValue.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
+  std::cout << "in ConT!\n" << std::flush;
+
   if (contValue.isa<OpResult>()) {
     if (isa<LiteralOp>(contValue.getDefiningOp())) {
       emitRemark(contValue.getLoc()) << "ConT of Literal";
@@ -680,7 +776,10 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
       emitRemark(contValue.getLoc()) << "Literal value: " << literalValue;
 
       if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
-        if (op.literalAttr().getType().isa<Float>()) {
+        if (op.literalAttr()
+                .getType()
+                .isa<ScalarType>()) { // TODO: use contained type for generating
+                                      // this
           auto fillOp = rewriter.create<ConstantFloatOp>(
               loc, llvm::APFloat(std::stof(literalValue)),
               FloatType::getF32(rewriter.getContext()));
@@ -871,25 +970,25 @@ Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
     emitError(rewriter.getUnknownLoc()) << "codegen started with nullptr!";
   }
   if (RiseAssignOp assign = dyn_cast<RiseAssignOp>(op)) {
-    rewriter.setInsertionPointAfter(assign);
-
     emitRemark(op->getLoc()) << "Codegen for Assign";
 
+    if (assign.value().isa<OpResult>()) {
+      rewriter.setInsertionPoint(assign.assignee().getDefiningOp());
+    } else {
+      rewriter.setInsertionPointToStart(
+          &assign.value().getParentRegion()->front());
+    }
     auto writeValue = codeGen(assign.value(), {}, rewriter);
     if (!writeValue)
-      emitError(op->getLoc()) << "Assignment has no Value to write to.";
+      emitError(op->getLoc()) << "Assignment has no Value to write.";
+
+    rewriter.setInsertionPointAfter(assign);
     auto leftPath = codeGenStore(assign.assignee(), writeValue, {}, rewriter);
 
-    //    std::cout << "back from recursion, will generate for assign now. \n"
-    //    << std::flush; print(leftPath); print(valuePath);
-    // Generate load and store here?
-    //    rewriter.eraseOp(assign);
   } else {
     emitRemark(op->getLoc())
         << "Codegen for " << op->getName().getStringRef().str()
         << " unsupported!";
-    //    std::cout << "\nI dont know how to do CodeGen for:"
-    //              << op->getName().getStringRef().str() << std::flush;
   }
   return nullptr;
 }
@@ -910,7 +1009,6 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       //                <<
       //                storeLocation.getDefiningOp()->getName().getStringRef().str()
       //                << std::flush;
-
       return codeGenStore(idx.arg0(), val, path, rewriter);
     } else {
       emitRemark(val.getLoc())
@@ -945,13 +1043,20 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
                           PatternRewriter &rewriter) {
 
   if (val.isa<OpResult>()) {
-    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+    if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for unwrap";
+      //      rewriter.setInsertionPointAfter(unwrapOp);
+      auto codeGenResult = codeGen(unwrapOp.getOperand(), path, rewriter);
+      unwrapOp.getResult().replaceAllUsesWith(codeGenResult);
+      rewriter.eraseOp(unwrapOp);
+      return val;
+
+    } else if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
       Value arg1 = idx.arg1();
       path.push_back(arg1);
-      //      std::cout << "pushed back!\n" << std::flush;
-      //      printPath(path);
+      //      rewriter.setInsertionPointAfter(idx);
       return codeGen(idx.arg0(), path, rewriter);
 
     } else if (RiseBinaryOp binOp =
@@ -1023,26 +1128,31 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       path.push_back(false);
       return codeGen(sndIntermOp.value(), path, rewriter);
 
+    } else if (isa<LoadOp>(val.getDefiningOp()) ||
+               isa<AffineLoadOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Load";
+      return val;
     } else {
-      //      std::cout << "\nI dont know how to do CodeGen for:"
-      //                << val.getDefiningOp()->getName().getStringRef().str()
-      //                << std::flush;
+      emitRemark(val.getLoc())
+          << "I don't know how to do codegen for: "
+          << val.getDefiningOp()->getName().getStringRef().str()
+          << " this is prob. an operation from another dialect. We walk "
+             "recursively through the operands until we hit something we can "
+             "do codegen for.";
+      for (auto operand : (val.getDefiningOp()->getOperands())) {
+        codeGen(operand, path, rewriter);
+      }
+      return val;
+      // go through all the operands until we hit an idx
     }
   } else {
     // val is a BlockArg
     emitRemark(val.getLoc()) << "reached a blockArg in Codegen, reversing";
     return generateWriteAccess(path, val, rewriter);
-
-    //    std::cout << "I have reached a BlockArg, should prob. do reverse
-    //    now."
-    //              << std::flush;
-    //    print(path);
-    //    path.push_back(val);
   }
-  //  std::cout << "have nothing proper to return in CodeGen! I am returning
-  //  the
-  //  "
-  //               "input.\n";
+
+  emitError(val.getLoc())
+      << "Something went wrong in codegen, we should never get here!";
   return val;
 }
 
@@ -1379,6 +1489,7 @@ void ConvertRiseToImperativePass::runOnModule() {
                     mlir::rise::RiseBinaryOp, mlir::rise::RiseFstIntermediateOp,
                     mlir::rise::RiseSndIntermediateOp,
                     mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
+                    mlir::rise::RiseWrapOp, mlir::rise::RiseUnwrapOp,
                     mlir::rise::ApplyOp, RiseContinuationTranslation>();
 
   if (failed(applyPartialConversion(module, target, patterns)))

@@ -32,6 +32,8 @@ namespace rise {
 using OutputPathType = mpark::variant<int, Value>;
 
 mlir::Value AccT(ApplyOp apply, Value out, PatternRewriter &rewriter);
+mlir::Value AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter);
+
 mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
                  PatternRewriter &rewriter);
 Value codeGen(Operation *op, SmallVector<OutputPathType, 10> path,

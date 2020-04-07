@@ -2,7 +2,7 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(memref<4xf32>, memref<4xf32>, memref<4xf32>)
-func @simple_fst() {
+func @simple_snd() {
 
     rise.fun "rise_fun" (%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
         %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>

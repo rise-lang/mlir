@@ -101,14 +101,14 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
 
 def RiseWrapOp : Rise_Op<"wrap"> {
   let summary = "rise wrap";
-  let arguments = (ins AnyType:$typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
+  let arguments = (ins AnyType : $typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
   let results = (outs AnyType : $wrapped);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseUnWrapOp : Rise_Op<"unwrap"> {
+def RiseUnwrapOp : Rise_Op<"unwrap"> {
   let summary = "rise unwrap";
-  let arguments = (ins ScalarType:$scalarToUnwrap);  // This is not really used. We have region arguments, not "normal" arguments.
+  let arguments = (ins AnyType : $scalarToUnwrap);  // This is not really used. We have region arguments, not "normal" arguments.
   let results = (outs AnyType : $unwrapped);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
