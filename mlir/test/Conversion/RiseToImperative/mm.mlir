@@ -54,6 +54,7 @@ func @mm() {
         }
         %m1 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
         %result = rise.apply %m1, %m1fun, %A
+        rise.return %result : !rise.array<4, array<4, scalar<f32>>>
     }
     //prepare output Array
     %outputArray = alloc() : memref<4x4xf32>

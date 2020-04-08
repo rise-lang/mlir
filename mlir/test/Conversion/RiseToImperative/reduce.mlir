@@ -10,6 +10,7 @@ func @simple_reduction() {
             %summand0_unwrapped = rise.unwrap %summand0
             %summand1_unwrapped = rise.unwrap %summand1
             %result = addf %summand0_unwrapped, %summand1_unwrapped : f32
+//            %result = constant 2.0 : f32
             %result_wrapped = rise.wrap %result
             rise.return %result_wrapped : !rise.scalar<f32>
         }

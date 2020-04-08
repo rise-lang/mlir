@@ -55,7 +55,7 @@ func @simple_dot() {
     linalg.fill(%inArg0, %cst_5) : memref<4xf32>, f32
 
     %inArg1 = alloc() : memref<4xf32>
-    %cst_10 = constant 10.0 : f32
+    %cst_10 = constant 5.0 : f32
     linalg.fill(%inArg1, %cst_10) : memref<4xf32>, f32
 
     call @rise_fun(%outputArray, %inArg0, %inArg1) : (memref<1xf32>, memref<4xf32>, memref<4xf32>) -> ()

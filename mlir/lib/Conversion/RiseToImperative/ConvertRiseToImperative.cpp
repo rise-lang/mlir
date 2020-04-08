@@ -141,8 +141,7 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 
   // Translation to imperative
   rewriter.setInsertionPointToStart(&riseFun.getBody().front());
-  auto result =
-      AccT(returnOp, riseFun.getBody().front().getArgument(0), rewriter);
+  AccT(returnOp, riseFun.getBody().front().getArgument(0), rewriter);
 
   emitRemark(riseFun.getLoc()) << "AccT finished. Starting CodeGen.";
 
@@ -164,10 +163,16 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   //   erase intermediate operations.
   //   We remove them back to front right now,
   //   this should be alright in terms of dependencies.
+  // TODO:
+  //  hack here: I also remove lambdas and applies and wraps which should
+  //  have been removed in the AccT. I could not remove them there presumably
+  //  due to a bug with erasure notifications in MLIR. Later check whether this
+  //  has been fixed already.
   riseFun.walk([&erasureList](Operation *inst) {
     if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
         isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst)) {
+        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst) ||
+        isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst)) {
       erasureList.push_back(inst);
     }
     return;
@@ -183,10 +188,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
   auto newReturn =
       rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
-
-  // We don't need the riseModule anymore
-  //  riseFunOp.region().front().getArgument(0).dropAllUses();
-  //  riseFunOp.region().front().getArgument(1).dropAllUses();
 
   riseFunOp.walk([&rewriter](Operation *inst) {
     if (!inst->use_empty()) {
@@ -216,8 +217,6 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
 
-// TODO: look at Map(Map(id))
-
 /// Acceptor Translation
 /// apply - The ApplyOp to start the translation.
 /// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
@@ -231,17 +230,17 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
 //    -> stuff between the wraps and unwraps has to be copied into the
 //    translated stuff.
 
-mlir::Value mlir::rise::AccT(ReturnOp returnOp, Value out,
-                             PatternRewriter &rewriter) {
+void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
   if (!returnOp.getOperand(0).isa<OpResult>()) {
     emitRemark(returnOp.getLoc())
         << "Directly returning an argument is not supported in lowering to "
            "imperative currently";
-    return nullptr;
+    return;
   }
   if (ApplyOp apply =
           dyn_cast<ApplyOp>(returnOp.getOperand(0).getDefiningOp())) {
-    return AccT(apply, out, rewriter);
+    AccT(apply, out, rewriter);
+    return;
   } else if (RiseWrapOp wrapOp =
                  dyn_cast<RiseWrapOp>(returnOp.getOperand(0).getDefiningOp())) {
     // TODO: think about possible implications of this lowering approach to
@@ -253,65 +252,46 @@ mlir::Value mlir::rise::AccT(ReturnOp returnOp, Value out,
     // here!
     Block &currentBlock = returnOp.getParentRegion()->front();
 
-//    // First do ConT for all values, which are unwrapped:
-//    SmallVector<RiseUnwrapOp *, 10> unwraps;
-//    currentBlock.walk([&unwraps](Operation *op) {
-//      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(op))
-//        unwraps.push_back(&unwrapOp);
-//    });
-//    std::cout << "collected all unwraps! " << unwraps.size() << "\n"
-//              << std::flush;
-//    for (RiseUnwrapOp *unwrapOp : unwraps) {
-//      // TODO: continue here, for some reason the unwrap op has no argument
-//      if (unwrapOp->unwrapped())
-//        std::cout << "hi!\n" << std::flush;
-//
-//      Value conT =
-//          ConT(unwrapOp->unwrapped(), rewriter.getInsertionPoint(), rewriter);
-//      unwrapOp->getResult().replaceAllUsesWith(conT);
-//    }
-//    std::cout << "did cont unwraps!" << std::flush;
-    // transfer operations until returnOp from lambda into result
+    // First do ConT for all values, which are unwrapped and keep track of first
+    // op after the unwraps
+    Operation *lastSeenOp;
+    Operation *firstOpAfterUnwrap;
+    currentBlock.walk([&](Operation *op) {
+      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(*op)) {
+        //        unwraps.push_back(&unwrapOp);
+        auto unwrapCont = ConT(unwrapOp.scalarToUnwrap(),
+                               rewriter.getInsertionPoint(), rewriter);
+        unwrapOp.unwrapped().replaceAllUsesWith(unwrapCont);
+        lastSeenOp = unwrapOp;
+      } else {
+        if (isa<RiseUnwrapOp>(lastSeenOp))
+          firstOpAfterUnwrap = op;
+        lastSeenOp = op;
+      }
+    });
+
+    //    rewriter.getInsertionBlock()->getOperations().
+    // transfer operations between last unwrapOp until returnOp from lambda into
+    // result
     rewriter.getInsertionBlock()->getOperations().splice(
         rewriter.getInsertionPoint(), currentBlock.getOperations(),
-        currentBlock.getOperations().begin(), Block::iterator(returnOp));
-    rewriter.create<RiseAssignOp>(wrapOp.getLoc(), wrapOp.getOperand(), out);
+        Block::iterator(firstOpAfterUnwrap), Block::iterator(returnOp));
+    auto assignment = rewriter.create<RiseAssignOp>(wrapOp.getLoc(),
+                                                    wrapOp.getOperand(), out);
+
+    //    currentBlock.getOperations().clear();
 
     // wrapOp not needed anymore!
-    rewriter.eraseOp(wrapOp);
+    //    rewriter.eraseOp(wrapOp);
 
-    //    currentBlock.walk([&](Operation *op) {
-    //      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(op)) {
-    //        // The operand of an unwrapUp is the result of a RiseIdxOp at
-    //        // this point in lowering We keep unwraps. They are removed in
-    //        // codeGen
-    //
-    //        std::cout << "unwrap: "
-    //                  << unwrapOp.getOperand()
-    //                         .getDefiningOp()
-    //                         ->getName()
-    //                         .getStringRef()
-    //                         .str()
-    //                  << "\n"
-    //                  << std::flush;
-    //        rewriter.clone(*unwrapOp);
-    //      } else if (RiseWrapOp wrapOp = dyn_cast<RiseWrapOp>(op)) {
-    //        //        rewriter.clone(*wrapOp);
-    //      } else if (isa<rise::ReturnOp>(op)) {
-    //      } else {
-    //        //        rewriter.clone(*op);
-    //      }
-    //    });
-
-    return returnOp.getOperand(0);
+    return;
   } else {
     std::cout << "something went wrong! \n" << std::flush;
-    return nullptr;
+    return;
   }
 }
 
-mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
-                             PatternRewriter &rewriter) {
+void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   // lower outsideArgs first
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
@@ -414,10 +394,13 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     if (contArray.getType().isa<MemRefType>()) {
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-
-      MemRefType inIndexOpResult =
-          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-
+      Type inIndexOpResult;
+      if (inShape.size() > 0) {
+        inIndexOpResult =
+            MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
+      } else {
+        inIndexOpResult = FloatType::getF32(rewriter.getContext());
+      }
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       loopInductionVar);
       //      std::cout << "contArray is of MemrefType";
@@ -427,9 +410,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     // index into acc
     RiseIdxOp accIdx = rewriter.create<RiseIdxOp>(
-        acc.getLoc(),
-        MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
-        acc.getResult(), cst_zero.getResult());
+        acc.getLoc(), FloatType::getF32(rewriter.getContext()), acc.getResult(),
+        cst_zero.getResult());
 
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
@@ -439,11 +421,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     AccT(fxi, accIdx.getResult(), rewriter);
 
-    fxi.getResult().dropAllUses();
-    fxi.erase();
-
-    lambdaCopy.getResult().dropAllUses();
-    rewriter.eraseOp(lambdaCopy);
+//        fxi.getResult().dropAllUses();
+//        fxi.erase();
+//    ////
+//    lambdaCopy.getResult().dropAllUses();
+//    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
 
@@ -468,7 +450,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 
     rewriter.restoreInsertionPoint(savedInsertionPoint);
 
-    return acc.getResult();
+    return;
 
   } else if (isa<MapSeqOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of MapSeq";
@@ -554,16 +536,16 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-    //    std::cout << "deleting apply dependency for lambda" << std::flush;
-    fxi.getResult().dropAllUses();
-    fxi.erase();
-    //    rewriter.eraseOp(fxi);
-
-    lambdaCopy.getResult().dropAllUses();
-    rewriter.eraseOp(lambdaCopy);
+//    //    std::cout << "deleting apply dependency for lambda" << std::flush;
+//    fxi.getResult().dropAllUses();
+//    fxi.erase();
+//    //    rewriter.eraseOp(fxi);
+//
+//    lambdaCopy.getResult().dropAllUses();
+//    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
-    return contArray;
+    return;
   } else if (isa<MapParOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of MapPar";
 
@@ -660,15 +642,15 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-    fxi.getResult().dropAllUses();
-    fxi.erase();
-    //    rewriter.eraseOp(fxi);
-
-    lambdaCopy.getResult().dropAllUses();
-    rewriter.eraseOp(lambdaCopy);
+//    fxi.getResult().dropAllUses();
+//    fxi.erase();
+//    //    rewriter.eraseOp(fxi);
+//
+//    lambdaCopy.getResult().dropAllUses();
+//    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
-    return contArray;
+    return;
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Fst";
 
@@ -679,7 +661,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         fstOp.getLoc(), FloatType::getF32(rewriter.getContext()), contTuple);
     auto assignment = rewriter.create<RiseAssignOp>(
         appliedFun->getLoc(), fstIntermOp.getResult(), out);
-    return fstIntermOp.getResult();
+    return;
   } else if (SndOp sndOp = dyn_cast<SndOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Snd";
 
@@ -690,7 +672,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         sndOp.getLoc(), FloatType::getF32(rewriter.getContext()), contTuple);
     auto assignment = rewriter.create<RiseAssignOp>(
         appliedFun->getLoc(), sndIntermOp.getResult(), out);
-    return sndIntermOp.getResult();
+    return;
   } else if (isa<LambdaOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Lambda";
 
@@ -706,8 +688,8 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
         break;
       }
     }
-
-    return AccT(returnOp, out, rewriter);
+    AccT(returnOp, out, rewriter);
+    return;
   } else if (isa<AddOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Add";
 
@@ -727,7 +709,7 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
                                                     newAddOp.getResult(), out);
 
-    return newAddOp;
+    return;
   } else if (isa<MulOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Mul";
 
@@ -745,12 +727,11 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
     auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
                                                     newMulOp.getResult(), out);
 
-    return newMulOp;
+    return;
   } else if (isa<ApplyOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Apply";
 
     emitError(appliedFun->getLoc()) << "We should never get here";
-    //    auto tmp = AccT(expression, cast<ApplyOp>(appliedFun), rewriter);
   } else {
     emitRemark(appliedFun->getLoc())
         << "lowering op: " << appliedFun->getName() << " not yet supported.";
@@ -761,10 +742,9 @@ mlir::Value mlir::rise::AccT(ApplyOp apply, Value out,
 mlir::Value mlir::rise::ConT(mlir::Value contValue,
                              Block::iterator contLocation,
                              PatternRewriter &rewriter) {
+
   Location loc = contValue.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
-
-  std::cout << "in ConT!\n" << std::flush;
 
   if (contValue.isa<OpResult>()) {
     if (isa<LiteralOp>(contValue.getDefiningOp())) {
@@ -973,6 +953,8 @@ Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
     emitRemark(op->getLoc()) << "Codegen for Assign";
 
     if (assign.value().isa<OpResult>()) {
+      // Should be to the idx generated usually right beside this one
+      // but I have no handle to that here
       rewriter.setInsertionPoint(assign.assignee().getDefiningOp());
     } else {
       rewriter.setInsertionPointToStart(
@@ -1043,15 +1025,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
                           PatternRewriter &rewriter) {
 
   if (val.isa<OpResult>()) {
-    if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(val.getDefiningOp())) {
-      emitRemark(val.getLoc()) << "Codegen for unwrap";
-      //      rewriter.setInsertionPointAfter(unwrapOp);
-      auto codeGenResult = codeGen(unwrapOp.getOperand(), path, rewriter);
-      unwrapOp.getResult().replaceAllUsesWith(codeGenResult);
-      rewriter.eraseOp(unwrapOp);
-      return val;
-
-    } else if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
       Value arg1 = idx.arg1();
@@ -1139,8 +1113,10 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
           << " this is prob. an operation from another dialect. We walk "
              "recursively through the operands until we hit something we can "
              "do codegen for.";
+      int i = 0;
       for (auto operand : (val.getDefiningOp()->getOperands())) {
-        codeGen(operand, path, rewriter);
+        val.getDefiningOp()->setOperand(i, codeGen(operand, path, rewriter));
+        i++;
       }
       return val;
       // go through all the operands until we hit an idx

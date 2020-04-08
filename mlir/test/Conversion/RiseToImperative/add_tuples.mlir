@@ -20,7 +20,7 @@ func @simple_add_tuples() {
 
             %fst_unwrapped = rise.unwrap %fst
             %snd_unwrapped = rise.unwrap %snd
-            %result = addf %fst_unwrapped, %snd_unwrapped :f32
+            %result = addf %fst_unwrapped, %snd_unwrapped : f32
             %result_wrapped = rise.wrap %result
 
             rise.return %result_wrapped : !rise.scalar<f32>
