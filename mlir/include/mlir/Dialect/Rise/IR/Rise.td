@@ -90,7 +90,7 @@ def RiseContinuationTranslation : Rise_Op<"cont"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
+def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">, IsolatedFromAbove]> {
   let summary = "rise fun";
   let regions = (region SizedRegion<1> : $region);
   //  let arguments = (ins AnyType:$out, Variadic<AnyType>:$inputs);

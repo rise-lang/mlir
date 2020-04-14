@@ -15,7 +15,6 @@
 #include "mlir/Dialect/StandardOps/Ops.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
@@ -24,6 +23,7 @@
 #include "mlir/Transforms/Passes.h"
 
 #include <iostream>
+#include <mlir/Dialect/AffineOps/AffineValueMap.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/EDSC/Builders.h>
 
@@ -48,16 +48,6 @@ struct ApplyToImpLowering : public OpRewritePattern<ApplyOp> {
                                      PatternRewriter &rewriter) const override;
 };
 
-PatternMatchResult
-ApplyToImpLowering::matchAndRewrite(ApplyOp applyOp,
-                                    PatternRewriter &rewriter) const {
-  MLIRContext *context = rewriter.getContext();
-  Location loc = applyOp.getLoc();
-  // TODO: do
-  //    emitError(loc) << "yoyoyo";
-  return matchSuccess();
-}
-
 struct ModuleToImp : public OpRewritePattern<RiseFunOp> {
   using OpRewritePattern<RiseFunOp>::OpRewritePattern;
 
@@ -72,33 +62,39 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   Location loc = riseFunOp.getLoc();
   Region &riseRegion = riseFunOp.region();
 
-  if (!riseRegion.getParentRegion()->getParentRegion()) {
-    emitError(loc) << "Rise IR cant be immediately nested into a module. It "
-                      "has to be surrounded by e.g. a FuncOp.";
-    return matchFailure();
+  bool funForwardDeclared = true;
+
+  FuncOp riseFun;
+  if (funForwardDeclared) {
+    if (!riseRegion.getParentRegion()->getParentRegion()) {
+      emitError(loc) << "Rise IR cant be immediately nested into a module. It "
+                        "has to be surrounded by e.g. a FuncOp.";
+      return matchFailure();
+    }
+
+    // create mlir function for the given chunk of rise and inline all rise
+    // operations
+    rewriter.setInsertionPointToStart(
+        &riseRegion.getParentRegion()->getParentRegion()->front());
+
+    // find declaration for the riseFun and delete
+    auto forwardDeclaration =
+        riseRegion.getParentOfType<ModuleOp>().lookupSymbol(riseFunOp.name());
+    rewriter.eraseOp(forwardDeclaration);
+
+    // create enclosing function
+    SmallVector<Type, 10> inputTypes = {};
+    for (auto blockArg : riseFunOp.region().front().getArguments()) {
+      inputTypes.push_back(blockArg.getType());
+    }
+    riseFun = rewriter.create<FuncOp>(
+        loc, riseFunOp.name(), FunctionType::get(inputTypes, {}, context),
+        ArrayRef<NamedAttribute>{});
+    riseFun.addEntryBlock();
+  } else {
+    riseFun = riseFunOp.getParentOfType<FuncOp>();
   }
-
-  // create mlir function for the given chunk of rise and inline all rise
-  // operations
-  rewriter.setInsertionPointToStart(
-      &riseRegion.getParentRegion()->getParentRegion()->front());
-
-  // find declaration for the riseFun and delete
-  auto forwardDeclaration =
-      riseRegion.getParentOfType<ModuleOp>().lookupSymbol(riseFunOp.name());
-  rewriter.eraseOp(forwardDeclaration);
-
-  // create enclosing function
-  SmallVector<Type, 10> inputTypes = {};
-  for (auto blockArg : riseFunOp.region().front().getArguments()) {
-    inputTypes.push_back(blockArg.getType());
-  }
-  auto riseFun = rewriter.create<FuncOp>(
-      loc, riseFunOp.name(), FunctionType::get(inputTypes, {}, context),
-      ArrayRef<NamedAttribute>{});
-
   rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
-  riseFun.addEntryBlock();
 
   // The rise module can only have one block.
   Block &block = riseRegion.front();
@@ -122,14 +118,14 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
         riseFun.getBody().front().getArgument(i));
   }
 
-  // Start at the back and find the first apply.
-  ApplyOp lastApply;
-  for (auto op = block.rbegin(); op != block.rend(); op++) {
-    if (isa<ApplyOp>(*op)) {
-      lastApply = cast<ApplyOp>(*op);
-      break;
-    }
-  }
+  //  // Start at the back and find the first apply.
+  //  ApplyOp lastApply;
+  //  for (auto op = block.rbegin(); op != block.rend(); op++) {
+  //    if (isa<ApplyOp>(*op)) {
+  //      lastApply = cast<ApplyOp>(*op);
+  //      break;
+  //    }
+  //  }
   // Finding the return from the chunk of rise IR
   rise::ReturnOp returnOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
@@ -154,11 +150,14 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   });
 
   // CodeGen
-  SmallVector<Operation *, 10> erasureList = {};
-  for (rise::RiseAssignOp assign : assignOps) {
-    codeGen(assign, {}, rewriter);
-  }
+  bool doCodegen = true;
 
+  SmallVector<Operation *, 10> erasureList = {};
+  if (doCodegen) {
+    for (rise::RiseAssignOp assign : assignOps) {
+      codeGen(assign, {}, rewriter);
+    }
+  }
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -168,26 +167,39 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
   //  have been removed in the AccT. I could not remove them there presumably
   //  due to a bug with erasure notifications in MLIR. Later check whether this
   //  has been fixed already.
-  riseFun.walk([&erasureList](Operation *inst) {
-    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst) ||
-        isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst)) {
-      erasureList.push_back(inst);
-    }
-    return;
-  });
-  size_t unneededOps = erasureList.size();
-  for (size_t i = 0; i < unneededOps; i++) {
-    auto op = erasureList.pop_back_val();
-    op->dropAllUses();
-    op->dropAllReferences();
-    rewriter.eraseOp(op);
+  if (doCodegen) {
+    riseFun.walk([&erasureList](Operation *inst) {
+      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst) ||
+          isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
+          isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
+          isa<RiseFstIntermediateOp>(inst) ||
+          isa<RiseSndIntermediateOp>(inst)) {
+        erasureList.push_back(inst);
+      }
+      return;
+    });
+  } else {
+    riseFun.walk([&erasureList](Operation *inst) {
+      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst)) {
+        erasureList.push_back(inst);
+      }
+      return;
+    });
   }
 
-  rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
-  auto newReturn =
-      rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
+    size_t unneededOps = erasureList.size();
+    for (size_t i = 0; i < unneededOps; i++) {
+      auto op = erasureList.pop_back_val();
+      op->dropAllUses();
+      op->dropAllReferences();
+      rewriter.eraseOp(op);
+    }
+
+  if (funForwardDeclared) {
+    rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
+    auto newReturn =
+        rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
+  }
 
   riseFunOp.walk([&rewriter](Operation *inst) {
     if (!inst->use_empty()) {
@@ -278,11 +290,12 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
         Block::iterator(firstOpAfterUnwrap), Block::iterator(returnOp));
     auto assignment = rewriter.create<RiseAssignOp>(wrapOp.getLoc(),
                                                     wrapOp.getOperand(), out);
-
-    //    currentBlock.getOperations().clear();
-
     // wrapOp not needed anymore!
-    //    rewriter.eraseOp(wrapOp);
+//    wrapOp.getResult().dropAllUses();
+//    rewriter.eraseOp(wrapOp);
+//        currentBlock.getOperations().clear();
+
+
 
     return;
   } else {
@@ -290,6 +303,15 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
     return;
   }
 }
+
+// TODO: approach for detecting MM pattern just for now:
+//  - Make pass 'RiseMMRewriting', this one has to be run before lowering to
+//    imperative.
+//  - OpPassBase<RiseFun>
+//  - walk the operations and check whether the structural constraints are given
+//    for a gemm computation
+//  - if given, replace the mm stuff with a linalg.matmul surrounded by wrap,
+//    unwrap operations
 
 void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   // lower outsideArgs first
@@ -417,15 +439,15 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
     auto fxi = rewriter.create<ApplyOp>(
         loc, lambdaCopy.getType(), lambdaCopy.getResult(),
-        ValueRange{xi.getResult(), accIdx.getResult()});
+        ValueRange{accIdx.getResult(), xi.getResult()});
 
     AccT(fxi, accIdx.getResult(), rewriter);
 
-//        fxi.getResult().dropAllUses();
-//        fxi.erase();
-//    ////
-//    lambdaCopy.getResult().dropAllUses();
-//    rewriter.eraseOp(lambdaCopy);
+    //        fxi.getResult().dropAllUses();
+    //        fxi.erase();
+    //    ////
+    //    lambdaCopy.getResult().dropAllUses();
+    //    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
 
@@ -518,7 +540,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       loopInductionVar);
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-      //      std::cout << "got an idx and not a memref! \n" << std::flush;
+      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
 
     // operate on a copy of the lambda to avoid generating dependencies.
@@ -536,13 +558,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-//    //    std::cout << "deleting apply dependency for lambda" << std::flush;
-//    fxi.getResult().dropAllUses();
-//    fxi.erase();
-//    //    rewriter.eraseOp(fxi);
-//
-//    lambdaCopy.getResult().dropAllUses();
-//    rewriter.eraseOp(lambdaCopy);
+    //    //    std::cout << "deleting apply dependency for lambda" <<
+    //    std::flush; fxi.getResult().dropAllUses(); fxi.erase();
+    //    //    rewriter.eraseOp(fxi);
+    //
+    //    lambdaCopy.getResult().dropAllUses();
+    //    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
@@ -581,29 +602,29 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
           appliedFun->getLoc(), n.getValue().getIntValue());
       auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
-      auto forLoop = rewriter.create<mlir::loop::ForOp>(
-          appliedFun->getLoc(), lowerBound, upperBound, step);
-      loopInductionVar = forLoop.getInductionVar();
+      auto forLoop = rewriter.create<mlir::loop::ParallelOp>(
+          appliedFun->getLoc(), ValueRange{lowerBound}, ValueRange{upperBound},
+          ValueRange{step});
+      loopInductionVar = *forLoop.getInductionVars().begin();
       forLoopBody = forLoop.getBody();
     } else if (loweringTarget == "affine") {
       auto forLoop = rewriter.create<AffineForOp>(
           appliedFun->getLoc(), 0, n.getValue().getIntValue(), 1);
 
-      // TODO: Not working as intended
+      //      // TODO: Not working as intended
       //      auto lbMap = AffineMap::getConstantMap(0, rewriter.getContext());
       //      auto ubMap = AffineMap::getConstantMap(n.getValue().getIntValue(),
       //                                             rewriter.getContext());
       //
-      //      auto parallelOp =
-      //      rewriter.create<AffineParallelOp>(appliedFun->getLoc(),
-      //                                                          lbMap,
-      //                                                          ValueRange{},
-      //                                                          ubMap,
-      //                                                          ValueRange{});
-      //      loopInductionVar = *parallelOp.getLowerBoundsOperands().begin();
+      //      auto parallelOp = rewriter.create<AffineParallelOp>(
+      //          appliedFun->getLoc(), lbMap, ValueRange{}, ubMap,
+      //          ValueRange{});
+      // parOp may have multiple indicees
+
       //      forLoopBody = parallelOp.getBody();
-      loopInductionVar = forLoop.getInductionVar();
       forLoopBody = forLoop.getBody();
+      loopInductionVar = forLoop.getInductionVar();
+      //      loopInductionVar = parallelOp.getRangesValueMap().getOperand(0);
     }
 
     rewriter.setInsertionPointToStart(forLoopBody);
@@ -623,6 +644,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
       xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
                                       loopInductionVar);
+
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
@@ -642,12 +664,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     AccT(fxi, outi.getResult(), rewriter);
     // tmp Apply not needed anymore.
 
-//    fxi.getResult().dropAllUses();
-//    fxi.erase();
-//    //    rewriter.eraseOp(fxi);
-//
-//    lambdaCopy.getResult().dropAllUses();
-//    rewriter.eraseOp(lambdaCopy);
+    //    fxi.getResult().dropAllUses();
+    //    fxi.erase();
+    //    //    rewriter.eraseOp(fxi);
+    //
+    //    lambdaCopy.getResult().dropAllUses();
+    //    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
@@ -1173,12 +1195,15 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
   }
   int rank = storeLoc.getType().dyn_cast<MemRefType>().getRank();
   if (indexValues.size() != rank) {
-    emitRemark(storeLoc.getLoc())
-        << "Cannot generate store. Number of indices: " << indexValues.size()
-        << " does not match rank of memref: " << rank << "!";
-    emitRemark(storeLoc.getLoc())
-        << "We bail out be removing the first val. This should be a generated "
-           "0 for accessing a val of arraytype.";
+    //    emitRemark(storeLoc.getLoc())
+    //        << "Cannot generate store. Number of indices: " <<
+    //        indexValues.size()
+    //        << " does not match rank of memref: " << rank << "!";
+    //    emitRemark(storeLoc.getLoc())
+    //        << "We bail out be removing the first val. This should be a
+    //        generated "
+    //           "0 for accessing a val of arraytype.";
+    // TODO: We sometimes generate a "0" index too much for accessing an element
     indexValues.erase(indexValues.begin());
   }
   ValueRange valRange = ValueRange(indexValues);
@@ -1457,16 +1482,16 @@ void ConvertRiseToImperativePass::runOnModule() {
 
   ConversionTarget target(getContext());
 
-  target.addLegalOp<CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
-                    AffineForOp, AffineParallelOp, AffineTerminatorOp,
-                    AffineStoreOp, AffineLoadOp, ConstantIndexOp, AllocOp,
-                    LoadOp, StoreOp, AddFOp, MulFOp, linalg::FillOp,
-                    mlir::ReturnOp, mlir::rise::LambdaOp, mlir::rise::RiseIdxOp,
-                    mlir::rise::RiseBinaryOp, mlir::rise::RiseFstIntermediateOp,
-                    mlir::rise::RiseSndIntermediateOp,
-                    mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
-                    mlir::rise::RiseWrapOp, mlir::rise::RiseUnwrapOp,
-                    mlir::rise::ApplyOp, RiseContinuationTranslation>();
+  target.addLegalOp<
+      CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, loop::ForOp,
+      loop::ParallelOp, AffineForOp, AffineParallelOp, AffineTerminatorOp,
+      AffineStoreOp, AffineLoadOp, ConstantIndexOp, AllocOp, LoadOp, StoreOp,
+      AddFOp, MulFOp, linalg::FillOp, mlir::ReturnOp, mlir::rise::LambdaOp,
+      mlir::rise::RiseIdxOp, mlir::rise::RiseBinaryOp,
+      mlir::rise::RiseFstIntermediateOp, mlir::rise::RiseSndIntermediateOp,
+      mlir::rise::RiseZipIntermediateOp, mlir::rise::RiseAssignOp,
+      mlir::rise::RiseWrapOp, mlir::rise::RiseUnwrapOp, mlir::rise::ApplyOp,
+      RiseContinuationTranslation>();
 
   if (failed(applyPartialConversion(module, target, patterns)))
     signalPassFailure();

@@ -117,6 +117,7 @@ inline void registerAllPasses() {
 
   // Rise
   rise::createConvertRiseToImperativePass();
+  rise::createRiseRewritingPass();
 
   // SPIR-V
   spirv::createDecorateSPIRVCompositeTypeLayoutPass();

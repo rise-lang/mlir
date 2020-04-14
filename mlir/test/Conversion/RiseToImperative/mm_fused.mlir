@@ -1,6 +1,7 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
 
 func @print_memref_f32(memref<*xf32>)
+//func @rise_fun(%_outArg:memref<1024x1024xf32>, %_inA:memref<1024x1024xf32>, %_inB:memref<1024x1024xf32>) {return}
 func @rise_fun(memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf32>)
 func @rtclock() -> (f64)
 func @print_flops(f64,f64,i64)
@@ -23,35 +24,29 @@ func @mm() {
                 %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
                 %zippedArrays = rise.apply %zipFun, %arow, %bcol
 
-                //Multiply
-                %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+                //Reduction
+                %reductionLambda = rise.lambda (%tuple, %acc) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> fun<scalar<f32> -> scalar<f32>>> {
+
                     %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
                     %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
-                    %fst = rise.apply %fstFun, %floatTuple
-                    %snd = rise.apply %sndFun, %floatTuple
+                    %fst = rise.apply %fstFun, %tuple
+                    %snd = rise.apply %sndFun, %tuple
 
                     %fst_unwrapped = rise.unwrap %fst
                     %snd_unwrapped = rise.unwrap %snd
-                    %result = mulf %fst_unwrapped, %snd_unwrapped :f32
+                    %acc_unwrapped = rise.unwrap %acc
+
+                    %product = mulf %fst_unwrapped, %snd_unwrapped :f32
+                    %result = addf %product, %acc_unwrapped : f32
                     %result_wrapped = rise.wrap %result
 
                     rise.return %result_wrapped : !rise.scalar<f32>
                 }
-                %map10TuplesToInts = rise.mapSeq {to = "affine"} #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-                %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
-                //Reduction
-                %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
-                    %summand0_unwrapped = rise.unwrap %summand0
-                    %summand1_unwrapped = rise.unwrap %summand1
-                    %result = addf %summand0_unwrapped, %summand1_unwrapped : f32
-                    %result_wrapped = rise.wrap %result
-                    rise.return %result_wrapped : !rise.scalar<f32>
-                }
                 %initializer = rise.literal #rise.lit<0.0>
-                %reduce10Ints = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
-                %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
+                %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+                %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
 
                 rise.return %result : !rise.scalar<f32>
             }
@@ -63,6 +58,7 @@ func @mm() {
         %result = rise.apply %m1, %m1fun, %A
         rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
     }
+
     //prepare output Array
     %outputArray = alloc() : memref<1024x1024xf32>
 

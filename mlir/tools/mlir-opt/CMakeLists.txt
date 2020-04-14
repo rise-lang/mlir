@@ -53,6 +53,7 @@ set(LIBS
   MLIRQuantOps
   MLIRRise
   MLIRRiseToImperative
+  MLIRRiseTransforms
   MLIRROCDLIR
   MLIRSPIRV
   MLIRLinalgToSPIRVTransforms

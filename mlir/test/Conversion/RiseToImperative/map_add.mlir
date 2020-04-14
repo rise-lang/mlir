@@ -12,7 +12,7 @@ func @array_times_2() {
             %doubledWrapped = rise.wrap %doubled
             rise.return %doubledWrapped : !rise.scalar<f32>
         }
-        %map4IntsToInts = rise.mapSeq {to = "affine"} #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %map4IntsToInts = rise.mapPar {to = "loop"} #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
         %doubledArray = rise.apply %map4IntsToInts, %doubleFun, %array
 
         rise.return %doubledArray : !rise.array<4, scalar<f32>>

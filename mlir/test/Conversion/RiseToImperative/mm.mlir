@@ -5,7 +5,12 @@ func @rise_fun(memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf3
 func @rtclock() -> (f64)
 func @print_flops(f64,f64,i64)
 func @mm() {
-
+//TODO : rewrite to fused version and generate similar code to uday
+//
+// zip xs ys |> map (fun(p => fst(p) * snd(p))) |> reduce (fun(x => fun(acc => x + acc))) 0.0
+//  vs.
+// zip xs ys |> reduceSeq (fun(p => fun(acc => (fst(p) * snd(p)) + acc))) 0.0
+//
     rise.fun "rise_fun" (%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
         //Arrays
         %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
@@ -33,7 +38,7 @@ func @mm() {
 
                     rise.return %result_wrapped : !rise.scalar<f32>
                 }
-                %map10TuplesToInts = rise.mapPar #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+                %map10TuplesToInts = rise.mapSeq {to = "affine"} #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
                 %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
                 //Reduction
@@ -45,16 +50,16 @@ func @mm() {
                     rise.return %result_wrapped : !rise.scalar<f32>
                 }
                 %initializer = rise.literal #rise.lit<0.0>
-                %reduce10Ints = rise.reduceSeq #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
+                %reduce10Ints = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
                 %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
 
                 rise.return %result : !rise.scalar<f32>
             }
-            %m2 = rise.mapPar #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
             %result = rise.apply %m2, %m2fun, %B
             rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
         }
-        %m1 = rise.mapPar #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
         %result = rise.apply %m1, %m1fun, %A
         rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
     }

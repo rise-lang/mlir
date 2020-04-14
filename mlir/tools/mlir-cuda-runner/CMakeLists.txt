@@ -50,6 +50,9 @@ if(MLIR_CUDA_RUNNER_ENABLED)
     MLIRIR
     MLIRLLVMIR
     MLIRLinalgOps
+    MLIRRise
+    MLIRRiseToImperative
+    MLIRRiseTransforms
     MLIRLoopToStandard
     MLIROpenMP
     MLIRParser

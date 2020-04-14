@@ -23,6 +23,7 @@ namespace rise {
 
 std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToStandardPass();
 std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToImperativePass();
+std::unique_ptr<OpPassBase<ModuleOp>> createRiseRewritingPass();
 
 } // namespace rise
 } // namespace mlir
