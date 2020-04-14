@@ -39,15 +39,15 @@ add_custom_target(mlir-doc)
 
 # Build the CUDA conversions and run according tests if the NVPTX backend
 # is available
-if ("NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
+#if ("NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
   set(MLIR_CUDA_CONVERSIONS_ENABLED 1)
-else()
-  set(MLIR_CUDA_CONVERSIONS_ENABLED 0)
-endif()
+#else()
+#  set(MLIR_CUDA_CONVERSIONS_ENABLED 0)
+#endif()
 # TODO: we should use a config.h file like LLVM does
 add_definitions(-DMLIR_CUDA_CONVERSIONS_ENABLED=${MLIR_CUDA_CONVERSIONS_ENABLED})
 
-set(MLIR_CUDA_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir CUDA runner")
+set(MLIR_CUDA_RUNNER_ENABLED 1 CACHE BOOL "Enable building the mlir CUDA runner")
 
 include_directories( "include")
 include_directories( ${MLIR_INCLUDE_DIR})
