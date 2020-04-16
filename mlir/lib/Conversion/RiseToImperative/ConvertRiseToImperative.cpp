@@ -27,6 +27,9 @@
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/EDSC/Builders.h>
 
+#define defineAccumulator true
+
+
 using namespace mlir;
 using namespace mlir::rise;
 
@@ -187,13 +190,13 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     });
   }
 
-    size_t unneededOps = erasureList.size();
-    for (size_t i = 0; i < unneededOps; i++) {
-      auto op = erasureList.pop_back_val();
-      op->dropAllUses();
-      op->dropAllReferences();
-      rewriter.eraseOp(op);
-    }
+  size_t unneededOps = erasureList.size();
+  for (size_t i = 0; i < unneededOps; i++) {
+    auto op = erasureList.pop_back_val();
+    op->dropAllUses();
+    op->dropAllReferences();
+    rewriter.eraseOp(op);
+  }
 
   if (funForwardDeclared) {
     rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
@@ -291,11 +294,9 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
     auto assignment = rewriter.create<RiseAssignOp>(wrapOp.getLoc(),
                                                     wrapOp.getOperand(), out);
     // wrapOp not needed anymore!
-//    wrapOp.getResult().dropAllUses();
-//    rewriter.eraseOp(wrapOp);
-//        currentBlock.getOperations().clear();
-
-
+    //    wrapOp.getResult().dropAllUses();
+    //    rewriter.eraseOp(wrapOp);
+    //        currentBlock.getOperations().clear();
 
     return;
   } else {
@@ -361,15 +362,21 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     // Add Continuation for init
     auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
+//    bool defineNewAccumulator = false;
     // Accumulator for Reduction
-    auto acc = rewriter.create<AllocOp>(
-        appliedFun->getLoc(),
-        MemRefType::get(ArrayRef<int64_t>{1},
-                        FloatType::getF32(rewriter.getContext())));
+    Value accum;
+    if (defineNewAccumulator) {
+      accum = rewriter
+                .create<AllocOp>(
+                    appliedFun->getLoc(),
+                    MemRefType::get(ArrayRef<int64_t>{1},
+                                    FloatType::getF32(rewriter.getContext())))
+                .getResult();
 
-    rewriter.create<linalg::FillOp>(initializer.getLoc(), acc.getResult(),
-                                    contInit);
-
+      rewriter.create<linalg::FillOp>(initializer.getLoc(), accum, contInit);
+    } else {
+      accum = out;
+    }
     // zero constant for indexing
     auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
 
@@ -430,18 +437,32 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
       //      std::cout << "contArray is not of MemrefType";
     }
 
-    // index into acc
-    RiseIdxOp accIdx = rewriter.create<RiseIdxOp>(
-        acc.getLoc(), FloatType::getF32(rewriter.getContext()), acc.getResult(),
-        cst_zero.getResult());
-
+    RiseIdxOp accumIdx;
+    if (defineNewAccumulator) {
+      // index into acc
+      accumIdx = rewriter.create<RiseIdxOp>(
+          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
+          cst_zero.getResult());
+    } else {
+      accumIdx = rewriter.create<RiseIdxOp>(
+          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
+          cst_zero.getResult());
+//      ArrayRef<int64_t> outShape =
+//          out.getType().dyn_cast<MemRefType>().getShape();
+//      MemRefType outIndexOpResult =
+//          MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+//      // TODO: at this point we sometimes need the 0 to access a val and
+//      // sometimes not.
+//      accumIdx = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
+//                                            cst_zero.getResult());
+    }
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
     auto fxi = rewriter.create<ApplyOp>(
         loc, lambdaCopy.getType(), lambdaCopy.getResult(),
-        ValueRange{accIdx.getResult(), xi.getResult()});
+        ValueRange{accumIdx.getResult(), xi.getResult()});
 
-    AccT(fxi, accIdx.getResult(), rewriter);
+    AccT(fxi, accumIdx.getResult(), rewriter);
 
     //        fxi.getResult().dropAllUses();
     //        fxi.erase();
@@ -449,28 +470,29 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     //    lambdaCopy.getResult().dropAllUses();
     //    rewriter.eraseOp(lambdaCopy);
 
-    rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
+    // copy accumulator to output
+    if (defineNewAccumulator) {
+      rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
 
-    // This generated idx is not consistent with the bible
-    // I just generate a 0 as index for the simplest case.
-    ArrayRef<int64_t> outShape =
-        out.getType().dyn_cast<MemRefType>().getShape();
-    MemRefType outIndexOpResult =
-        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    // TODO: at this point we sometimes need the 0 to access a val and sometimes
-    // not.
-    auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           cst_zero.getResult());
+      ArrayRef<int64_t> outShape =
+          out.getType().dyn_cast<MemRefType>().getShape();
+      MemRefType outIndexOpResult =
+          MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
+      // TODO: at this point we sometimes need the 0 to access a val and
+      // sometimes not.
+      auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
+                                             cst_zero.getResult());
 
-    RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
-        acc.getLoc(),
-        MemRefType::get({1}, FloatType::getF32(rewriter.getContext())),
-        acc.getResult(), cst_zero.getResult());
+      RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
+          accum.getLoc(),
+          MemRefType::get({1}, FloatType::getF32(rewriter.getContext())), accum,
+          cst_zero.getResult());
 
-    auto storing = rewriter.create<RiseAssignOp>(
-        appliedFun->getLoc(), storeAccIdx.getResult(), out0.getResult());
+      auto storing = rewriter.create<RiseAssignOp>(
+          appliedFun->getLoc(), storeAccIdx.getResult(), out0.getResult());
 
-    rewriter.restoreInsertionPoint(savedInsertionPoint);
+      rewriter.restoreInsertionPoint(savedInsertionPoint);
+    }
 
     return;
 
@@ -1168,6 +1190,12 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
+  // handle problem originating from translation of reduce (accessing element)
+  int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
+  if (indexValues.size() != rank) {
+    indexValues.erase(indexValues.begin());
+  }
+
   if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
     return rewriter
         .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)

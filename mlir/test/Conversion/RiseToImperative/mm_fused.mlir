@@ -6,8 +6,7 @@ func @rise_fun(memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf3
 func @rtclock() -> (f64)
 func @print_flops(f64,f64,i64)
 func @mm() {
-//TODO : rewrite to fused version and generate similar code to uday
-//
+
 // zip xs ys |> map (fun(p => fst(p) * snd(p))) |> reduce (fun(x => fun(acc => x + acc))) 0.0
 //  vs.
 // zip xs ys |> reduceSeq (fun(p => fun(acc => (fst(p) * snd(p)) + acc))) 0.0
