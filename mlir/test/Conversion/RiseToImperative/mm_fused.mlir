@@ -2,7 +2,52 @@
 
 func @print_memref_f32(memref<*xf32>)
 //func @rise_fun(%_outArg:memref<1024x1024xf32>, %_inA:memref<1024x1024xf32>, %_inB:memref<1024x1024xf32>) {return}
-func @rise_fun(memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf32>)
+func @rise_fun(%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
+    %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
+    %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
+
+    %m1fun = rise.lambda (%arow) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+        %m2fun = rise.lambda (%bcol) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+
+            //Zipping
+            %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
+            %zippedArrays = rise.apply %zipFun, %arow, %bcol
+
+            //Reduction
+            %reductionLambda = rise.lambda (%tuple, %acc) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> fun<scalar<f32> -> scalar<f32>>> {
+
+                %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+                %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
+
+                %fst = rise.apply %fstFun, %tuple
+                %snd = rise.apply %sndFun, %tuple
+
+                %fst_unwrapped = rise.unwrap %fst
+                %snd_unwrapped = rise.unwrap %snd
+                %acc_unwrapped = rise.unwrap %acc
+
+                %product = mulf %fst_unwrapped, %snd_unwrapped :f32
+                %result = addf %product, %acc_unwrapped : f32
+                %result_wrapped = rise.wrap %result
+
+                rise.return %result_wrapped : !rise.scalar<f32>
+            }
+
+            %initializer = rise.literal #rise.lit<0.0>
+            %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+            %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
+
+            rise.return %result : !rise.scalar<f32>
+        }
+        %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+        %result = rise.apply %m2, %m2fun, %B
+        rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+    }
+    %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+    %result = rise.apply %m1, %m1fun, %A
+//    rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+    return
+}
 func @rtclock() -> (f64)
 func @print_flops(f64,f64,i64)
 func @mm() {
@@ -11,52 +56,52 @@ func @mm() {
 //  vs.
 // zip xs ys |> reduceSeq (fun(p => fun(acc => (fst(p) * snd(p)) + acc))) 0.0
 //
-    rise.fun "rise_fun" (%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
-        //Arrays
-        %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
-        %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
-
-        %m1fun = rise.lambda (%arow) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
-            %m2fun = rise.lambda (%bcol) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
-
-                //Zipping
-                %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
-                %zippedArrays = rise.apply %zipFun, %arow, %bcol
-
-                //Reduction
-                %reductionLambda = rise.lambda (%tuple, %acc) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> fun<scalar<f32> -> scalar<f32>>> {
-
-                    %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
-                    %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
-
-                    %fst = rise.apply %fstFun, %tuple
-                    %snd = rise.apply %sndFun, %tuple
-
-                    %fst_unwrapped = rise.unwrap %fst
-                    %snd_unwrapped = rise.unwrap %snd
-                    %acc_unwrapped = rise.unwrap %acc
-
-                    %product = mulf %fst_unwrapped, %snd_unwrapped :f32
-                    %result = addf %product, %acc_unwrapped : f32
-                    %result_wrapped = rise.wrap %result
-
-                    rise.return %result_wrapped : !rise.scalar<f32>
-                }
-
-                %initializer = rise.literal #rise.lit<0.0>
-                %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-                %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
-
-                rise.return %result : !rise.scalar<f32>
-            }
-            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
-            %result = rise.apply %m2, %m2fun, %B
-            rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
-        }
-        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
-        %result = rise.apply %m1, %m1fun, %A
-        rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
-    }
+//    rise.fun "rise_fun" (%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
+//        //Arrays
+//        %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
+//        %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
+//
+//        %m1fun = rise.lambda (%arow) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+//            %m2fun = rise.lambda (%bcol) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+//
+//                //Zipping
+//                %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
+//                %zippedArrays = rise.apply %zipFun, %arow, %bcol
+//
+//                //Reduction
+//                %reductionLambda = rise.lambda (%tuple, %acc) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> fun<scalar<f32> -> scalar<f32>>> {
+//
+//                    %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+//                    %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
+//
+//                    %fst = rise.apply %fstFun, %tuple
+//                    %snd = rise.apply %sndFun, %tuple
+//
+//                    %fst_unwrapped = rise.unwrap %fst
+//                    %snd_unwrapped = rise.unwrap %snd
+//                    %acc_unwrapped = rise.unwrap %acc
+//
+//                    %product = mulf %fst_unwrapped, %snd_unwrapped :f32
+//                    %result = addf %product, %acc_unwrapped : f32
+//                    %result_wrapped = rise.wrap %result
+//
+//                    rise.return %result_wrapped : !rise.scalar<f32>
+//                }
+//
+//                %initializer = rise.literal #rise.lit<0.0>
+//                %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+//                %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
+//
+//                rise.return %result : !rise.scalar<f32>
+//            }
+//            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+//            %result = rise.apply %m2, %m2fun, %B
+//            rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+//        }
+//        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+//        %result = rise.apply %m1, %m1fun, %A
+//        rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+//    }
 
     //prepare output Array
     %outputArray = alloc() : memref<1024x1024xf32>

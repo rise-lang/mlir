@@ -109,8 +109,14 @@ ParseResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
     return failure();
   parser.resolveOperandUnsafe(operand, result.operands);
 
-  result.addTypes(
-      ScalarType::get(builder.getContext(), result.operands.front().getType()));
+  if (succeeded(parser.parseOptionalColon())) {
+    Type outputType;
+    parser.parseType(outputType);
+    result.addTypes(outputType);
+  } else {
+    result.addTypes(ScalarType::get(builder.getContext(),
+                                    result.operands.front().getType()));
+  }
   return success();
 }
 
@@ -126,9 +132,16 @@ ParseResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperandUnsafe(operand, result.operands))
     return failure();
 
-  Type outputType =
-      result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
-  result.addTypes(outputType);
+  if (succeeded(parser.parseOptionalColon())) {
+    Type outputType;
+    parser.parseType(outputType);
+    result.addTypes(outputType);
+  } else {
+    Type outputType =
+        result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
+    result.addTypes(outputType);
+  }
+
   return success();
 }
 
@@ -149,19 +162,32 @@ ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseColonType(riseType))
     return failure();
 
-  //  DataTypeWrapper riseType = DataTypeWrapper::get(
-  //      builder.getContext(),
-  //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
-  //      4),
-  //                     Float::get(builder.getContext())));
-  //  DataType riseType = ArrayType::get(
-  //      builder.getContext(), Nat::get(builder.getContext(), 4),
-  //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
-  //      4),
-  //                     Float::get(builder.getContext())));
   result.addTypes(riseType);
   return success();
 }
+
+
+//===----------------------------------------------------------------------===//
+// RiseOutOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType operand;
+
+  if (parser.parseOperand(operand))
+    return failure();
+
+  parser.resolveOperandUnsafe(operand, result.operands);
+  // parse Memref and create one of our types for it.
+
+  Type outType;
+  if (parser.parseColonType(outType))
+    return failure();
+
+  result.addTypes(outType);
+  return success();
+}
+
 
 //===----------------------------------------------------------------------===//
 // RiseIdxOp
