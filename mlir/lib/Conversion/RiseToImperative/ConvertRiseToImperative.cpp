@@ -181,7 +181,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       codeGen(assign, {}, rewriter);
     }
   }
-
+  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,

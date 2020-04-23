@@ -1,16 +1,16 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
 
 func @print_memref_f32(memref<*xf32>)
-//func @rise_fun(%_outArg:memref<1024x1024xf32>, %_inA:memref<1024x1024xf32>, %_inB:memref<1024x1024xf32>) {return}
-func @rise_fun(%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
-    %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
-    %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
+//func @rise_fun(%_outArg:memref<2048x2048xf32>, %_inA:memref<2048x2048xf32>, %_inB:memref<2048x2048xf32>) {return}
+func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
+    %A = rise.in %inA : !rise.array<2048, array<2048, scalar<f32>>>
+    %B = rise.in %inB : !rise.array<2048, array<2048, scalar<f32>>>
 
-    %m1fun = rise.lambda (%arow) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
-        %m2fun = rise.lambda (%bcol) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+    %m1fun = rise.lambda (%arow) : !rise.fun<array<2048, scalar<f32>> -> array<2048, scalar<f32>>> {
+        %m2fun = rise.lambda (%bcol) : !rise.fun<array<2048, scalar<f32>> -> array<2048, scalar<f32>>> {
 
             //Zipping
-            %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
+            %zipFun = rise.zip #rise.nat<2048> #rise.scalar<f32> #rise.scalar<f32>
             %zippedArrays = rise.apply %zipFun, %arow, %bcol
 
             //Reduction
@@ -34,18 +34,18 @@ func @rise_fun(%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:m
             }
 
             %initializer = rise.literal #rise.lit<0.0>
-            %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+            %reduceFun = rise.reduceSeq {to = "loop"}  #rise.nat<2048> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
             %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
 
             rise.return %result : !rise.scalar<f32>
         }
-        %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+        %m2 = rise.mapSeq {to = "loop"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
         %result = rise.apply %m2, %m2fun, %B
-        rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+        rise.return %result : !rise.array<2048, array<2048, scalar<f32>>>
     }
-    %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+    %m1 = rise.mapSeq {to = "loop"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
     %result = rise.apply %m1, %m1fun, %A
-//    rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+//    rise.return %result : !rise.array<2048, array<2048, scalar<f32>>>
     return
 }
 func @rtclock() -> (f64)
@@ -56,16 +56,16 @@ func @mm() {
 //  vs.
 // zip xs ys |> reduceSeq (fun(p => fun(acc => (fst(p) * snd(p)) + acc))) 0.0
 //
-//    rise.fun "rise_fun" (%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:memref<1024x1024xf32>) {
+//    rise.fun "rise_fun" (%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
 //        //Arrays
-//        %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
-//        %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
+//        %A = rise.in %inA : !rise.array<2048, array<2048, scalar<f32>>>
+//        %B = rise.in %inB : !rise.array<2048, array<2048, scalar<f32>>>
 //
-//        %m1fun = rise.lambda (%arow) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
-//            %m2fun = rise.lambda (%bcol) : !rise.fun<array<1024, scalar<f32>> -> array<1024, scalar<f32>>> {
+//        %m1fun = rise.lambda (%arow) : !rise.fun<array<2048, scalar<f32>> -> array<2048, scalar<f32>>> {
+//            %m2fun = rise.lambda (%bcol) : !rise.fun<array<2048, scalar<f32>> -> array<2048, scalar<f32>>> {
 //
 //                //Zipping
-//                %zipFun = rise.zip #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
+//                %zipFun = rise.zip #rise.nat<2048> #rise.scalar<f32> #rise.scalar<f32>
 //                %zippedArrays = rise.apply %zipFun, %arow, %bcol
 //
 //                //Reduction
@@ -89,25 +89,25 @@ func @mm() {
 //                }
 //
 //                %initializer = rise.literal #rise.lit<0.0>
-//                %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+//                %reduceFun = rise.reduceSeq {to = "affine"}  #rise.nat<2048> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
 //                %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
 //
 //                rise.return %result : !rise.scalar<f32>
 //            }
-//            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+//            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
 //            %result = rise.apply %m2, %m2fun, %B
-//            rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+//            rise.return %result : !rise.array<2048, array<2048, scalar<f32>>>
 //        }
-//        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>
+//        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
 //        %result = rise.apply %m1, %m1fun, %A
-//        rise.return %result : !rise.array<1024, array<1024, scalar<f32>>>
+//        rise.return %result : !rise.array<2048, array<2048, scalar<f32>>>
 //    }
 
     //prepare output Array
-    %outputArray = alloc() : memref<1024x1024xf32>
+    %outputArray = alloc() : memref<2048x2048xf32>
 
 
-    %A = alloc() : memref<1024x1024xf32>
+    %A = alloc() : memref<2048x2048xf32>
 
     %cst0 = constant 0.000000e+00 : f32
     %memrefcst1 = alloc() : memref<f32>
@@ -118,7 +118,7 @@ func @mm() {
     store %cst0, %val[] : memref<f32>
 
     %c0 = constant 0 : index
-    %c16 = constant 1024 : index
+    %c16 = constant 2048 : index
     %c1 = constant 1 : index
     loop.for %arg0 = %c0 to %c16 step %c1 {
         loop.for %arg1 = %c0 to %c16 step %c1 {
@@ -127,7 +127,7 @@ func @mm() {
             %interm = addf %val_loaded, %cst1_loaded : f32
             store %interm, %val[] : memref<f32>
             // transposed here
-            store %interm, %A[%arg1, %arg0] : memref<1024x1024xf32>
+            store %interm, %A[%arg1, %arg0] : memref<2048x2048xf32>
         }
     }
 
@@ -135,7 +135,7 @@ func @mm() {
 //    %cst_0 = constant 5.000000e+00 : f32
 //    linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
 
-    %B = alloc() : memref<1024x1024xf32>
+    %B = alloc() : memref<2048x2048xf32>
 //    %cst_1 = constant 5.000000e+00 : f32
 //    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
     loop.for %arg0 = %c0 to %c16 step %c1 {
@@ -144,17 +144,17 @@ func @mm() {
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
             store %interm, %val[] : memref<f32>
-            store %interm, %B[%arg0, %arg1] : memref<1024x1024xf32>
+            store %interm, %B[%arg0, %arg1] : memref<2048x2048xf32>
         }
     }
 
     %t0 = call @rtclock() : () -> (f64)
-    call @rise_fun(%outputArray, %A, %B) : (memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf32>) -> ()
+    call @rise_fun(%outputArray, %A, %B) : (memref<2048x2048xf32>, memref<2048x2048xf32>, memref<2048x2048xf32>) -> ()
     %t1 = call @rtclock() : () -> (f64)
     %ci1 = constant 17179869184 : i64 // Number of flops to compute
 
 
-    %print_me = memref_cast %outputArray : memref<1024x1024xf32> to memref<*xf32>
+    %print_me = memref_cast %outputArray : memref<2048x2048xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
 
     call @print_flops(%t0, %t1, %ci1): (f64,f64,i64) -> ()
