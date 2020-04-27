@@ -153,30 +153,43 @@ ModuleToImp::matchAndRewrite(RiseFunOp riseFunOp,
     return;
   });
 
-  // CodeGen
+
+  // Codegen:
+  bool doCodegen = true;
+
   SmallVector<Operation *, 10> erasureList = {};
-  for (rise::RiseAssignOp assign : assignOps) {
-    codeGen(assign, {}, rewriter);
+  if (doCodegen) {
+    for (rise::RiseAssignOp assign : assignOps) {
+      codeGen(assign, {}, rewriter);
+    }
+  }
+//
+//  //   cleanup:
+//  //   erase intermediate operations.
+//  //   We remove them back to front right now,
+//  //   this should be alright in terms of dependencies.
+//  // TODO:
+//  //  hack here: I also remove lambdas and applies and wraps which should
+//  //  have been removed in the AccT. I could not remove them there presumably
+//  //  due to a bug with erasure notifications in MLIR. Later check whether this
+//  //  has been fixed already.
+  if (doCodegen) {
+    riseFun.walk([&](Operation *inst) {
+      if (inst->getDialect()->getNamespace().equals("rise")) {
+        erasureList.push_back(inst);
+      }
+      return;
+    });
+  } else {
+    riseFun.walk([&erasureList](Operation *inst) {
+      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst)) {
+        erasureList.push_back(inst);
+      }
+      return;
+    });
   }
 
-  //   cleanup:
-  //   erase intermediate operations.
-  //   We remove them back to front right now,
-  //   this should be alright in terms of dependencies.
-  // TODO:
-  //  hack here: I also remove lambdas and applies and wraps which should
-  //  have been removed in the AccT. I could not remove them there presumably
-  //  due to a bug with erasure notifications in MLIR. Later check whether this
-  //  has been fixed already.
-  riseFun.walk([&erasureList](Operation *inst) {
-    if (isa<RiseAssignOp>(inst) || isa<RiseBinaryOp>(inst) ||
-        isa<RiseIdxOp>(inst) || isa<RiseZipIntermediateOp>(inst) ||
-        isa<RiseFstIntermediateOp>(inst) || isa<RiseSndIntermediateOp>(inst) ||
-        isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst)) {
-      erasureList.push_back(inst);
-    }
-    return;
-  });
+
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
@@ -282,7 +295,7 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
     //    currentBlock.getOperations().clear();
 
     // wrapOp not needed anymore!
-    //    rewriter.eraseOp(wrapOp);
+//        rewriter.eraseOp(wrapOp);
 
     return;
   } else {
