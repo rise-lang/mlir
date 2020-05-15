@@ -1,31 +1,28 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mapMapId -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=3D_MAP_ADD
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(memref<4x4x4xf32>, memref<4x4x4xf32>)
-func @mapMapId() {
-
-    rise.fun "rise_fun" (%outArg:memref<4x4x4xf32>, %inArg:memref<4x4x4xf32>) {
-        %array3D = rise.in %inArg : !rise.array<4, array<4, array<4, scalar<f32>>>>
-        %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
-            %addFun = rise.add #rise.scalar<f32>
-            %doubled = rise.apply %addFun, %summand, %summand //: !rise.fun<data<float> -> fun<data<float> -> data<float>>>, %summand, %summand
-            rise.return %doubled : !rise.scalar<f32>
-        }
-        %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, scalar<f32>>> #rise.array<4, array<4, scalar<f32>>>
-        %mapInnerLambda_1 = rise.lambda (%arraySlice_1) : !rise.fun<array<4, array<4, scalar<f32>>> -> array<4, array<4, scalar<f32>>>> {
-            %map2 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
-            %mapInnerLambda_2 = rise.lambda (%arraySlice_2) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
-                %map3 = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-                %res = rise.apply %map3, %doubleFun, %arraySlice_2
-                rise.return %res : !rise.array<4, scalar<f32>>
-            }
-           %res = rise.apply %map2, %mapInnerLambda_2, %arraySlice_1
-           rise.return %res : !rise.array<4, array<4, scalar<f32>>>
-        }
-        %res = rise.apply %map1, %mapInnerLambda_1, %array3D
-        rise.return %res: !rise.array<4, array<4, array<4, scalar<f32>>>>
+func @rise_fun(%outArg:memref<4x4x4xf32>, %inArg:memref<4x4x4xf32>) {
+    %array3D = rise.in %inArg : !rise.array<4, array<4, array<4, scalar<f32>>>>
+    %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+        %addFun = rise.add #rise.scalar<f32>
+        %doubled = rise.apply %addFun, %summand, %summand //: !rise.fun<data<float> -> fun<data<float> -> data<float>>>, %summand, %summand
+        rise.return %doubled : !rise.scalar<f32>
     }
-
+    %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, scalar<f32>>> #rise.array<4, array<4, scalar<f32>>>
+    %mapInnerLambda_1 = rise.lambda (%arraySlice_1) : !rise.fun<array<4, array<4, scalar<f32>>> -> array<4, array<4, scalar<f32>>>> {
+        %map2 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
+        %mapInnerLambda_2 = rise.lambda (%arraySlice_2) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
+            %map3 = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+            %res = rise.apply %map3, %doubleFun, %arraySlice_2
+            rise.return %res : !rise.array<4, scalar<f32>>
+        }
+       %res = rise.apply %map2, %mapInnerLambda_2, %arraySlice_1
+       rise.return %res : !rise.array<4, array<4, scalar<f32>>>
+    }
+    %res = rise.apply %map1, %mapInnerLambda_1, %array3D
+    return
+}
+func @mapMapId() {
     //prepare output Array
     %outputArray = alloc() : memref<4x4x4xf32>
 
