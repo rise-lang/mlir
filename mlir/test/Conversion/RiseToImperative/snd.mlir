@@ -1,28 +1,26 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_snd -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_SND
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(memref<4xf32>, memref<4xf32>, memref<4xf32>)
-func @simple_snd() {
+func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
+    %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
+    %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
 
-    rise.fun "rise_fun" (%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
-        %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
-        %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
+    %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+    %zipped = rise.apply %zipFun, %array0, %array1
 
-        %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-        %zipped = rise.apply %zipFun, %array0, %array1
-
-        %projectToFirst = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
-            %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
-            %snd = rise.apply %sndFun, %floatTuple
-            rise.return %snd : !rise.scalar<f32>
-        }
-
-        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-        %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
-
-        rise.return %fstArray : !rise.array<4, scalar<f32>>
+    %projectToFirst = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+        %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
+        %snd = rise.apply %sndFun, %floatTuple
+        rise.return %snd : !rise.scalar<f32>
     }
 
+    %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+    %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
+
+    return
+}
+
+func @simple_snd() {
     //prepare output Array
     %outputArray = alloc() : memref<4xf32>
 

@@ -121,7 +121,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   //  rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
   //  riseFun.addEntryBlock();
 
-  // TODO: There should be a check for there only to be one block in this region!
+  // TODO: There should be a check for there only to be one block in this
+  // region!
   Block &block = funcOp.getBody().front();
 
   //  RiseInOp inOp;
@@ -131,25 +132,28 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   //      break;
   //    }
   //  }
-//  riseFunOp.walk([](Operation *op) {
-//    if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
-//      inOp.output().replaceAllUsesWith(inOp.input());
-//    }
-//  });
+  //  riseFunOp.walk([](Operation *op) {
+  //    if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
+  //      inOp.output().replaceAllUsesWith(inOp.input());
+  //    }
+  //  });
+
+  rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   funcOp.walk([&](Operation *op) {
     if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
       inOp.output().replaceAllUsesWith(inOp.input());
       // TODO: errors could come from this
-//      inOp.erase();
-      rewriter.eraseOp(inOp);
+      //      inOp.erase();
+      //      rewriter.eraseOp(inOp);
+      rewriter.setInsertionPointAfter(inOp);
     }
   });
 
-//  // replace output
-//  for (int i = 0; i < riseFunOp.region().front().getNumArguments(); i++) {
-//    riseFunOp.region().front().getArgument(i).replaceAllUsesWith(
-//        riseFun.getBody().front().getArgument(i));
-//  }
+  //  // replace output
+  //  for (int i = 0; i < riseFunOp.region().front().getNumArguments(); i++) {
+  //    riseFunOp.region().front().getArgument(i).replaceAllUsesWith(
+  //        riseFun.getBody().front().getArgument(i));
+  //  }
 
   // Start at the back and find the first apply.
   ApplyOp applyOp;
@@ -159,19 +163,16 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       break;
     }
   }
-//  // Finding the return from the chunk of rise IR
-//  rise::ReturnOp returnOp;
-//  for (auto op = block.rbegin(); op != block.rend(); op++) {
-//    if (isa<rise::ReturnOp>(*op)) {
-//      returnOp = cast<rise::ReturnOp>(*op);
-//      break;
-//    }
-//  }
+  //  // Finding the return from the chunk of rise IR
+  //  rise::ReturnOp returnOp;
+  //  for (auto op = block.rbegin(); op != block.rend(); op++) {
+  //    if (isa<rise::ReturnOp>(*op)) {
+  //      returnOp = cast<rise::ReturnOp>(*op);
+  //      break;
+  //    }
+  //  }
 
   // Translation to imperative
-//  rewriter.setInsertionPointToStart(&riseFun.getBody().front());
-//  AccT(returnOp, riseFun.getBody().front().getArgument(0), rewriter);
-  rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   AccT(applyOp, funcOp.getBody().front().getArgument(0), rewriter);
 
   emitRemark(funcOp.getLoc()) << "AccT finished. Starting CodeGen.";
@@ -187,7 +188,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   });
 
   // Codegen:
-  bool doCodegen = false;
+  bool doCodegen = true;
 
   SmallVector<Operation *, 10> erasureList = {};
   if (doCodegen) {
@@ -216,7 +217,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     });
   } else {
     funcOp.walk([&erasureList](Operation *inst) {
-      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseWrapOp>(inst) || isa<MapSeqOp>(inst)) {
+      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseInOp>(inst) ||
+          isa<RiseWrapOp>(inst) || isa<MapSeqOp>(inst)) {
         erasureList.push_back(inst);
       }
       return;
@@ -231,34 +233,35 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     rewriter.eraseOp(op);
   }
 
-//  rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
-//  auto newReturn =
-//      rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
-//
-//  riseFunOp.walk([&rewriter](Operation *inst) {
-//    if (!inst->use_empty()) {
-//      //      std::cout << "printing uses for " <<
-//      //      inst->getName().getStringRef().str()
-//      //                << "\n"
-//      //                << std::flush;
-//
-//      //            inst->dropAllDefinedValueUses();
-//      inst->getResult(0).dropAllUses();
-//      //        printUses(inst->getResult(0));
-//
-//      //      rewriter.eraseOp(inst);
-//    } else {
-//      //        std::cout << "walking over: " <<
-//      //        inst->getName().getStringRef().str()
-//      //                  << "\n"
-//      //                  << std::flush;
-//    }
-//    return;
-//  });
+  //  rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
+  //  auto newReturn =
+  //      rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
   //
-//  riseFunOp.getOperation()->dropAllUses();
-//  riseFunOp.getOperation()->dropAllReferences();
-//  rewriter.eraseOp(riseFunOp);
+  //  riseFunOp.walk([&rewriter](Operation *inst) {
+  //    if (!inst->use_empty()) {
+  //      //      std::cout << "printing uses for " <<
+  //      //      inst->getName().getStringRef().str()
+  //      //                << "\n"
+  //      //                << std::flush;
+  //
+  //      //            inst->dropAllDefinedValueUses();
+  //      inst->getResult(0).dropAllUses();
+  //      //        printUses(inst->getResult(0));
+  //
+  //      //      rewriter.eraseOp(inst);
+  //    } else {
+  //      //        std::cout << "walking over: " <<
+  //      //        inst->getName().getStringRef().str()
+  //      //                  << "\n"
+  //      //                  << std::flush;
+  //    }
+  //    return;
+  //  });
+  //
+  //  riseFunOp.getOperation()->dropAllUses();
+  //  riseFunOp.getOperation()->dropAllReferences();
+  //  rewriter.eraseOp(riseFunOp);
+  //  funcOp.dump();
   return;
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -382,27 +385,33 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     // Add Continuation for array.
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
-    // Add Continuation for init
+    auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
 
     bool defineNewAccumulator = false;
     // Accumulator for Reduction
+    // TODO: do this properly! This can be way better structured
     Value accum;
     if (defineNewAccumulator) {
       auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
       accum = rewriter
-          .create<AllocOp>(
-              appliedFun->getLoc(),
-              MemRefType::get(ArrayRef<int64_t>{1},
-                              FloatType::getF32(rewriter.getContext())))
-          .getResult();
+                  .create<AllocOp>(
+                      appliedFun->getLoc(),
+                      MemRefType::get(ArrayRef<int64_t>{1},
+                                      FloatType::getF32(rewriter.getContext())))
+                  .getResult();
 
       rewriter.create<linalg::FillOp>(initializer.getLoc(), accum, contInit);
     } else {
+      auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
       accum = out;
+      auto accumIdx = rewriter.create<RiseIdxOp>(
+          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
+          cst_zero.getResult());
+      auto initAccum = rewriter.create<RiseAssignOp>(
+          appliedFun->getLoc(), contInit, accumIdx.getResult());
     }
     // zero constant for indexing
-    auto cst_zero = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 0);
 
     Value loopInductionVar;
     Block *forLoopBody;
@@ -410,7 +419,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     // lowering to a specific loop depending on the lowering target dialect
     std::string loweringTarget;
     if (StringAttr loweringTargetAttr =
-        appliedFun->getAttrOfType<StringAttr>("to")) {
+            appliedFun->getAttrOfType<StringAttr>("to")) {
       loweringTarget = loweringTargetAttr.getValue().str();
     } else {
       // default lowering target
@@ -1214,6 +1223,11 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
+  // handle problem originating from translation of reduce (accessing element)
+  int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
+  if (indexValues.size() != rank) {
+    indexValues.erase(indexValues.begin());
+  }
   if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
     return rewriter
         .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)
@@ -1241,12 +1255,6 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
   }
   int rank = storeLoc.getType().dyn_cast<MemRefType>().getRank();
   if (indexValues.size() != rank) {
-    emitRemark(storeLoc.getLoc())
-        << "Cannot generate store. Number of indices: " << indexValues.size()
-        << " does not match rank of memref: " << rank << "!";
-    emitRemark(storeLoc.getLoc())
-        << "We bail out be removing the first val. This should be a generated "
-           "0 for accessing a val of arraytype.";
     indexValues.erase(indexValues.begin());
   }
   ValueRange valRange = ValueRange(indexValues);
@@ -1552,14 +1560,14 @@ void ConvertRiseToImperativePass::runOnModule() {
       return true;
     funcOp.walk([&](Operation *op) {
       if (op->getDialect()->getNamespace().equals(
-          rise::RiseDialect::getDialectNamespace()))
+              rise::RiseDialect::getDialectNamespace()))
         riseInside = true;
     });
     return !riseInside;
   });
 
   if (failed(applyPartialConversion(module, target, patterns)))
-//      if (!applyPatternsGreedily(this->getOperation(), patterns))
+    //      if (!applyPatternsGreedily(this->getOperation(), patterns))
     signalPassFailure();
 
   return;

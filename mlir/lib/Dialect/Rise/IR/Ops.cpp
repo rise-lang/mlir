@@ -97,6 +97,50 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   LambdaOp::ensureTerminator(*body, builder, result.location);
   return success();
 }
+//===----------------------------------------------------------------------===//
+// RiseWrapOp
+//===----------------------------------------------------------------------===//
+ParseResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  SmallVector<OpAsmParser::OperandType, 4> operands;
+  SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+  SmallVector<Type, 4> argumentTypesUnpacked = SmallVector<Type, 4>();
+
+  if (parser.parseLParen())
+    return failure();
+
+  if (parser.parseOperandList(operands))
+    return failure();
+
+  if (parser.parseRParen())
+    return failure();
+
+  for (auto operand : operands)
+    parser.resolveOperandUnsafe(operand, result.operands);
+
+  for (auto val : result.operands) {
+    argumentTypes.push_back(val.getType());
+  }
+
+  for (auto type : argumentTypes) {
+    ScalarType scalar = type.dyn_cast<ScalarType>();
+    argumentTypesUnpacked.push_back(scalar.getWrappedType());
+  }
+
+  // Parse body of embed
+  Region *body = result.addRegion();
+
+  std::cout << "still here!" << argumentTypesUnpacked.size() << ", "
+            << argumentTypes.size() << ", " << operands.size() << " \n"
+            << std::flush;
+  if (parser.parseRegion(*body, operands, argumentTypesUnpacked, true))
+    return failure();
+  std::cout << "still here2!\n" << std::flush;
+
+  result.addTypes(ScalarType::get(builder.getContext(),
+                                  FloatType::getF32(builder.getContext())));
+  return success();
+}
 
 //===----------------------------------------------------------------------===//
 // RiseWrapOp

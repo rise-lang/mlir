@@ -99,6 +99,15 @@ def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+
+def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
+  let summary = "rise embed";
+  let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
+  let results = (outs AnyType : $wrapped);
+  let regions = (region SizedRegion<1> : $region);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def RiseWrapOp : Rise_Op<"wrap"> {
   let summary = "rise wrap";
   let arguments = (ins AnyType : $typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
