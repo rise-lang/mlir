@@ -1212,7 +1212,6 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     // C++, OpenMP and ARC stuff we don't support yet.
     case Expr::ObjCIndirectCopyRestoreExprClass:
     case Stmt::CXXDependentScopeMemberExprClass:
-    case Stmt::CXXInheritedCtorInitExprClass:
     case Stmt::CXXTryStmtClass:
     case Stmt::CXXTypeidExprClass:
     case Stmt::CXXUuidofExprClass:
@@ -1226,6 +1225,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::UnresolvedLookupExprClass:
     case Stmt::UnresolvedMemberExprClass:
     case Stmt::TypoExprClass:
+    case Stmt::RecoveryExprClass:
     case Stmt::CXXNoexceptExprClass:
     case Stmt::PackExpansionExprClass:
     case Stmt::SubstNonTypeTemplateParmPackExprClass:
@@ -1258,6 +1258,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::OMPTaskwaitDirectiveClass:
     case Stmt::OMPTaskgroupDirectiveClass:
     case Stmt::OMPFlushDirectiveClass:
+    case Stmt::OMPDepobjDirectiveClass:
+    case Stmt::OMPScanDirectiveClass:
     case Stmt::OMPOrderedDirectiveClass:
     case Stmt::OMPAtomicDirectiveClass:
     case Stmt::OMPTargetDirectiveClass:
@@ -1411,6 +1413,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::SubstNonTypeTemplateParmExprClass:
     case Stmt::CXXNullPtrLiteralExprClass:
     case Stmt::OMPArraySectionExprClass:
+    case Stmt::OMPArrayShapingExprClass:
+    case Stmt::OMPIteratorExprClass:
     case Stmt::TypeTraitExprClass: {
       Bldr.takeNodes(Pred);
       ExplodedNodeSet preVisit;
@@ -1615,6 +1619,13 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::CXXConstructExprClass:
       Bldr.takeNodes(Pred);
       VisitCXXConstructExpr(cast<CXXConstructExpr>(S), Pred, Dst);
+      Bldr.addNodes(Dst);
+      break;
+
+    case Stmt::CXXInheritedCtorInitExprClass:
+      Bldr.takeNodes(Pred);
+      VisitCXXInheritedCtorInitExpr(cast<CXXInheritedCtorInitExpr>(S), Pred,
+                                    Dst);
       Bldr.addNodes(Dst);
       break;
 
@@ -3164,9 +3175,10 @@ std::string ExprEngine::DumpGraph(bool trim, StringRef Filename) {
                             /*Title=*/"Exploded Graph",
                             /*Filename=*/std::string(Filename));
   }
-#endif
+#else
   llvm::errs() << "Warning: dumping graph requires assertions" << "\n";
   return "";
+#endif
 }
 
 std::string ExprEngine::DumpGraph(ArrayRef<const ExplodedNode*> Nodes,

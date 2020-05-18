@@ -453,6 +453,20 @@ TEST(DeclarationMatcher, ClassIsDerived) {
   EXPECT_TRUE(notMatches("class X;", IsDerivedFromX));
   EXPECT_TRUE(notMatches("class Y;", IsDerivedFromX));
   EXPECT_TRUE(notMatches("", IsDerivedFromX));
+  EXPECT_TRUE(matches("class X {}; template<int N> class Y : Y<N-1>, X {};",
+    IsDerivedFromX));
+  EXPECT_TRUE(matches("class X {}; template<int N> class Y : X, Y<N-1> {};",
+    IsDerivedFromX));
+
+  DeclarationMatcher IsZDerivedFromX = cxxRecordDecl(hasName("Z"),
+    isDerivedFrom("X"));
+  EXPECT_TRUE(
+    matches(
+      "class X {};"
+      "template<int N> class Y : Y<N-1> {};"
+      "template<> class Y<0> : X {};"
+      "class Z : Y<1> {};",
+      IsZDerivedFromX));
 
   DeclarationMatcher IsDirectlyDerivedFromX =
       cxxRecordDecl(isDirectlyDerivedFrom("X"));
@@ -898,6 +912,12 @@ TEST(Matcher, HasOperatorNameForOverloadedOperatorCall) {
   DeclarationMatcher AnyOpStar = functionDecl(hasOverloadedOperatorName("*"));
   EXPECT_TRUE(matches("class Y; int operator*(Y &);", AnyOpStar));
   EXPECT_TRUE(matches("class Y { int operator*(); };", AnyOpStar));
+  DeclarationMatcher AnyAndOp =
+      functionDecl(hasAnyOverloadedOperatorName("&", "&&"));
+  EXPECT_TRUE(matches("class Y; Y operator&(Y &, Y &);", AnyAndOp));
+  EXPECT_TRUE(matches("class Y; Y operator&&(Y &, Y &);", AnyAndOp));
+  EXPECT_TRUE(matches("class Y { Y operator&(Y &); };", AnyAndOp));
+  EXPECT_TRUE(matches("class Y { Y operator&&(Y &); };", AnyAndOp));
 }
 
 
@@ -1643,6 +1663,21 @@ TEST(Matcher, HasNameSupportsFunctionScope) {
   EXPECT_TRUE(matches(code, fieldDecl(hasName("::a::F(int)::S::m"))));
 }
 
+TEST(Matcher, HasNameQualifiedSupportsLinkage) {
+  // https://bugs.llvm.org/show_bug.cgi?id=42193
+  std::string code = R"cpp(namespace foo { extern "C" void test(); })cpp";
+  EXPECT_TRUE(matches(code, functionDecl(hasName("test"))));
+  EXPECT_TRUE(matches(code, functionDecl(hasName("foo::test"))));
+  EXPECT_TRUE(matches(code, functionDecl(hasName("::foo::test"))));
+  EXPECT_TRUE(notMatches(code, functionDecl(hasName("::test"))));
+
+  code = R"cpp(namespace foo { extern "C" { void test(); } })cpp";
+  EXPECT_TRUE(matches(code, functionDecl(hasName("test"))));
+  EXPECT_TRUE(matches(code, functionDecl(hasName("foo::test"))));
+  EXPECT_TRUE(matches(code, functionDecl(hasName("::foo::test"))));
+  EXPECT_TRUE(notMatches(code, functionDecl(hasName("::test"))));
+}
+
 TEST(Matcher, HasAnyName) {
   const std::string Code = "namespace a { namespace b { class C; } }";
 
@@ -1992,22 +2027,28 @@ TEST(EachOf, BehavesLikeAnyOfUnlessBothMatch) {
 TEST(Optionally, SubmatchersDoNotMatch) {
   EXPECT_TRUE(matchAndVerifyResultFalse(
       "class A { int a; int b; };",
-      recordDecl(optionally(has(fieldDecl(hasName("c")).bind("v")),
-                            has(fieldDecl(hasName("d")).bind("v")))),
-      std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("v")));
+      recordDecl(optionally(has(fieldDecl(hasName("c")).bind("c")))),
+      std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("c")));
+}
+
+// Regression test.
+TEST(Optionally, SubmatchersDoNotMatchButPreserveBindings) {
+  std::string Code = "class A { int a; int b; };";
+  auto Matcher = recordDecl(decl().bind("decl"),
+                            optionally(has(fieldDecl(hasName("c")).bind("v"))));
+  // "decl" is still bound.
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      Code, Matcher, std::make_unique<VerifyIdIsBoundTo<RecordDecl>>("decl")));
+  // "v" is not bound, but the match still suceeded.
+  EXPECT_TRUE(matchAndVerifyResultFalse(
+      Code, Matcher, std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("v")));
 }
 
 TEST(Optionally, SubmatchersMatch) {
   EXPECT_TRUE(matchAndVerifyResultTrue(
       "class A { int a; int c; };",
-      recordDecl(optionally(has(fieldDecl(hasName("a")).bind("v")),
-                            has(fieldDecl(hasName("b")).bind("v")))),
-      std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("v", 1)));
-  EXPECT_TRUE(matchAndVerifyResultTrue(
-      "class A { int c; int b; };",
-      recordDecl(optionally(has(fieldDecl(hasName("c")).bind("v")),
-                            has(fieldDecl(hasName("b")).bind("v")))),
-      std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("v", 2)));
+      recordDecl(optionally(has(fieldDecl(hasName("a")).bind("v")))),
+      std::make_unique<VerifyIdIsBoundTo<FieldDecl>>("v")));
 }
 
 TEST(IsTemplateInstantiation, MatchesImplicitClassTemplateInstantiation) {
@@ -2585,7 +2626,7 @@ TEST(HasExternalFormalLinkage, Basic) {
 }
 
 TEST(HasDefaultArgument, Basic) {
-  EXPECT_TRUE(matches("void x(int val = 0) {}", 
+  EXPECT_TRUE(matches("void x(int val = 0) {}",
                       parmVarDecl(hasDefaultArgument())));
   EXPECT_TRUE(notMatches("void x(int val) {}",
                       parmVarDecl(hasDefaultArgument())));
@@ -2638,7 +2679,7 @@ TEST(HasTrailingReturn, MatchesTrailingReturn) {
   EXPECT_TRUE(matches("auto Y() -> int { return 0; }",
                       functionDecl(hasTrailingReturn())));
   EXPECT_TRUE(matches("auto X() -> int;", functionDecl(hasTrailingReturn())));
-  EXPECT_TRUE(notMatches("int X() { return 0; }", 
+  EXPECT_TRUE(notMatches("int X() { return 0; }",
                       functionDecl(hasTrailingReturn())));
   EXPECT_TRUE(notMatches("int X();", functionDecl(hasTrailingReturn())));
   EXPECT_TRUE(notMatchesC("void X();", functionDecl(hasTrailingReturn())));
@@ -2666,6 +2707,20 @@ TEST(IsAssignmentOperator, Basic) {
                       CXXAsgmtOperator));
   EXPECT_TRUE(
       notMatches("void x() { int a; if(a == 0) return; }", BinAsgmtOperator));
+}
+
+TEST(IsComparisonOperator, Basic) {
+  StatementMatcher BinCompOperator = binaryOperator(isComparisonOperator());
+  StatementMatcher CXXCompOperator =
+      cxxOperatorCallExpr(isComparisonOperator());
+
+  EXPECT_TRUE(matches("void x() { int a; a == 1; }", BinCompOperator));
+  EXPECT_TRUE(matches("void x() { int a; a > 2; }", BinCompOperator));
+  EXPECT_TRUE(matches("struct S { bool operator==(const S&); };"
+                      "void x() { S s1, s2; bool b1 = s1 == s2; }",
+                      CXXCompOperator));
+  EXPECT_TRUE(
+      notMatches("void x() { int a; if(a = 0) return; }", BinCompOperator));
 }
 
 TEST(HasInit, Basic) {
@@ -2703,26 +2758,6 @@ void x() {
 #pragma omp taskyield
 })";
   EXPECT_TRUE(matchesWithOpenMP(Source1, Matcher));
-}
-
-TEST(Stmt, isOMPStructuredBlock) {
-  const std::string Source0 = R"(
-void x() {
-#pragma omp parallel
-;
-})";
-  EXPECT_TRUE(
-      matchesWithOpenMP(Source0, stmt(nullStmt(), isOMPStructuredBlock())));
-
-  const std::string Source1 = R"(
-void x() {
-#pragma omp parallel
-{;}
-})";
-  EXPECT_TRUE(
-      notMatchesWithOpenMP(Source1, stmt(nullStmt(), isOMPStructuredBlock())));
-  EXPECT_TRUE(
-      matchesWithOpenMP(Source1, stmt(compoundStmt(), isOMPStructuredBlock())));
 }
 
 TEST(OMPExecutableDirective, hasStructuredBlock) {
@@ -2870,8 +2905,8 @@ void x(int x) {
 }
 
 TEST(OMPExecutableDirective, isAllowedToContainClauseKind) {
-  auto Matcher =
-      ompExecutableDirective(isAllowedToContainClauseKind(OMPC_default));
+  auto Matcher = ompExecutableDirective(
+      isAllowedToContainClauseKind(llvm::omp::OMPC_default));
 
   const std::string Source0 = R"(
 void x() {

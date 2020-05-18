@@ -50,6 +50,7 @@ public:
   using Base::erase;
   using Base::find;
   using Base::insert;
+  using Base::insert_or_assign;
   using Base::lookup;
   using Base::size;
   using Base::try_emplace;
@@ -93,4 +94,4 @@ template <> struct format_provider<lldb_private::Environment> {
 };
 } // namespace llvm
 
-#endif // #ifndef LLDB_UTILITY_ENVIRONMENT_H
+#endif // LLDB_UTILITY_ENVIRONMENT_H

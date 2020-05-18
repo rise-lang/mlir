@@ -89,6 +89,11 @@ public:
       : Value(Raw > MaxValue ? Unknown : Raw) {}
 
   static LocationSize precise(uint64_t Value) { return LocationSize(Value); }
+  static LocationSize precise(TypeSize Value) {
+    if (Value.isScalable())
+      return unknown();
+    return precise(Value.getFixedSize());
+  }
 
   static LocationSize upperBound(uint64_t Value) {
     // You can't go lower than 0, so give a precise result.
@@ -97,6 +102,11 @@ public:
     if (LLVM_UNLIKELY(Value > MaxValue))
       return unknown();
     return LocationSize(Value | ImpreciseBit, Direct);
+  }
+  static LocationSize upperBound(TypeSize Value) {
+    if (Value.isScalable())
+      return unknown();
+    return upperBound(Value.getFixedSize());
   }
 
   constexpr static LocationSize unknown() {
@@ -194,6 +204,8 @@ public:
   /// The metadata nodes which describes the aliasing of the location (each
   /// member is null if that kind of information is unavailable).
   AAMDNodes AATags;
+
+  void print(raw_ostream &OS) const { OS << *Ptr << " " << Size << "\n"; }
 
   /// Return a location with information about the memory reference by the given
   /// instruction.

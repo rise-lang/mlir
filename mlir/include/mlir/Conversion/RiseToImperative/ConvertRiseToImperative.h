@@ -14,14 +14,12 @@
 #include "mlir/IR/Module.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/Functional.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/Utils.h"
 
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
 
 #include "mlir/Dialect/Rise/variant.hpp"
 

@@ -11,6 +11,7 @@ unittest("AnalysisTests") {
   sources = [
     "AliasAnalysisTest.cpp",
     "AliasSetTrackerTest.cpp",
+    "AssumeBundleQueriesTest.cpp",
     "BasicAliasAnalysisTest.cpp",
     "BlockFrequencyInfoTest.cpp",
     "BranchProbabilityInfoTest.cpp",
@@ -25,9 +26,9 @@ unittest("AnalysisTests") {
     "LazyCallGraphTest.cpp",
     "LoadsTest.cpp",
     "LoopInfoTest.cpp",
+    "LoopNestTest.cpp",
     "MemoryBuiltinsTest.cpp",
     "MemorySSATest.cpp",
-    "OrderedBasicBlockTest.cpp",
     "OrderedInstructionsTest.cpp",
     "PhiValuesTest.cpp",
     "ProfileSummaryInfoTest.cpp",

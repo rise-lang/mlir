@@ -79,6 +79,8 @@ public:
         InstPrinter->setCommentStream(CommentStream);
     if (Assembler->getBackendPtr())
       setAllowAutoPadding(Assembler->getBackend().allowAutoPadding());
+
+    Context.setUseNamesOnTempLabels(true);
   }
 
   MCAssembler &getAssembler() { return *Assembler; }
@@ -135,7 +137,7 @@ public:
   /// @name MCStreamer Interface
   /// @{
 
-  void ChangeSection(MCSection *Section, const MCExpr *Subsection) override;
+  void changeSection(MCSection *Section, const MCExpr *Subsection) override;
 
   void emitELFSymverDirective(StringRef AliasName,
                               const MCSymbol *Aliasee) override;
@@ -252,12 +254,12 @@ public:
   bool EmitCVInlineSiteIdDirective(unsigned FunctionId, unsigned IAFunc,
                                    unsigned IAFile, unsigned IALine,
                                    unsigned IACol, SMLoc Loc) override;
-  void EmitCVLocDirective(unsigned FunctionId, unsigned FileNo, unsigned Line,
+  void emitCVLocDirective(unsigned FunctionId, unsigned FileNo, unsigned Line,
                           unsigned Column, bool PrologueEnd, bool IsStmt,
                           StringRef FileName, SMLoc Loc) override;
-  void EmitCVLinetableDirective(unsigned FunctionId, const MCSymbol *FnStart,
+  void emitCVLinetableDirective(unsigned FunctionId, const MCSymbol *FnStart,
                                 const MCSymbol *FnEnd) override;
-  void EmitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
+  void emitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
                                       unsigned SourceFileId,
                                       unsigned SourceLineNum,
                                       const MCSymbol *FnStartSym,
@@ -266,25 +268,25 @@ public:
   void PrintCVDefRangePrefix(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges);
 
-  void EmitCVDefRangeDirective(
+  void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeRegisterRelHeader DRHdr) override;
 
-  void EmitCVDefRangeDirective(
+  void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeSubfieldRegisterHeader DRHdr) override;
 
-  void EmitCVDefRangeDirective(
+  void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeRegisterHeader DRHdr) override;
 
-  void EmitCVDefRangeDirective(
+  void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeFramePointerRelHeader DRHdr) override;
 
-  void EmitCVStringTableDirective() override;
-  void EmitCVFileChecksumsDirective() override;
-  void EmitCVFileChecksumOffsetDirective(unsigned FileNo) override;
+  void emitCVStringTableDirective() override;
+  void emitCVFileChecksumsDirective() override;
+  void emitCVFileChecksumOffsetDirective(unsigned FileNo) override;
   void EmitCVFPOData(const MCSymbol *ProcSym, SMLoc L) override;
 
   void emitIdent(StringRef IdentString) override;
@@ -352,7 +354,7 @@ public:
   /// hasRawTextSupport() predicate.
   void emitRawTextImpl(StringRef String) override;
 
-  void FinishImpl() override;
+  void finishImpl() override;
 };
 
 } // end anonymous namespace.
@@ -444,7 +446,7 @@ void MCAsmStreamer::emitExplicitComments() {
   ExplicitCommentToEmit.clear();
 }
 
-void MCAsmStreamer::ChangeSection(MCSection *Section,
+void MCAsmStreamer::changeSection(MCSection *Section,
                                   const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
   if (MCTargetStreamer *TS = getTargetStreamer()) {
@@ -673,6 +675,9 @@ bool MCAsmStreamer::emitSymbolAttribute(MCSymbol *Symbol,
     break;
   case MCSA_Protected:      OS << "\t.protected\t";       break;
   case MCSA_Reference:      OS << "\t.reference\t";       break;
+  case MCSA_Extern:
+    OS << "\t.extern\t";
+    break;
   case MCSA_Weak:           OS << MAI->getWeakDirective(); break;
   case MCSA_WeakDefinition:
     OS << "\t.weak_definition\t";
@@ -846,7 +851,7 @@ void MCAsmStreamer::emitZerofill(MCSection *Section, MCSymbol *Symbol,
   // This is a mach-o specific directive.
 
   const MCSectionMachO *MOSection = ((const MCSectionMachO*)Section);
-  OS << MOSection->getSegmentName() << "," << MOSection->getSectionName();
+  OS << MOSection->getSegmentName() << "," << MOSection->getName();
 
   if (Symbol) {
     OS << ',';
@@ -1397,7 +1402,7 @@ bool MCAsmStreamer::EmitCVInlineSiteIdDirective(unsigned FunctionId,
                                                  IALine, IACol, Loc);
 }
 
-void MCAsmStreamer::EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
+void MCAsmStreamer::emitCVLocDirective(unsigned FunctionId, unsigned FileNo,
                                        unsigned Line, unsigned Column,
                                        bool PrologueEnd, bool IsStmt,
                                        StringRef FileName, SMLoc Loc) {
@@ -1421,7 +1426,7 @@ void MCAsmStreamer::EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVLinetableDirective(unsigned FunctionId,
+void MCAsmStreamer::emitCVLinetableDirective(unsigned FunctionId,
                                              const MCSymbol *FnStart,
                                              const MCSymbol *FnEnd) {
   OS << "\t.cv_linetable\t" << FunctionId << ", ";
@@ -1429,10 +1434,10 @@ void MCAsmStreamer::EmitCVLinetableDirective(unsigned FunctionId,
   OS << ", ";
   FnEnd->print(OS, MAI);
   EmitEOL();
-  this->MCStreamer::EmitCVLinetableDirective(FunctionId, FnStart, FnEnd);
+  this->MCStreamer::emitCVLinetableDirective(FunctionId, FnStart, FnEnd);
 }
 
-void MCAsmStreamer::EmitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
+void MCAsmStreamer::emitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
                                                    unsigned SourceFileId,
                                                    unsigned SourceLineNum,
                                                    const MCSymbol *FnStartSym,
@@ -1443,7 +1448,7 @@ void MCAsmStreamer::EmitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
   OS << ' ';
   FnEndSym->print(OS, MAI);
   EmitEOL();
-  this->MCStreamer::EmitCVInlineLinetableDirective(
+  this->MCStreamer::emitCVInlineLinetableDirective(
       PrimaryFunctionId, SourceFileId, SourceLineNum, FnStartSym, FnEndSym);
 }
 
@@ -1458,7 +1463,7 @@ void MCAsmStreamer::PrintCVDefRangePrefix(
   }
 }
 
-void MCAsmStreamer::EmitCVDefRangeDirective(
+void MCAsmStreamer::emitCVDefRangeDirective(
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
     codeview::DefRangeRegisterRelHeader DRHdr) {
   PrintCVDefRangePrefix(Ranges);
@@ -1468,7 +1473,7 @@ void MCAsmStreamer::EmitCVDefRangeDirective(
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVDefRangeDirective(
+void MCAsmStreamer::emitCVDefRangeDirective(
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
     codeview::DefRangeSubfieldRegisterHeader DRHdr) {
   PrintCVDefRangePrefix(Ranges);
@@ -1477,7 +1482,7 @@ void MCAsmStreamer::EmitCVDefRangeDirective(
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVDefRangeDirective(
+void MCAsmStreamer::emitCVDefRangeDirective(
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
     codeview::DefRangeRegisterHeader DRHdr) {
   PrintCVDefRangePrefix(Ranges);
@@ -1486,7 +1491,7 @@ void MCAsmStreamer::EmitCVDefRangeDirective(
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVDefRangeDirective(
+void MCAsmStreamer::emitCVDefRangeDirective(
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
     codeview::DefRangeFramePointerRelHeader DRHdr) {
   PrintCVDefRangePrefix(Ranges);
@@ -1495,17 +1500,17 @@ void MCAsmStreamer::EmitCVDefRangeDirective(
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVStringTableDirective() {
+void MCAsmStreamer::emitCVStringTableDirective() {
   OS << "\t.cv_stringtable";
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVFileChecksumsDirective() {
+void MCAsmStreamer::emitCVFileChecksumsDirective() {
   OS << "\t.cv_filechecksums";
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitCVFileChecksumOffsetDirective(unsigned FileNo) {
+void MCAsmStreamer::emitCVFileChecksumOffsetDirective(unsigned FileNo) {
   OS << "\t.cv_filechecksumoffset\t" << FileNo;
   EmitEOL();
 }
@@ -1682,13 +1687,17 @@ void MCAsmStreamer::emitCFISignalFrame() {
 
 void MCAsmStreamer::emitCFIUndefined(int64_t Register) {
   MCStreamer::emitCFIUndefined(Register);
-  OS << "\t.cfi_undefined " << Register;
+  OS << "\t.cfi_undefined ";
+  EmitRegisterName(Register);
   EmitEOL();
 }
 
 void MCAsmStreamer::emitCFIRegister(int64_t Register1, int64_t Register2) {
   MCStreamer::emitCFIRegister(Register1, Register2);
-  OS << "\t.cfi_register " << Register1 << ", " << Register2;
+  OS << "\t.cfi_register ";
+  EmitRegisterName(Register1);
+  OS << ", ";
+  EmitRegisterName(Register2);
   EmitEOL();
 }
 
@@ -1706,7 +1715,8 @@ void MCAsmStreamer::emitCFINegateRAState() {
 
 void MCAsmStreamer::emitCFIReturnColumn(int64_t Register) {
   MCStreamer::emitCFIReturnColumn(Register);
-  OS << "\t.cfi_return_column " << Register;
+  OS << "\t.cfi_return_column ";
+  EmitRegisterName(Register);
   EmitEOL();
 }
 
@@ -2025,7 +2035,7 @@ void MCAsmStreamer::emitRawTextImpl(StringRef String) {
   EmitEOL();
 }
 
-void MCAsmStreamer::FinishImpl() {
+void MCAsmStreamer::finishImpl() {
   // If we are generating dwarf for assembly source files dump out the sections.
   if (getContext().getGenDwarfForAssembly())
     MCGenDwarfInfo::Emit(this);

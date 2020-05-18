@@ -30,7 +30,7 @@ using namespace MIPatternMatch;
 
 namespace {
 
-TEST_F(GISelMITest, MatchIntConstant) {
+TEST_F(AArch64GISelMITest, MatchIntConstant) {
   setUp();
   if (!TM)
     return;
@@ -41,10 +41,11 @@ TEST_F(GISelMITest, MatchIntConstant) {
   EXPECT_EQ(Cst, 42);
 }
 
-TEST_F(GISelMITest, MatchBinaryOp) {
+TEST_F(AArch64GISelMITest, MatchBinaryOp) {
   setUp();
   if (!TM)
     return;
+  LLT s32 = LLT::scalar(32);
   LLT s64 = LLT::scalar(64);
   auto MIBAdd = B.buildAdd(s64, Copies[0], Copies[1]);
   // Test case for no bind.
@@ -127,9 +128,26 @@ TEST_F(GISelMITest, MatchBinaryOp) {
   EXPECT_TRUE(match);
   EXPECT_EQ(Src0, Copies[0]);
   EXPECT_EQ(Src1, Copies[1]);
+
+  // Match lshr, and make sure a different shift amount type works.
+  auto TruncCopy1 = B.buildTrunc(s32, Copies[1]);
+  auto LShr = B.buildLShr(s64, Copies[0], TruncCopy1);
+  match = mi_match(LShr.getReg(0), *MRI,
+                   m_GLShr(m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, Copies[0]);
+  EXPECT_EQ(Src1, TruncCopy1.getReg(0));
+
+  // Match shl, and make sure a different shift amount type works.
+  auto Shl = B.buildShl(s64, Copies[0], TruncCopy1);
+  match = mi_match(Shl.getReg(0), *MRI,
+                   m_GShl(m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, Copies[0]);
+  EXPECT_EQ(Src1, TruncCopy1.getReg(0));
 }
 
-TEST_F(GISelMITest, MatchICmp) {
+TEST_F(AArch64GISelMITest, MatchICmp) {
   setUp();
   if (!TM)
     return;
@@ -154,7 +172,7 @@ TEST_F(GISelMITest, MatchICmp) {
   EXPECT_EQ(Copies[1], Reg1);
 }
 
-TEST_F(GISelMITest, MatchFCmp) {
+TEST_F(AArch64GISelMITest, MatchFCmp) {
   setUp();
   if (!TM)
     return;
@@ -179,7 +197,7 @@ TEST_F(GISelMITest, MatchFCmp) {
   EXPECT_EQ(Copies[1], Reg1);
 }
 
-TEST_F(GISelMITest, MatchFPUnaryOp) {
+TEST_F(AArch64GISelMITest, MatchFPUnaryOp) {
   setUp();
   if (!TM)
     return;
@@ -241,7 +259,7 @@ TEST_F(GISelMITest, MatchFPUnaryOp) {
   EXPECT_NE(TmpFP16, TmpFP);
 }
 
-TEST_F(GISelMITest, MatchExtendsTrunc) {
+TEST_F(AArch64GISelMITest, MatchExtendsTrunc) {
   setUp();
   if (!TM)
     return;
@@ -288,7 +306,7 @@ TEST_F(GISelMITest, MatchExtendsTrunc) {
   EXPECT_EQ(Src0, Copies[0]);
 }
 
-TEST_F(GISelMITest, MatchSpecificType) {
+TEST_F(AArch64GISelMITest, MatchSpecificType) {
   setUp();
   if (!TM)
     return;
@@ -325,7 +343,7 @@ TEST_F(GISelMITest, MatchSpecificType) {
   EXPECT_EQ(Src0, Copies[0]);
 }
 
-TEST_F(GISelMITest, MatchCombinators) {
+TEST_F(AArch64GISelMITest, MatchCombinators) {
   setUp();
   if (!TM)
     return;
@@ -359,7 +377,7 @@ TEST_F(GISelMITest, MatchCombinators) {
   EXPECT_FALSE(match);
 }
 
-TEST_F(GISelMITest, MatchMiscellaneous) {
+TEST_F(AArch64GISelMITest, MatchMiscellaneous) {
   setUp();
   if (!TM)
     return;

@@ -78,7 +78,7 @@ static bool isDereferenceableAndAlignedPointer(
     if (!CheckForNonNull || isKnownNonZero(V, DL, 0, nullptr, CtxI, DT)) {
       // As we recursed through GEPs to get here, we've incrementally checked
       // that each step advanced by a multiple of the alignment. If our base is
-      // properly aligned, then the original offset accessed must also be.  
+      // properly aligned, then the original offset accessed must also be.
       Type *Ty = V->getType();
       assert(Ty->isSized() && "must be sized");
       APInt Offset(DL.getTypeStoreSizeInBits(Ty), 0);
@@ -148,9 +148,9 @@ bool llvm::isDereferenceableAndAlignedPointer(const Value *V, Type *Ty,
                                               const DominatorTree *DT) {
   // For unsized types or scalable vectors we don't know exactly how many bytes
   // are dereferenced, so bail out.
-  if (!Ty->isSized() || (Ty->isVectorTy() && Ty->getVectorIsScalable()))
+  if (!Ty->isSized() || isa<ScalableVectorType>(Ty))
     return false;
-  
+
   // When dereferenceability information is provided by a dereferenceable
   // attribute, we know exactly how many bytes are dereferenceable. If we can
   // determine the exact offset to the attributed variable, we can use that
@@ -210,8 +210,7 @@ bool llvm::isDereferenceableAndAlignedInLoop(LoadInst *LI, Loop *L,
 
   APInt EltSize(DL.getIndexTypeSizeInBits(Ptr->getType()),
                 DL.getTypeStoreSize(LI->getType()));
-  const Align Alignment = DL.getValueOrABITypeAlignment(
-      MaybeAlign(LI->getAlignment()), LI->getType());
+  const Align Alignment = LI->getAlign();
 
   Instruction *HeaderFirstNonPHI = L->getHeader()->getFirstNonPHI();
 

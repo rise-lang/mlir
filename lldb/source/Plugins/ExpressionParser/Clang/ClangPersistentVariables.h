@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ClangPersistentVariables_h_
-#define liblldb_ClangPersistentVariables_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H
 
 #include "llvm/ADT/DenseMap.h"
 
@@ -51,9 +51,7 @@ public:
 
   void RemovePersistentVariable(lldb::ExpressionVariableSP variable) override;
 
-  llvm::StringRef GetPersistentVariablePrefix(bool is_error) const override {
-    return "$";
-  }
+  ConstString GetNextPersistentVariableName(bool is_error = false) override;
 
   /// Returns the next file name that should be used for user expressions.
   std::string GetNextExprFileName() {
@@ -78,6 +76,12 @@ public:
 
   const ClangModulesDeclVendor::ModuleVector &GetHandLoadedClangModules() {
     return m_hand_loaded_clang_modules;
+  }
+
+protected:
+  llvm::StringRef
+  GetPersistentVariablePrefix(bool is_error = false) const override {
+    return "$";
   }
 
 private:
@@ -106,4 +110,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_ClangPersistentVariables_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H

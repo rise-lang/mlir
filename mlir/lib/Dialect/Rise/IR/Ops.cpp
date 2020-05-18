@@ -45,7 +45,7 @@ namespace rise {
 //===----------------------------------------------------------------------===//
 // RiseFunOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType output;
   Type outputType;
@@ -100,7 +100,7 @@ ParseResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseWrapOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::OperandType, 4> operands;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
@@ -145,7 +145,7 @@ ParseResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseWrapOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 
@@ -161,7 +161,7 @@ ParseResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseUnwrapOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 
@@ -179,7 +179,7 @@ ParseResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseInOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 
@@ -210,7 +210,7 @@ ParseResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseIdxOp
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseIdxOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseRiseIdxOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType input;
   OpAsmParser::OperandType index;
@@ -246,7 +246,7 @@ ParseResult parseRiseIdxOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseContinuationTranslation
 //===----------------------------------------------------------------------===//
-ParseResult parseRiseContinuationTranslation(OpAsmParser &parser,
+LogicalResult parseRiseContinuationTranslation(OpAsmParser &parser,
                                              OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType contValue;
@@ -266,7 +266,7 @@ ParseResult parseRiseContinuationTranslation(OpAsmParser &parser,
 //===----------------------------------------------------------------------===//
 // LambdaOp
 //===----------------------------------------------------------------------===//
-ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
@@ -308,7 +308,7 @@ ParseResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // ApplyOp
 //===----------------------------------------------------------------------===//
-ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
   bool simplified = true;
 
   auto &builder = parser.getBuilder();
@@ -365,7 +365,7 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(funType.getOutput());
-  result.setOperandListToResizable(true);
+//  result.setOperandListToResizable(true);
   return success();
 }
 
@@ -379,7 +379,7 @@ ParseResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
 ///         rise.literal #rise.array<2.3, !rise.int, [[1,2,3],[4,5,6]]>
 // TODO: restructure the literal attribute to clearly differ between type and
 // value
-ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   LiteralAttr attr;
 
@@ -396,26 +396,26 @@ ParseResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// map: {n : nat} → {s t : data} → (s → t ) → n.s → n.t
-ParseResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  SmallVector<NamedAttribute, 1> attributesFromDict;
+  NamedAttrList attributesFromDict;
   if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
     if (!attributesFromDict.empty()) {
       bool validLowering = false;
-      if (attributesFromDict.front().first.str() == "to") {
+      if (attributesFromDict.begin()->first.str() == "to") {
         if (StringAttr loweringAttr =
-                attributesFromDict.front().second.dyn_cast<StringAttr>()) {
+                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.front());
+              result.attributes.push_back(attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -460,26 +460,26 @@ ParseResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// map: {n : nat} → {s t : data} → (s → t ) → n.s → n.t
-ParseResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  SmallVector<NamedAttribute, 1> attributesFromDict;
+  NamedAttrList attributesFromDict;
   if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
     if (!attributesFromDict.empty()) {
       bool validLowering = false;
-      if (attributesFromDict.front().first.str() == "to") {
+      if (attributesFromDict.begin()->first.str() == "to") {
         if (StringAttr loweringAttr =
-                attributesFromDict.front().second.dyn_cast<StringAttr>()) {
+                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.front());
+              result.attributes.push_back(attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -528,26 +528,26 @@ ParseResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// reduce: {n : nat} → {s t : data} → (s → t → t ) → t → n.s → t
-ParseResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  SmallVector<NamedAttribute, 1> attributesFromDict;
+  NamedAttrList attributesFromDict;
   if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
     if (!attributesFromDict.empty()) {
       bool validLowering = false;
-      if (attributesFromDict.front().first.str() == "to") {
+      if (attributesFromDict.begin()->first.str() == "to") {
         if (StringAttr loweringAttr =
-                attributesFromDict.front().second.dyn_cast<StringAttr>()) {
+                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.front());
+              result.attributes.push_back(attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -600,7 +600,7 @@ ParseResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// zip: {n : nat} → {s t : data} → n.s → n.t → n.(s × t )
-ParseResult parseZipOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
 
   NatAttr n;
@@ -631,10 +631,10 @@ ParseResult parseZipOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// tuple: {s t : data} → s → t → s × t
-ParseResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -653,10 +653,10 @@ ParseResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// fst: {s t : data} → s × t → s
-ParseResult parseFstOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -674,10 +674,10 @@ ParseResult parseFstOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// snd: {s t : data} → s × t → t
-ParseResult parseSndOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -699,7 +699,7 @@ ParseResult parseSndOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 /// add: {t : data} → t → t → t
-ParseResult parseAddOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseAddOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr t;
 
@@ -714,7 +714,7 @@ ParseResult parseAddOp(OpAsmParser &parser, OperationState &result) {
 }
 
 /// mult: {t : data} → t → t → t
-ParseResult parseMulOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseMulOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr t;
 
@@ -731,10 +731,10 @@ ParseResult parseMulOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // ReturnOp
 //===----------------------------------------------------------------------===//
-ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType value;
   Type type;
-  result.setOperandListToResizable();
+//  result.setOperandListToResizable();
 
   // return value
   if (parser.parseOperand(value))

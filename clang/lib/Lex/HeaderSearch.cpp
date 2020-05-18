@@ -1219,9 +1219,11 @@ HeaderSearch::getExistingFileInfo(const FileEntry *FE,
 }
 
 bool HeaderSearch::isFileMultipleIncludeGuarded(const FileEntry *File) {
-  // Check if we've ever seen this file as a header.
+  // Check if we've entered this file and found an include guard or #pragma
+  // once. Note that we dor't check for #import, because that's not a property
+  // of the file itself.
   if (auto *HFI = getExistingFileInfo(File))
-    return HFI->isPragmaOnce || HFI->isImport || HFI->ControllingMacro ||
+    return HFI->isPragmaOnce || HFI->ControllingMacro ||
            HFI->ControllingMacroID;
   return false;
 }
@@ -1399,6 +1401,16 @@ HeaderSearch::findModuleForHeader(const FileEntry *File,
   return ModMap.findModuleForHeader(File, AllowTextual);
 }
 
+ArrayRef<ModuleMap::KnownHeader>
+HeaderSearch::findAllModulesForHeader(const FileEntry *File) const {
+  if (ExternalSource) {
+    // Make sure the external source has handled header info about this file,
+    // which includes whether the file is part of a module.
+    (void)getExistingFileInfo(File);
+  }
+  return ModMap.findAllModulesForHeader(File);
+}
+
 static bool suggestModule(HeaderSearch &HS, const FileEntry *File,
                           Module *RequestingModule,
                           ModuleMap::KnownHeader *SuggestedModule) {
@@ -1568,6 +1580,16 @@ HeaderSearch::lookupModuleMapFile(const DirectoryEntry *Dir, bool IsFramework) {
   llvm::sys::path::append(ModuleMapFileName, "module.map");
   if (auto F = FileMgr.getFile(ModuleMapFileName))
     return *F;
+
+  // For frameworks, allow to have a private module map with a preferred
+  // spelling when a public module map is absent.
+  if (IsFramework) {
+    ModuleMapFileName = Dir->getName();
+    llvm::sys::path::append(ModuleMapFileName, "Modules",
+                            "module.private.modulemap");
+    if (auto F = FileMgr.getFile(ModuleMapFileName))
+      return *F;
+  }
   return nullptr;
 }
 

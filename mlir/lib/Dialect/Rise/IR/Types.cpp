@@ -21,7 +21,6 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/StandardTypes.h"
-#include "mlir/Support/STLExtras.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -102,26 +101,26 @@ ArrayType ArrayType::get(mlir::MLIRContext *context, Nat size,
   return Base::get(context, RiseTypeKind::RISE_ARRAY, size, elementType);
 }
 
-mlir::LogicalResult
-ArrayType::verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
-                                        mlir::MLIRContext *context, Nat size,
-                                        Type elementType) {
-  /// For some reason this method is called without a valid location in
-  /// StorageUniquerSupport Hence we can not provide proper location information
-  /// on error
-
-  if (!(size.getIntValue() > 0)) {
-    if (loc) {
-      emitError(loc.getValue(), "ArrayType must have a size of at least 1");
-    } else {
-      emitError(UnknownLoc::get(context),
-                "ArrayType must have a size of at least 1");
-    }
-    return mlir::failure();
-  }
-
-  return mlir::success();
-}
+//mlir::LogicalResult
+//ArrayType::verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
+//                                        mlir::MLIRContext *context, Nat size,
+//                                        Type elementType) {
+//  /// For some reason this method is called without a valid location in
+//  /// StorageUniquerSupport Hence we can not provide proper location information
+//  /// on error
+//
+//  if (!(size.getIntValue() > 0)) {
+//    if (loc) {
+//      emitError(loc.getValue(), "ArrayType must have a size of at least 1");
+//    } else {
+//      emitError(UnknownLoc::get(context),
+//                "ArrayType must have a size of at least 1");
+//    }
+//    return mlir::failure();
+//  }
+//
+//  return mlir::success();
+//}
 
 } // end namespace rise
 } // end namespace mlir

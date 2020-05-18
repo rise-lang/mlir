@@ -10,9 +10,9 @@
 #include "CodeCompletionStrings.h"
 #include "FindSymbols.h"
 #include "FindTarget.h"
-#include "Logger.h"
 #include "ParsedAST.h"
 #include "Protocol.h"
+#include "Quality.h"
 #include "Selection.h"
 #include "SourceCode.h"
 #include "URI.h"
@@ -20,7 +20,9 @@
 #include "index/Merge.h"
 #include "index/Relation.h"
 #include "index/SymbolLocation.h"
+#include "support/Logger.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTTypeTraits.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Attrs.inc"
 #include "clang/AST/Decl.h"
@@ -28,20 +30,27 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/Type.h"
+#include "clang/Basic/CharInfo.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Index/IndexDataConsumer.h"
 #include "clang/Index/IndexSymbol.h"
 #include "clang/Index/IndexingAction.h"
 #include "clang/Index/IndexingOptions.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Tooling/Syntax/Tokens.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -131,160 +140,130 @@ SymbolLocation getPreferredLocation(const Location &ASTLoc,
   return Merged.CanonicalDeclaration;
 }
 
-std::vector<const NamedDecl *> getDeclAtPosition(ParsedAST &AST,
-                                                 SourceLocation Pos,
-                                                 DeclRelationSet Relations) {
-  FileID FID;
-  unsigned Offset;
-  std::tie(FID, Offset) = AST.getSourceManager().getDecomposedSpellingLoc(Pos);
-  SelectionTree Selection(AST.getASTContext(), AST.getTokens(), Offset);
+std::vector<const NamedDecl *>
+getDeclAtPosition(ParsedAST &AST, SourceLocation Pos, DeclRelationSet Relations,
+                  ASTNodeKind *NodeKind = nullptr) {
+  unsigned Offset = AST.getSourceManager().getDecomposedSpellingLoc(Pos).second;
   std::vector<const NamedDecl *> Result;
-  if (const SelectionTree::Node *N = Selection.commonAncestor()) {
-    auto Decls = targetDecl(N->ASTNode, Relations);
-    Result.assign(Decls.begin(), Decls.end());
-  }
+  SelectionTree::createEach(AST.getASTContext(), AST.getTokens(), Offset,
+                            Offset, [&](SelectionTree ST) {
+                              if (const SelectionTree::Node *N =
+                                      ST.commonAncestor()) {
+                                if (NodeKind)
+                                  *NodeKind = N->ASTNode.getNodeKind();
+                                llvm::copy(targetDecl(N->ASTNode, Relations),
+                                           std::back_inserter(Result));
+                              }
+                              return !Result.empty();
+                            });
   return Result;
 }
 
-llvm::Optional<Location> makeLocation(ASTContext &AST, SourceLocation TokLoc,
+// Expects Loc to be a SpellingLocation, will bail out otherwise as it can't
+// figure out a filename.
+llvm::Optional<Location> makeLocation(const ASTContext &AST, SourceLocation Loc,
                                       llvm::StringRef TUPath) {
-  const SourceManager &SourceMgr = AST.getSourceManager();
-  const FileEntry *F = SourceMgr.getFileEntryForID(SourceMgr.getFileID(TokLoc));
+  const auto &SM = AST.getSourceManager();
+  const FileEntry *F = SM.getFileEntryForID(SM.getFileID(Loc));
   if (!F)
     return None;
-  auto FilePath = getCanonicalPath(F, SourceMgr);
+  auto FilePath = getCanonicalPath(F, SM);
   if (!FilePath) {
     log("failed to get path!");
     return None;
   }
-  if (auto Range =
-          getTokenRange(AST.getSourceManager(), AST.getLangOpts(), TokLoc)) {
-    Location L;
-    L.uri = URIForFile::canonicalize(*FilePath, TUPath);
-    L.range = *Range;
-    return L;
-  }
-  return None;
+  Location L;
+  L.uri = URIForFile::canonicalize(*FilePath, TUPath);
+  // We call MeasureTokenLength here as TokenBuffer doesn't store spelled tokens
+  // outside the main file.
+  auto TokLen = Lexer::MeasureTokenLength(Loc, SM, AST.getLangOpts());
+  L.range = halfOpenToRange(
+      SM, CharSourceRange::getCharRange(Loc, Loc.getLocWithOffset(TokLen)));
+  return L;
 }
 
-} // namespace
-
-std::vector<DocumentLink> getDocumentLinks(ParsedAST &AST) {
-  const auto &SM = AST.getSourceManager();
-  auto MainFilePath =
-      getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
-  if (!MainFilePath) {
-    elog("Failed to get a path for the main file, so no links");
-    return {};
-  }
-
-  std::vector<DocumentLink> Result;
+// Treat #included files as symbols, to enable go-to-definition on them.
+llvm::Optional<LocatedSymbol> locateFileReferent(const Position &Pos,
+                                                 ParsedAST &AST,
+                                                 llvm::StringRef MainFilePath) {
   for (auto &Inc : AST.getIncludeStructure().MainFileIncludes) {
-    if (!Inc.Resolved.empty()) {
-      Result.push_back(DocumentLink(
-          {Inc.R, URIForFile::canonicalize(Inc.Resolved, *MainFilePath)}));
-    }
-  }
-
-  return Result;
-}
-
-std::vector<LocatedSymbol> locateSymbolAt(ParsedAST &AST, Position Pos,
-                                          const SymbolIndex *Index) {
-  const auto &SM = AST.getSourceManager();
-  auto MainFilePath =
-      getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
-  if (!MainFilePath) {
-    elog("Failed to get a path for the main file, so no references");
-    return {};
-  }
-
-  // Treat #included files as symbols, to enable go-to-definition on them.
-  for (auto &Inc : AST.getIncludeStructure().MainFileIncludes) {
-    if (!Inc.Resolved.empty() && Inc.R.start.line == Pos.line) {
+    if (!Inc.Resolved.empty() && Inc.HashLine == Pos.line) {
       LocatedSymbol File;
       File.Name = std::string(llvm::sys::path::filename(Inc.Resolved));
       File.PreferredDeclaration = {
-          URIForFile::canonicalize(Inc.Resolved, *MainFilePath), Range{}};
+          URIForFile::canonicalize(Inc.Resolved, MainFilePath), Range{}};
       File.Definition = File.PreferredDeclaration;
       // We're not going to find any further symbols on #include lines.
-      return {std::move(File)};
+      return File;
     }
   }
+  return llvm::None;
+}
 
-  // Macros are simple: there's no declaration/definition distinction.
-  // As a consequence, there's no need to look them up in the index either.
-  SourceLocation IdentStartLoc = SM.getMacroArgExpandedLocation(
-      getBeginningOfIdentifier(Pos, AST.getSourceManager(), AST.getLangOpts()));
-  std::vector<LocatedSymbol> Result;
-  if (auto M = locateMacroAt(IdentStartLoc, AST.getPreprocessor())) {
+// Macros are simple: there's no declaration/definition distinction.
+// As a consequence, there's no need to look them up in the index either.
+llvm::Optional<LocatedSymbol>
+locateMacroReferent(const syntax::Token &TouchedIdentifier, ParsedAST &AST,
+                    llvm::StringRef MainFilePath) {
+  if (auto M = locateMacroAt(TouchedIdentifier, AST.getPreprocessor())) {
     if (auto Loc = makeLocation(AST.getASTContext(),
-                                M->Info->getDefinitionLoc(), *MainFilePath)) {
+                                M->Info->getDefinitionLoc(), MainFilePath)) {
       LocatedSymbol Macro;
       Macro.Name = std::string(M->Name);
       Macro.PreferredDeclaration = *Loc;
       Macro.Definition = Loc;
-      Result.push_back(std::move(Macro));
-
-      // Don't look at the AST or index if we have a macro result.
-      // (We'd just return declarations referenced from the macro's
-      // expansion.)
-      return Result;
+      return Macro;
     }
   }
+  return llvm::None;
+}
 
-  // Decls are more complicated.
-  // The AST contains at least a declaration, maybe a definition.
-  // These are up-to-date, and so generally preferred over index results.
-  // We perform a single batch index lookup to find additional definitions.
-
+// Decls are more complicated.
+// The AST contains at least a declaration, maybe a definition.
+// These are up-to-date, and so generally preferred over index results.
+// We perform a single batch index lookup to find additional definitions.
+std::vector<LocatedSymbol>
+locateASTReferent(SourceLocation CurLoc, const syntax::Token *TouchedIdentifier,
+                  ParsedAST &AST, llvm::StringRef MainFilePath,
+                  const SymbolIndex *Index, ASTNodeKind *NodeKind) {
+  const SourceManager &SM = AST.getSourceManager();
   // Results follow the order of Symbols.Decls.
+  std::vector<LocatedSymbol> Result;
   // Keep track of SymbolID -> index mapping, to fill in index data later.
   llvm::DenseMap<SymbolID, size_t> ResultIndex;
 
-  SourceLocation SourceLoc;
-  if (auto L = sourceLocationInMainFile(SM, Pos)) {
-    SourceLoc = *L;
-  } else {
-    elog("locateSymbolAt failed to convert position to source location: {0}",
-         L.takeError());
-    return Result;
-  }
-
   auto AddResultDecl = [&](const NamedDecl *D) {
-    const NamedDecl *Def = getDefinition(D);
-    const NamedDecl *Preferred = Def ? Def : D;
-
-    auto Loc = makeLocation(AST.getASTContext(), nameLocation(*Preferred, SM),
-                            *MainFilePath);
+    D = llvm::cast<NamedDecl>(D->getCanonicalDecl());
+    auto Loc =
+        makeLocation(AST.getASTContext(), nameLocation(*D, SM), MainFilePath);
     if (!Loc)
       return;
 
     Result.emplace_back();
-    Result.back().Name = printName(AST.getASTContext(), *Preferred);
+    Result.back().Name = printName(AST.getASTContext(), *D);
     Result.back().PreferredDeclaration = *Loc;
-    // Preferred is always a definition if possible, so this check works.
-    if (Def == Preferred)
-      Result.back().Definition = *Loc;
+    if (const NamedDecl *Def = getDefinition(D))
+      Result.back().Definition = makeLocation(
+          AST.getASTContext(), nameLocation(*Def, SM), MainFilePath);
 
     // Record SymbolID for index lookup later.
-    if (auto ID = getSymbolID(Preferred))
+    if (auto ID = getSymbolID(D))
       ResultIndex[*ID] = Result.size() - 1;
   };
 
   // Emit all symbol locations (declaration or definition) from AST.
   DeclRelationSet Relations =
       DeclRelation::TemplatePattern | DeclRelation::Alias;
-  for (const NamedDecl *D : getDeclAtPosition(AST, SourceLoc, Relations)) {
+  for (const NamedDecl *D :
+       getDeclAtPosition(AST, CurLoc, Relations, NodeKind)) {
     // Special case: void foo() ^override: jump to the overridden method.
     if (const auto *CMD = llvm::dyn_cast<CXXMethodDecl>(D)) {
-      const InheritableAttr* Attr = D->getAttr<OverrideAttr>();
+      const InheritableAttr *Attr = D->getAttr<OverrideAttr>();
       if (!Attr)
         Attr = D->getAttr<FinalAttr>();
-      const syntax::Token *Tok =
-          spelledIdentifierTouching(SourceLoc, AST.getTokens());
-      if (Attr && Tok &&
-          SM.getSpellingLoc(Attr->getLocation()) == Tok->location()) {
+      if (Attr && TouchedIdentifier &&
+          SM.getSpellingLoc(Attr->getLocation()) ==
+              TouchedIdentifier->location()) {
         // We may be overridding multiple methods - offer them all.
         for (const NamedDecl *ND : CMD->overridden_methods())
           AddResultDecl(ND);
@@ -294,8 +273,9 @@ std::vector<LocatedSymbol> locateSymbolAt(ParsedAST &AST, Position Pos,
 
     // Special case: the point of declaration of a template specialization,
     // it's more useful to navigate to the template declaration.
-    if (SM.getMacroArgExpandedLocation(D->getLocation()) == IdentStartLoc) {
-      if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
+    if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
+      if (TouchedIdentifier &&
+          D->getLocation() == TouchedIdentifier->location()) {
         AddResultDecl(CTSD->getSpecializedTemplate());
         continue;
       }
@@ -317,26 +297,325 @@ std::vector<LocatedSymbol> locateSymbolAt(ParsedAST &AST, Position Pos,
       if (R.Definition) { // from AST
         // Special case: if the AST yielded a definition, then it may not be
         // the right *declaration*. Prefer the one from the index.
-        if (auto Loc = toLSPLocation(Sym.CanonicalDeclaration, *MainFilePath))
+        if (auto Loc = toLSPLocation(Sym.CanonicalDeclaration, MainFilePath))
           R.PreferredDeclaration = *Loc;
 
         // We might still prefer the definition from the index, e.g. for
         // generated symbols.
         if (auto Loc = toLSPLocation(
                 getPreferredLocation(*R.Definition, Sym.Definition, Scratch),
-                *MainFilePath))
+                MainFilePath))
           R.Definition = *Loc;
       } else {
-        R.Definition = toLSPLocation(Sym.Definition, *MainFilePath);
+        R.Definition = toLSPLocation(Sym.Definition, MainFilePath);
 
         // Use merge logic to choose AST or index declaration.
         if (auto Loc = toLSPLocation(
                 getPreferredLocation(R.PreferredDeclaration,
                                      Sym.CanonicalDeclaration, Scratch),
-                *MainFilePath))
+                MainFilePath))
           R.PreferredDeclaration = *Loc;
       }
     });
+  }
+
+  return Result;
+}
+
+bool tokenSpelledAt(SourceLocation SpellingLoc, const syntax::TokenBuffer &TB) {
+  auto ExpandedTokens = TB.expandedTokens(
+      TB.sourceManager().getMacroArgExpandedLocation(SpellingLoc));
+  return !ExpandedTokens.empty();
+}
+
+llvm::StringRef sourcePrefix(SourceLocation Loc, const SourceManager &SM) {
+  auto D = SM.getDecomposedLoc(Loc);
+  bool Invalid = false;
+  llvm::StringRef Buf = SM.getBufferData(D.first, &Invalid);
+  if (Invalid || D.second > Buf.size())
+    return "";
+  return Buf.substr(0, D.second);
+}
+
+bool isDependentName(ASTNodeKind NodeKind) {
+  return NodeKind.isSame(ASTNodeKind::getFromNodeKind<OverloadExpr>()) ||
+         NodeKind.isSame(
+             ASTNodeKind::getFromNodeKind<CXXDependentScopeMemberExpr>()) ||
+         NodeKind.isSame(
+             ASTNodeKind::getFromNodeKind<DependentScopeDeclRefExpr>());
+}
+
+} // namespace
+
+std::vector<LocatedSymbol>
+locateSymbolTextually(const SpelledWord &Word, ParsedAST &AST,
+                      const SymbolIndex *Index, const std::string &MainFilePath,
+                      ASTNodeKind NodeKind) {
+  // Don't use heuristics if this is a real identifier, or not an
+  // identifier.
+  // Exception: dependent names, because those may have useful textual
+  // matches that AST-based heuristics cannot find.
+  if ((Word.ExpandedToken && !isDependentName(NodeKind)) ||
+      !Word.LikelyIdentifier || !Index)
+    return {};
+  // We don't want to handle words in string literals. It'd be nice to whitelist
+  // comments instead, but they're not retained in TokenBuffer.
+  if (Word.PartOfSpelledToken &&
+      isStringLiteral(Word.PartOfSpelledToken->kind()))
+    return {};
+
+  const auto &SM = AST.getSourceManager();
+  // Look up the selected word in the index.
+  FuzzyFindRequest Req;
+  Req.Query = Word.Text.str();
+  Req.ProximityPaths = {MainFilePath};
+  // Find the namespaces to query by lexing the file.
+  Req.Scopes =
+      visibleNamespaces(sourcePrefix(Word.Location, SM), AST.getLangOpts());
+  // FIXME: For extra strictness, consider AnyScope=false.
+  Req.AnyScope = true;
+  // We limit the results to 3 further below. This limit is to avoid fetching
+  // too much data, while still likely having enough for 3 results to remain
+  // after additional filtering.
+  Req.Limit = 10;
+  bool TooMany = false;
+  using ScoredLocatedSymbol = std::pair<float, LocatedSymbol>;
+  std::vector<ScoredLocatedSymbol> ScoredResults;
+  Index->fuzzyFind(Req, [&](const Symbol &Sym) {
+    // Only consider exact name matches, including case.
+    // This is to avoid too many false positives.
+    // We could relax this in the future (e.g. to allow for typos) if we make
+    // the query more accurate by other means.
+    if (Sym.Name != Word.Text)
+      return;
+
+    // Exclude constructor results. They have the same name as the class,
+    // but we don't have enough context to prefer them over the class.
+    if (Sym.SymInfo.Kind == index::SymbolKind::Constructor)
+      return;
+
+    auto MaybeDeclLoc =
+        indexToLSPLocation(Sym.CanonicalDeclaration, MainFilePath);
+    if (!MaybeDeclLoc) {
+      log("locateSymbolNamedTextuallyAt: {0}", MaybeDeclLoc.takeError());
+      return;
+    }
+    Location DeclLoc = *MaybeDeclLoc;
+    Location DefLoc;
+    if (Sym.Definition) {
+      auto MaybeDefLoc = indexToLSPLocation(Sym.Definition, MainFilePath);
+      if (!MaybeDefLoc) {
+        log("locateSymbolNamedTextuallyAt: {0}", MaybeDefLoc.takeError());
+        return;
+      }
+      DefLoc = *MaybeDefLoc;
+    }
+
+    if (ScoredResults.size() >= 3) {
+      // If we have more than 3 results, don't return anything,
+      // as confidence is too low.
+      // FIXME: Alternatively, try a stricter query?
+      TooMany = true;
+      return;
+    }
+
+    LocatedSymbol Located;
+    Located.Name = (Sym.Name + Sym.TemplateSpecializationArgs).str();
+    Located.PreferredDeclaration = bool(Sym.Definition) ? DefLoc : DeclLoc;
+    Located.Definition = DefLoc;
+
+    SymbolQualitySignals Quality;
+    Quality.merge(Sym);
+    SymbolRelevanceSignals Relevance;
+    Relevance.Name = Sym.Name;
+    Relevance.Query = SymbolRelevanceSignals::Generic;
+    Relevance.merge(Sym);
+    auto Score =
+        evaluateSymbolAndRelevance(Quality.evaluate(), Relevance.evaluate());
+    dlog("locateSymbolNamedTextuallyAt: {0}{1} = {2}\n{3}{4}\n", Sym.Scope,
+         Sym.Name, Score, Quality, Relevance);
+
+    ScoredResults.push_back({Score, std::move(Located)});
+  });
+
+  if (TooMany)
+    return {};
+
+  llvm::sort(ScoredResults,
+             [](const ScoredLocatedSymbol &A, const ScoredLocatedSymbol &B) {
+               return A.first > B.first;
+             });
+  std::vector<LocatedSymbol> Results;
+  for (auto &Res : std::move(ScoredResults))
+    Results.push_back(std::move(Res.second));
+  return Results;
+}
+
+const syntax::Token *findNearbyIdentifier(const SpelledWord &Word,
+                                          const syntax::TokenBuffer &TB) {
+  // Don't use heuristics if this is a real identifier.
+  // Unlikely identifiers are OK if they were used as identifiers nearby.
+  if (Word.ExpandedToken)
+    return nullptr;
+  // We don't want to handle words in string literals. It'd be nice to whitelist
+  // comments instead, but they're not retained in TokenBuffer.
+  if (Word.PartOfSpelledToken &&
+      isStringLiteral(Word.PartOfSpelledToken->kind()))
+    return {};
+
+  const SourceManager &SM = TB.sourceManager();
+  // We prefer the closest possible token, line-wise. Backwards is penalized.
+  // Ties are implicitly broken by traversal order (first-one-wins).
+  auto File = SM.getFileID(Word.Location);
+  unsigned WordLine = SM.getSpellingLineNumber(Word.Location);
+  auto Cost = [&](SourceLocation Loc) -> unsigned {
+    assert(SM.getFileID(Loc) == File && "spelled token in wrong file?");
+    unsigned Line = SM.getSpellingLineNumber(Loc);
+    if (Line > WordLine)
+      return 1 + llvm::Log2_64(Line - WordLine);
+    if (Line < WordLine)
+      return 2 + llvm::Log2_64(WordLine - Line);
+    return 0;
+  };
+  const syntax::Token *BestTok = nullptr;
+  // Search bounds are based on word length: 2^N lines forward.
+  unsigned BestCost = Word.Text.size() + 1;
+
+  // Updates BestTok and BestCost if Tok is a good candidate.
+  // May return true if the cost is too high for this token.
+  auto Consider = [&](const syntax::Token &Tok) {
+    if (!(Tok.kind() == tok::identifier && Tok.text(SM) == Word.Text))
+      return false;
+    // No point guessing the same location we started with.
+    if (Tok.location() == Word.Location)
+      return false;
+    // We've done cheap checks, compute cost so we can break the caller's loop.
+    unsigned TokCost = Cost(Tok.location());
+    if (TokCost >= BestCost)
+      return true; // causes the outer loop to break.
+    // Allow locations that might be part of the AST, and macros (even if empty)
+    // but not things like disabled preprocessor sections.
+    if (!(tokenSpelledAt(Tok.location(), TB) || TB.expansionStartingAt(&Tok)))
+      return false;
+    // We already verified this token is an improvement.
+    BestCost = TokCost;
+    BestTok = &Tok;
+    return false;
+  };
+  auto SpelledTokens = TB.spelledTokens(File);
+  // Find where the word occurred in the token stream, to search forward & back.
+  auto *I = llvm::partition_point(SpelledTokens, [&](const syntax::Token &T) {
+    assert(SM.getFileID(T.location()) == SM.getFileID(Word.Location));
+    return T.location() >= Word.Location; // Comparison OK: same file.
+  });
+  // Search for matches after the cursor.
+  for (const syntax::Token &Tok : llvm::makeArrayRef(I, SpelledTokens.end()))
+    if (Consider(Tok))
+      break; // costs of later tokens are greater...
+  // Search for matches before the cursor.
+  for (const syntax::Token &Tok :
+       llvm::reverse(llvm::makeArrayRef(SpelledTokens.begin(), I)))
+    if (Consider(Tok))
+      break;
+
+  if (BestTok)
+    vlog(
+        "Word {0} under cursor {1} isn't a token (after PP), trying nearby {2}",
+        Word.Text, Word.Location.printToString(SM),
+        BestTok->location().printToString(SM));
+
+  return BestTok;
+}
+
+std::vector<LocatedSymbol> locateSymbolAt(ParsedAST &AST, Position Pos,
+                                          const SymbolIndex *Index) {
+  const auto &SM = AST.getSourceManager();
+  auto MainFilePath =
+      getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
+  if (!MainFilePath) {
+    elog("Failed to get a path for the main file, so no references");
+    return {};
+  }
+
+  if (auto File = locateFileReferent(Pos, AST, *MainFilePath))
+    return {std::move(*File)};
+
+  auto CurLoc = sourceLocationInMainFile(SM, Pos);
+  if (!CurLoc) {
+    elog("locateSymbolAt failed to convert position to source location: {0}",
+         CurLoc.takeError());
+    return {};
+  }
+
+  const syntax::Token *TouchedIdentifier =
+      syntax::spelledIdentifierTouching(*CurLoc, AST.getTokens());
+  if (TouchedIdentifier)
+    if (auto Macro =
+            locateMacroReferent(*TouchedIdentifier, AST, *MainFilePath))
+      // Don't look at the AST or index if we have a macro result.
+      // (We'd just return declarations referenced from the macro's
+      // expansion.)
+      return {*std::move(Macro)};
+
+  ASTNodeKind NodeKind;
+  auto ASTResults = locateASTReferent(*CurLoc, TouchedIdentifier, AST,
+                                      *MainFilePath, Index, &NodeKind);
+  if (!ASTResults.empty())
+    return ASTResults;
+
+  // If the cursor can't be resolved directly, try fallback strategies.
+  auto Word =
+      SpelledWord::touching(*CurLoc, AST.getTokens(), AST.getLangOpts());
+  if (Word) {
+    // Is the same word nearby a real identifier that might refer to something?
+    if (const syntax::Token *NearbyIdent =
+            findNearbyIdentifier(*Word, AST.getTokens())) {
+      if (auto Macro = locateMacroReferent(*NearbyIdent, AST, *MainFilePath))
+        return {*std::move(Macro)};
+      ASTResults =
+          locateASTReferent(NearbyIdent->location(), NearbyIdent, AST,
+                            *MainFilePath, Index, /*NodeKind=*/nullptr);
+      if (!ASTResults.empty())
+        return ASTResults;
+    }
+    // No nearby word, or it didn't refer to anything either. Try the index.
+    auto TextualResults =
+        locateSymbolTextually(*Word, AST, Index, *MainFilePath, NodeKind);
+    if (!TextualResults.empty())
+      return TextualResults;
+  }
+
+  return {};
+}
+
+std::vector<DocumentLink> getDocumentLinks(ParsedAST &AST) {
+  const auto &SM = AST.getSourceManager();
+  auto MainFilePath =
+      getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
+  if (!MainFilePath) {
+    elog("Failed to get a path for the main file, so no links");
+    return {};
+  }
+
+  std::vector<DocumentLink> Result;
+  for (auto &Inc : AST.getIncludeStructure().MainFileIncludes) {
+    if (Inc.Resolved.empty())
+      continue;
+    auto HashLoc = SM.getComposedLoc(SM.getMainFileID(), Inc.HashOffset);
+    const auto *HashTok = AST.getTokens().spelledTokenAt(HashLoc);
+    assert(HashTok && "got inclusion at wrong offset");
+    const auto *IncludeTok = std::next(HashTok);
+    const auto *FileTok = std::next(IncludeTok);
+    // FileTok->range is not sufficient here, as raw lexing wouldn't yield
+    // correct tokens for angled filenames. Hence we explicitly use
+    // Inc.Written's length.
+    auto FileRange =
+        syntax::FileRange(SM, FileTok->location(), Inc.Written.length())
+            .toCharRange(SM);
+
+    Result.push_back(
+        DocumentLink({halfOpenToRange(SM, FileRange),
+                      URIForFile::canonicalize(Inc.Resolved, *MainFilePath)}));
   }
 
   return Result;
@@ -348,11 +627,15 @@ namespace {
 class ReferenceFinder : public index::IndexDataConsumer {
 public:
   struct Reference {
-    SourceLocation Loc;
+    syntax::Token SpelledTok;
     index::SymbolRoleSet Role;
+
+    Range range(const SourceManager &SM) const {
+      return halfOpenToRange(SM, SpelledTok.range(SM).toCharRange(SM));
+    }
   };
 
-  ReferenceFinder(ASTContext &AST, Preprocessor &PP,
+  ReferenceFinder(const ParsedAST &AST,
                   const std::vector<const NamedDecl *> &TargetDecls)
       : AST(AST) {
     for (const NamedDecl *D : TargetDecls)
@@ -361,13 +644,17 @@ public:
 
   std::vector<Reference> take() && {
     llvm::sort(References, [](const Reference &L, const Reference &R) {
-      return std::tie(L.Loc, L.Role) < std::tie(R.Loc, R.Role);
+      auto LTok = L.SpelledTok.location();
+      auto RTok = R.SpelledTok.location();
+      return std::tie(LTok, L.Role) < std::tie(RTok, R.Role);
     });
     // We sometimes see duplicates when parts of the AST get traversed twice.
     References.erase(std::unique(References.begin(), References.end(),
                                  [](const Reference &L, const Reference &R) {
-                                   return std::tie(L.Loc, L.Role) ==
-                                          std::tie(R.Loc, R.Role);
+                                   auto LTok = L.SpelledTok.location();
+                                   auto RTok = R.SpelledTok.location();
+                                   return std::tie(LTok, L.Role) ==
+                                          std::tie(RTok, R.Role);
                                  }),
                      References.end());
     return std::move(References);
@@ -380,21 +667,24 @@ public:
                        index::IndexDataConsumer::ASTNodeInfo ASTNode) override {
     assert(D->isCanonicalDecl() && "expect D to be a canonical declaration");
     const SourceManager &SM = AST.getSourceManager();
+    if (!CanonicalTargets.count(D) || !isInsideMainFile(Loc, SM))
+      return true;
+    const auto &TB = AST.getTokens();
     Loc = SM.getFileLoc(Loc);
-    if (isInsideMainFile(Loc, SM) && CanonicalTargets.count(D))
-      References.push_back({Loc, Roles});
+    if (const auto *Tok = TB.spelledTokenAt(Loc))
+      References.push_back({*Tok, Roles});
     return true;
   }
 
 private:
   llvm::SmallSet<const Decl *, 4> CanonicalTargets;
   std::vector<Reference> References;
-  const ASTContext &AST;
+  const ParsedAST &AST;
 };
 
 std::vector<ReferenceFinder::Reference>
 findRefs(const std::vector<const NamedDecl *> &Decls, ParsedAST &AST) {
-  ReferenceFinder RefFinder(AST.getASTContext(), AST.getPreprocessor(), Decls);
+  ReferenceFinder RefFinder(AST, Decls);
   index::IndexingOptions IndexOpts;
   IndexOpts.SystemSymbolFilter =
       index::IndexingOptions::SystemSymbolFilterKind::All;
@@ -414,29 +704,26 @@ std::vector<DocumentHighlight> findDocumentHighlights(ParsedAST &AST,
   // FIXME: show references to macro within file?
   DeclRelationSet Relations =
       DeclRelation::TemplatePattern | DeclRelation::Alias;
-  auto References = findRefs(
-      getDeclAtPosition(AST,
-                        SM.getMacroArgExpandedLocation(getBeginningOfIdentifier(
-                            Pos, SM, AST.getLangOpts())),
-                        Relations),
-      AST);
+  auto CurLoc = sourceLocationInMainFile(SM, Pos);
+  if (!CurLoc) {
+    llvm::consumeError(CurLoc.takeError());
+    return {};
+  }
+  auto References = findRefs(getDeclAtPosition(AST, *CurLoc, Relations), AST);
 
   // FIXME: we may get multiple DocumentHighlights with the same location and
   // different kinds, deduplicate them.
   std::vector<DocumentHighlight> Result;
   for (const auto &Ref : References) {
-    if (auto Range =
-            getTokenRange(AST.getSourceManager(), AST.getLangOpts(), Ref.Loc)) {
-      DocumentHighlight DH;
-      DH.range = *Range;
-      if (Ref.Role & index::SymbolRoleSet(index::SymbolRole::Write))
-        DH.kind = DocumentHighlightKind::Write;
-      else if (Ref.Role & index::SymbolRoleSet(index::SymbolRole::Read))
-        DH.kind = DocumentHighlightKind::Read;
-      else
-        DH.kind = DocumentHighlightKind::Text;
-      Result.push_back(std::move(DH));
-    }
+    DocumentHighlight DH;
+    DH.range = Ref.range(SM);
+    if (Ref.Role & index::SymbolRoleSet(index::SymbolRole::Write))
+      DH.kind = DocumentHighlightKind::Write;
+    else if (Ref.Role & index::SymbolRoleSet(index::SymbolRole::Read))
+      DH.kind = DocumentHighlightKind::Read;
+    else
+      DH.kind = DocumentHighlightKind::Text;
+    Result.push_back(std::move(DH));
   }
   return Result;
 }
@@ -454,11 +741,19 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
     return Results;
   }
   auto URIMainFile = URIForFile::canonicalize(*MainFilePath, *MainFilePath);
-  auto Loc = SM.getMacroArgExpandedLocation(
-      getBeginningOfIdentifier(Pos, SM, AST.getLangOpts()));
-  RefsRequest Req;
+  auto CurLoc = sourceLocationInMainFile(SM, Pos);
+  if (!CurLoc) {
+    llvm::consumeError(CurLoc.takeError());
+    return {};
+  }
+  llvm::Optional<DefinedMacro> Macro;
+  if (const auto *IdentifierAtCursor =
+          syntax::spelledIdentifierTouching(*CurLoc, AST.getTokens())) {
+    Macro = locateMacroAt(*IdentifierAtCursor, AST.getPreprocessor());
+  }
 
-  if (auto Macro = locateMacroAt(Loc, AST.getPreprocessor())) {
+  RefsRequest Req;
+  if (Macro) {
     // Handle references to macro.
     if (auto MacroSID = getSymbolID(Macro->Name, Macro->Info, SM)) {
       // Collect macro references from main file.
@@ -481,7 +776,7 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
     // DeclRelation::Underlying.
     DeclRelationSet Relations = DeclRelation::TemplatePattern |
                                 DeclRelation::Alias | DeclRelation::Underlying;
-    auto Decls = getDeclAtPosition(AST, Loc, Relations);
+    auto Decls = getDeclAtPosition(AST, *CurLoc, Relations);
 
     // We traverse the AST to find references in the main file.
     auto MainFileRefs = findRefs(Decls, AST);
@@ -491,16 +786,15 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
     MainFileRefs.erase(std::unique(MainFileRefs.begin(), MainFileRefs.end(),
                                    [](const ReferenceFinder::Reference &L,
                                       const ReferenceFinder::Reference &R) {
-                                     return L.Loc == R.Loc;
+                                     return L.SpelledTok.location() ==
+                                            R.SpelledTok.location();
                                    }),
                        MainFileRefs.end());
     for (const auto &Ref : MainFileRefs) {
-      if (auto Range = getTokenRange(SM, AST.getLangOpts(), Ref.Loc)) {
-        Location Result;
-        Result.range = *Range;
-        Result.uri = URIMainFile;
-        Results.References.push_back(std::move(Result));
-      }
+      Location Result;
+      Result.range = Ref.range(SM);
+      Result.uri = URIMainFile;
+      Results.References.push_back(std::move(Result));
     }
     if (Index && Results.References.size() <= Limit) {
       for (const Decl *D : Decls) {
@@ -539,8 +833,11 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
 
 std::vector<SymbolDetails> getSymbolInfo(ParsedAST &AST, Position Pos) {
   const SourceManager &SM = AST.getSourceManager();
-  auto Loc = SM.getMacroArgExpandedLocation(
-      getBeginningOfIdentifier(Pos, SM, AST.getLangOpts()));
+  auto CurLoc = sourceLocationInMainFile(SM, Pos);
+  if (!CurLoc) {
+    llvm::consumeError(CurLoc.takeError());
+    return {};
+  }
 
   std::vector<SymbolDetails> Results;
 
@@ -548,7 +845,7 @@ std::vector<SymbolDetails> getSymbolInfo(ParsedAST &AST, Position Pos) {
   // DeclRelation::Underlying.
   DeclRelationSet Relations = DeclRelation::TemplatePattern |
                               DeclRelation::Alias | DeclRelation::Underlying;
-  for (const NamedDecl *D : getDeclAtPosition(AST, Loc, Relations)) {
+  for (const NamedDecl *D : getDeclAtPosition(AST, *CurLoc, Relations)) {
     SymbolDetails NewSymbol;
     std::string QName = printQualifiedName(*D);
     auto SplitQName = splitQualifiedName(QName);
@@ -568,7 +865,12 @@ std::vector<SymbolDetails> getSymbolInfo(ParsedAST &AST, Position Pos) {
     Results.push_back(std::move(NewSymbol));
   }
 
-  if (auto M = locateMacroAt(Loc, AST.getPreprocessor())) {
+  const auto *IdentifierAtCursor =
+      syntax::spelledIdentifierTouching(*CurLoc, AST.getTokens());
+  if (!IdentifierAtCursor)
+    return Results;
+
+  if (auto M = locateMacroAt(*IdentifierAtCursor, AST.getPreprocessor())) {
     SymbolDetails NewMacro;
     NewMacro.name = std::string(M->Name);
     llvm::SmallString<32> USR;
@@ -592,22 +894,23 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const LocatedSymbol &S) {
 
 // FIXME(nridge): Reduce duplication between this function and declToSym().
 static llvm::Optional<TypeHierarchyItem>
-declToTypeHierarchyItem(ASTContext &Ctx, const NamedDecl &ND) {
+declToTypeHierarchyItem(ASTContext &Ctx, const NamedDecl &ND,
+                        const syntax::TokenBuffer &TB) {
   auto &SM = Ctx.getSourceManager();
-
   SourceLocation NameLoc = nameLocation(ND, Ctx.getSourceManager());
-  // getFileLoc is a good choice for us, but we also need to make sure
-  // sourceLocToPosition won't switch files, so we call getSpellingLoc on top of
-  // that to make sure it does not switch files.
-  // FIXME: sourceLocToPosition should not switch files!
-  SourceLocation BeginLoc = SM.getSpellingLoc(SM.getFileLoc(ND.getBeginLoc()));
-  SourceLocation EndLoc = SM.getSpellingLoc(SM.getFileLoc(ND.getEndLoc()));
-  if (NameLoc.isInvalid() || BeginLoc.isInvalid() || EndLoc.isInvalid())
+  auto FilePath =
+      getCanonicalPath(SM.getFileEntryForID(SM.getFileID(NameLoc)), SM);
+  auto TUPath = getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
+  if (!FilePath || !TUPath)
+    return llvm::None; // Not useful without a uri.
+
+  auto DeclToks = TB.spelledForExpanded(TB.expandedTokens(ND.getSourceRange()));
+  if (!DeclToks || DeclToks->empty())
     return llvm::None;
 
-  Position NameBegin = sourceLocToPosition(SM, NameLoc);
-  Position NameEnd = sourceLocToPosition(
-      SM, Lexer::getLocForEndOfToken(NameLoc, 0, SM, Ctx.getLangOpts()));
+  auto NameToks = TB.spelledForExpanded(TB.expandedTokens(NameLoc));
+  if (!NameToks || NameToks->empty())
+    return llvm::None;
 
   index::SymbolInfo SymInfo = index::getSymbolInfo(&ND);
   // FIXME: this is not classifying constructors, destructors and operators
@@ -618,20 +921,18 @@ declToTypeHierarchyItem(ASTContext &Ctx, const NamedDecl &ND) {
   THI.name = printName(Ctx, ND);
   THI.kind = SK;
   THI.deprecated = ND.isDeprecated();
-  THI.range =
-      Range{sourceLocToPosition(SM, BeginLoc), sourceLocToPosition(SM, EndLoc)};
-  THI.selectionRange = Range{NameBegin, NameEnd};
+  THI.range = halfOpenToRange(
+      SM, syntax::Token::range(SM, DeclToks->front(), DeclToks->back())
+              .toCharRange(SM));
+  THI.selectionRange = halfOpenToRange(
+      SM, syntax::Token::range(SM, NameToks->front(), NameToks->back())
+              .toCharRange(SM));
   if (!THI.range.contains(THI.selectionRange)) {
     // 'selectionRange' must be contained in 'range', so in cases where clang
     // reports unrelated ranges we need to reconcile somehow.
     THI.range = THI.selectionRange;
   }
 
-  auto FilePath =
-      getCanonicalPath(SM.getFileEntryForID(SM.getFileID(BeginLoc)), SM);
-  auto TUPath = getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
-  if (!FilePath || !TUPath)
-    return llvm::None; // Not useful without a uri.
   THI.uri = URIForFile::canonicalize(*FilePath, *TUPath);
 
   return THI;
@@ -684,7 +985,8 @@ using RecursionProtectionSet = llvm::SmallSet<const CXXRecordDecl *, 4>;
 
 static void fillSuperTypes(const CXXRecordDecl &CXXRD, ASTContext &ASTCtx,
                            std::vector<TypeHierarchyItem> &SuperTypes,
-                           RecursionProtectionSet &RPSet) {
+                           RecursionProtectionSet &RPSet,
+                           const syntax::TokenBuffer &TB) {
   // typeParents() will replace dependent template specializations
   // with their class template, so to avoid infinite recursion for
   // certain types of hierarchies, keep the templates encountered
@@ -699,9 +1001,9 @@ static void fillSuperTypes(const CXXRecordDecl &CXXRD, ASTContext &ASTCtx,
 
   for (const CXXRecordDecl *ParentDecl : typeParents(&CXXRD)) {
     if (Optional<TypeHierarchyItem> ParentSym =
-            declToTypeHierarchyItem(ASTCtx, *ParentDecl)) {
+            declToTypeHierarchyItem(ASTCtx, *ParentDecl, TB)) {
       ParentSym->parents.emplace();
-      fillSuperTypes(*ParentDecl, ASTCtx, *ParentSym->parents, RPSet);
+      fillSuperTypes(*ParentDecl, ASTCtx, *ParentSym->parents, RPSet, TB);
       SuperTypes.emplace_back(std::move(*ParentSym));
     }
   }
@@ -712,41 +1014,51 @@ static void fillSuperTypes(const CXXRecordDecl &CXXRD, ASTContext &ASTCtx,
 }
 
 const CXXRecordDecl *findRecordTypeAt(ParsedAST &AST, Position Pos) {
+  auto RecordFromNode =
+      [](const SelectionTree::Node *N) -> const CXXRecordDecl * {
+    if (!N)
+      return nullptr;
+
+    // Note: explicitReferenceTargets() will search for both template
+    // instantiations and template patterns, and prefer the former if available
+    // (generally, one will be available for non-dependent specializations of a
+    // class template).
+    auto Decls = explicitReferenceTargets(N->ASTNode, DeclRelation::Underlying);
+    if (Decls.empty())
+      return nullptr;
+
+    const NamedDecl *D = Decls[0];
+
+    if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+      // If this is a variable, use the type of the variable.
+      return VD->getType().getTypePtr()->getAsCXXRecordDecl();
+    }
+
+    if (const CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(D)) {
+      // If this is a method, use the type of the class.
+      return Method->getParent();
+    }
+
+    // We don't handle FieldDecl because it's not clear what behaviour
+    // the user would expect: the enclosing class type (as with a
+    // method), or the field's type (as with a variable).
+
+    return dyn_cast<CXXRecordDecl>(D);
+  };
+
   const SourceManager &SM = AST.getSourceManager();
-  SourceLocation SourceLocationBeg = SM.getMacroArgExpandedLocation(
-      getBeginningOfIdentifier(Pos, SM, AST.getLangOpts()));
-  unsigned Offset =
-      AST.getSourceManager().getDecomposedSpellingLoc(SourceLocationBeg).second;
-  SelectionTree Selection(AST.getASTContext(), AST.getTokens(), Offset);
-  const SelectionTree::Node *N = Selection.commonAncestor();
-  if (!N)
-    return nullptr;
-
-  // Note: explicitReferenceTargets() will search for both template
-  // instantiations and template patterns, and prefer the former if available
-  // (generally, one will be available for non-dependent specializations of a
-  // class template).
-  auto Decls = explicitReferenceTargets(N->ASTNode, DeclRelation::Underlying);
-  if (Decls.empty())
-    return nullptr;
-
-  const NamedDecl *D = Decls[0];
-
-  if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
-    // If this is a variable, use the type of the variable.
-    return VD->getType().getTypePtr()->getAsCXXRecordDecl();
+  const CXXRecordDecl *Result = nullptr;
+  auto Offset = positionToOffset(SM.getBufferData(SM.getMainFileID()), Pos);
+  if (!Offset) {
+    llvm::consumeError(Offset.takeError());
+    return Result;
   }
-
-  if (const CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(D)) {
-    // If this is a method, use the type of the class.
-    return Method->getParent();
-  }
-
-  // We don't handle FieldDecl because it's not clear what behaviour
-  // the user would expect: the enclosing class type (as with a
-  // method), or the field's type (as with a variable).
-
-  return dyn_cast<CXXRecordDecl>(D);
+  SelectionTree::createEach(AST.getASTContext(), AST.getTokens(), *Offset,
+                            *Offset, [&](SelectionTree ST) {
+                              Result = RecordFromNode(ST.commonAncestor());
+                              return Result != nullptr;
+                            });
+  return Result;
 }
 
 std::vector<const CXXRecordDecl *> typeParents(const CXXRecordDecl *CXXRD) {
@@ -795,7 +1107,7 @@ getTypeHierarchy(ParsedAST &AST, Position Pos, int ResolveLevels,
     return llvm::None;
 
   Optional<TypeHierarchyItem> Result =
-      declToTypeHierarchyItem(AST.getASTContext(), *CXXRD);
+      declToTypeHierarchyItem(AST.getASTContext(), *CXXRD, AST.getTokens());
   if (!Result)
     return Result;
 
@@ -804,7 +1116,8 @@ getTypeHierarchy(ParsedAST &AST, Position Pos, int ResolveLevels,
     Result->parents.emplace();
 
     RecursionProtectionSet RPSet;
-    fillSuperTypes(*CXXRD, AST.getASTContext(), *Result->parents, RPSet);
+    fillSuperTypes(*CXXRD, AST.getASTContext(), *Result->parents, RPSet,
+                   AST.getTokens());
   }
 
   if ((Direction == TypeHierarchyDirection::Children ||

@@ -95,9 +95,6 @@ void RegistryMaps::registerMatcher(
 RegistryMaps::RegistryMaps() {
   // TODO: Here is the list of the missing matchers, grouped by reason.
   //
-  // Need Variant/Parser fixes:
-  // ofKind
-  //
   // Polymorphic + argument overload:
   // findAll
   //
@@ -243,6 +240,8 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasAnyConstructorInitializer);
   REGISTER_MATCHER(hasAnyDeclaration);
   REGISTER_MATCHER(hasAnyName);
+  REGISTER_MATCHER(hasAnyOperatorName);
+  REGISTER_MATCHER(hasAnyOverloadedOperatorName);
   REGISTER_MATCHER(hasAnyParameter);
   REGISTER_MATCHER(hasAnyPlacementArg);
   REGISTER_MATCHER(hasAnySelector);
@@ -295,6 +294,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasName);
   REGISTER_MATCHER(hasNullSelector);
   REGISTER_MATCHER(hasObjectExpression);
+  REGISTER_MATCHER(hasOperands);
   REGISTER_MATCHER(hasOperatorName);
   REGISTER_MATCHER(hasOverloadedOperatorName);
   REGISTER_MATCHER(hasParameter);
@@ -357,6 +357,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isClass);
   REGISTER_MATCHER(isClassMessage);
   REGISTER_MATCHER(isClassMethod);
+  REGISTER_MATCHER(isComparisonOperator);
   REGISTER_MATCHER(isConst);
   REGISTER_MATCHER(isConstQualified);
   REGISTER_MATCHER(isConstexpr);
@@ -395,7 +396,6 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isNoReturn);
   REGISTER_MATCHER(isNoThrow);
   REGISTER_MATCHER(isNoneKind);
-  REGISTER_MATCHER(isOMPStructuredBlock);
   REGISTER_MATCHER(isOverride);
   REGISTER_MATCHER(isPrivate);
   REGISTER_MATCHER(isProtected);
@@ -456,6 +456,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(objcThrowStmt);
   REGISTER_MATCHER(objcTryStmt);
   REGISTER_MATCHER(ofClass);
+  REGISTER_MATCHER(ofKind);
   REGISTER_MATCHER(ompDefaultClause);
   REGISTER_MATCHER(ompExecutableDirective);
   REGISTER_MATCHER(on);

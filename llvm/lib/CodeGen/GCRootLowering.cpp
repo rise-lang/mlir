@@ -160,10 +160,9 @@ static bool InsertRootInitializers(Function &F, ArrayRef<AllocaInst *> Roots) {
 
   for (AllocaInst *Root : Roots)
     if (!InitedRoots.count(Root)) {
-      StoreInst *SI = new StoreInst(
+      new StoreInst(
           ConstantPointerNull::get(cast<PointerType>(Root->getAllocatedType())),
-          Root);
-      SI->insertAfter(Root);
+          Root, Root->getNextNode());
       MadeChange = true;
     }
 
@@ -189,12 +188,12 @@ bool LowerIntrinsics::runOnFunction(Function &F) {
 /// need to be able to ensure each root has been initialized by the point the
 /// first safepoint is reached.  This really should have been done by the
 /// frontend, but the old API made this non-obvious, so we do a potentially
-/// redundant store just in case.  
+/// redundant store just in case.
 bool LowerIntrinsics::DoLowering(Function &F, GCStrategy &S) {
   SmallVector<AllocaInst *, 32> Roots;
 
   bool MadeChange = false;
-  for (BasicBlock &BB : F) 
+  for (BasicBlock &BB : F)
     for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
       IntrinsicInst *CI = dyn_cast<IntrinsicInst>(II++);
       if (!CI)
@@ -297,7 +296,7 @@ void GCMachineCodeAnalysis::FindStackOffsets(MachineFunction &MF) {
     if (MF.getFrameInfo().isDeadObjectIndex(RI->Num)) {
       RI = FI->removeStackRoot(RI);
     } else {
-      unsigned FrameReg; // FIXME: surely GCRoot ought to store the
+      Register FrameReg; // FIXME: surely GCRoot ought to store the
                          // register that the offset is from?
       RI->StackOffset = TFI->getFrameIndexReference(MF, RI->Num, FrameReg);
       ++RI;

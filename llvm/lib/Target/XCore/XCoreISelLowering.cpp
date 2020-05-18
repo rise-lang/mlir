@@ -107,6 +107,7 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::CTPOP, MVT::i32, Expand);
   setOperationAction(ISD::ROTL , MVT::i32, Expand);
   setOperationAction(ISD::ROTR , MVT::i32, Expand);
+  setOperationAction(ISD::BITREVERSE , MVT::i32, Legal);
 
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
 
@@ -328,10 +329,10 @@ LowerConstantPool(SDValue Op, SelectionDAG &DAG) const
   SDValue Res;
   if (CP->isMachineConstantPoolEntry()) {
     Res = DAG.getTargetConstantPool(CP->getMachineCPVal(), PtrVT,
-                                    CP->getAlignment(), CP->getOffset());
+                                    CP->getAlign(), CP->getOffset());
   } else {
-    Res = DAG.getTargetConstantPool(CP->getConstVal(), PtrVT,
-                                    CP->getAlignment(), CP->getOffset());
+    Res = DAG.getTargetConstantPool(CP->getConstVal(), PtrVT, CP->getAlign(),
+                                    CP->getOffset());
   }
   return DAG.getNode(XCoreISD::CPRelativeWrapper, dl, MVT::i32, Res);
 }

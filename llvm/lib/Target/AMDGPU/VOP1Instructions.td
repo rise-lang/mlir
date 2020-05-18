@@ -1,4 +1,4 @@
-//===-- VOP1Instructions.td - Vector Instruction Defintions ---------------===//
+//===-- VOP1Instructions.td - Vector Instruction Definitions --------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -89,9 +89,7 @@ class VOP1_DPP_Pseudo <string OpName, VOPProfile P, list<dag> pattern=[]> :
 class getVOP1Pat64 <SDPatternOperator node, VOPProfile P> : LetDummies {
   list<dag> ret =
     !if(P.HasModifiers,
-        [(set P.DstVT:$vdst, (node (P.Src0VT (VOP3Mods0 P.Src0VT:$src0,
-                                              i32:$src0_modifiers,
-                                              i1:$clamp, i32:$omod))))],
+        [(set P.DstVT:$vdst, (node (P.Src0VT (VOP3Mods P.Src0VT:$src0, i32:$src0_modifiers))))],
         !if(P.HasOMod,
             [(set P.DstVT:$vdst, (node (P.Src0VT (VOP3OMods P.Src0VT:$src0,
                                                   i1:$clamp, i32:$omod))))],
@@ -190,7 +188,7 @@ defm V_CVT_U32_F64 : VOP1Inst <"v_cvt_u32_f64", VOP_I32_F64,  fp_to_uint>;
 defm V_CVT_F64_U32 : VOP1Inst <"v_cvt_f64_u32", VOP1_F64_I32, uint_to_fp>;
 } // End SchedRW = [WriteDoubleCvt]
 
-let SchedRW = [WriteQuarterRate32] in {
+let SchedRW = [WriteFloatCvt] in {
 defm V_CVT_F32_I32 : VOP1Inst <"v_cvt_f32_i32", VOP1_F32_I32, sint_to_fp>;
 defm V_CVT_F32_U32 : VOP1Inst <"v_cvt_f32_u32", VOP1_F32_I32, uint_to_fp>;
 defm V_CVT_U32_F32 : VOP1Inst <"v_cvt_u32_f32", VOP_I32_F32, fp_to_uint>;
@@ -202,7 +200,7 @@ defm V_CVT_F32_F16 : VOP1Inst <"v_cvt_f32_f16", VOP_F32_F16, fpextend>;
 defm V_CVT_RPI_I32_F32 : VOP1Inst <"v_cvt_rpi_i32_f32", VOP_I32_F32, cvt_rpi_i32_f32>;
 defm V_CVT_FLR_I32_F32 : VOP1Inst <"v_cvt_flr_i32_f32", VOP_I32_F32, cvt_flr_i32_f32>;
 defm V_CVT_OFF_F32_I4 : VOP1Inst  <"v_cvt_off_f32_i4", VOP1_F32_I32>;
-} // End SchedRW = [WriteQuarterRate32]
+} // End SchedRW = [WriteFloatCvt]
 
 defm V_CVT_F32_UBYTE0 : VOP1Inst <"v_cvt_f32_ubyte0", VOP1_F32_I32, AMDGPUcvt_f32_ubyte0>;
 defm V_CVT_F32_UBYTE1 : VOP1Inst <"v_cvt_f32_ubyte1", VOP1_F32_I32, AMDGPUcvt_f32_ubyte1>;
@@ -327,7 +325,7 @@ let SubtargetPredicate = isGFX6GFX7 in {
     defm V_RSQ_CLAMP_F32 :
       VOP1Inst<"v_rsq_clamp_f32", VOP_F32_F32, AMDGPUrsq_clamp>;
     defm V_RSQ_LEGACY_F32 :
-      VOP1Inst<"v_rsq_legacy_f32", VOP_F32_F32, AMDGPUrsq_legacy>;
+      VOP1Inst<"v_rsq_legacy_f32", VOP_F32_F32, int_amdgcn_rsq_legacy>;
   } // End SchedRW = [WriteQuarterRate32]
 
   let SchedRW = [WriteDouble] in {
@@ -458,7 +456,7 @@ class VOP1_DPP<bits<8> op, VOP1_DPP_Pseudo ps, VOPProfile p = ps.Pfl, bit isDPP1
 class VOP1_DPP16<bits<8> op, VOP1_DPP_Pseudo ps, VOPProfile p = ps.Pfl> :
     VOP1_DPP<op, ps, p, 1>,
     SIMCInstr <ps.PseudoInstr, SIEncodingFamily.GFX10> {
-  let AssemblerPredicate = !if(p.HasExt, HasDPP16, DisableInst);
+  let AssemblerPredicate = HasDPP16;
   let SubtargetPredicate = HasDPP16;
 }
 
@@ -475,7 +473,7 @@ class VOP1_DPP8<bits<8> op, VOP1_Pseudo ps, VOPProfile p = ps.Pfl> :
   let Inst{24-17} = !if(p.EmitDst, vdst{7-0}, 0);
   let Inst{31-25} = 0x3f;
 
-  let AssemblerPredicate = !if(p.HasExt, HasDPP8, DisableInst);
+  let AssemblerPredicate = HasDPP8;
   let SubtargetPredicate = HasDPP8;
 }
 

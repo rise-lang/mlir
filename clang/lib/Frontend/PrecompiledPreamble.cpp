@@ -12,6 +12,7 @@
 
 #include "clang/Frontend/PrecompiledPreamble.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -227,7 +228,7 @@ template <class T> bool moveOnNoError(llvm::ErrorOr<T> Val, T &Output) {
 } // namespace
 
 PreambleBounds clang::ComputePreambleBounds(const LangOptions &LangOpts,
-                                            llvm::MemoryBuffer *Buffer,
+                                            const llvm::MemoryBuffer *Buffer,
                                             unsigned MaxLines) {
   return Lexer::ComputePreamble(Buffer->getBuffer(), LangOpts, MaxLines);
 }

@@ -698,7 +698,7 @@ public:
 
         lldb::offset_t offset;
 
-        ptr = extractor.GetPointer(&offset);
+        ptr = extractor.GetAddress(&offset);
 
         dump_stream.PutChar('\n');
       }
@@ -881,11 +881,9 @@ public:
       return;
     }
 
-    ConstString name =
-        m_delegate
-            ? m_delegate->GetName()
-            : persistent_state->GetNextPersistentVariableName(
-                  *target_sp, persistent_state->GetPersistentVariablePrefix());
+    ConstString name = m_delegate
+                           ? m_delegate->GetName()
+                           : persistent_state->GetNextPersistentVariableName();
 
     lldb::ExpressionVariableSP ret = persistent_state->CreatePersistentVariable(
         exe_scope, name, m_type, map.GetByteOrder(), map.GetAddressByteSize());
@@ -972,7 +970,7 @@ public:
 
         lldb::offset_t offset;
 
-        ptr = extractor.GetPointer(&offset);
+        ptr = extractor.GetAddress(&offset);
 
         dump_stream.PutChar('\n');
       }

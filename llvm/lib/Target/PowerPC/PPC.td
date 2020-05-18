@@ -166,6 +166,16 @@ def FeatureHTM : SubtargetFeature<"htm", "HasHTM", "true",
                                   "Enable Hardware Transactional Memory instructions">;
 def FeatureMFTB   : SubtargetFeature<"", "FeatureMFTB", "true",
                                         "Implement mftb using the mfspr instruction">;
+def FeatureFusion : SubtargetFeature<"fusion", "HasFusion", "true",
+                                     "Target supports instruction fusion">;
+def FeatureAddiLoadFusion : SubtargetFeature<"fuse-addi-load",
+                                             "HasAddiLoadFusion", "true",
+                                             "Power8 Addi-Load fusion",
+                                             [FeatureFusion]>;
+def FeatureAddisLoadFusion : SubtargetFeature<"fuse-addis-load",
+                                              "HasAddisLoadFusion", "true",
+                                              "Power8 Addis-Load fusion",
+                                              [FeatureFusion]>;
 def FeatureUnalignedFloats :
   SubtargetFeature<"allow-unaligned-fp-access", "AllowsUnalignedFPAccess",
                    "true", "CPU does not trap on unaligned FP access">;
@@ -219,6 +229,12 @@ def FeaturePCRelativeMemops :
                    "Enable PC relative Memory Ops",
                    [FeatureISA3_0]>;
 
+def FeaturePredictableSelectIsExpensive :
+  SubtargetFeature<"predictable-select-expensive",
+                   "PredictableSelectIsExpensive",
+                   "true",
+                   "Prefer likely predicted branches over selects">;
+
 // Since new processors generally contain a superset of features of those that
 // came before them, the idea is to make implementations of new processors
 // less error prone and easier to read.
@@ -234,7 +250,7 @@ def FeaturePCRelativeMemops :
 //         !listconcat(FutureProcessorInheritableFeatures,
 //                     FutureProcessorSpecificFeatures)
 
-// Makes it explicit and obvious what is new in FutureProcesor vs. Power8 as
+// Makes it explicit and obvious what is new in FutureProcessor vs. Power8 as
 // well as providing a single point of definition if the feature set will be
 // used elsewhere.
 def ProcessorFeatures {
@@ -271,25 +287,34 @@ def ProcessorFeatures {
     !listconcat(P7InheritableFeatures, P7SpecificFeatures);
 
   // Power8
-  list<SubtargetFeature> P8AdditionalFeatures = [DirectivePwr8,
-                                                 FeatureP8Altivec,
-                                                 FeatureP8Vector,
-                                                 FeatureP8Crypto,
-                                                 FeatureHTM,
-                                                 FeatureDirectMove,
-                                                 FeatureICBT,
-                                                 FeaturePartwordAtomic];
-  list<SubtargetFeature> P8SpecificFeatures = [];
+  list<SubtargetFeature> P8AdditionalFeatures =
+    [DirectivePwr8,
+     FeatureP8Altivec,
+     FeatureP8Vector,
+     FeatureP8Crypto,
+     FeatureHTM,
+     FeatureDirectMove,
+     FeatureICBT,
+     FeaturePartwordAtomic,
+     FeaturePredictableSelectIsExpensive
+    ];
+
+  list<SubtargetFeature> P8SpecificFeatures = [FeatureAddiLoadFusion,
+                                               FeatureAddisLoadFusion];
   list<SubtargetFeature> P8InheritableFeatures =
     !listconcat(P7InheritableFeatures, P8AdditionalFeatures);
   list<SubtargetFeature> P8Features =
     !listconcat(P8InheritableFeatures, P8SpecificFeatures);
 
   // Power9
-  list<SubtargetFeature> P9AdditionalFeatures = [DirectivePwr9,
-                                                 FeatureP9Altivec,
-                                                 FeatureP9Vector,
-                                                 FeatureISA3_0];
+  list<SubtargetFeature> P9AdditionalFeatures =
+    [DirectivePwr9,
+     FeatureP9Altivec,
+     FeatureP9Vector,
+     FeatureISA3_0,
+     FeaturePredictableSelectIsExpensive
+    ];
+
   // Some features are unique to Power9 and there is no reason to assume
   // they will be part of any future CPUs. One example is the narrower
   // dispatch for vector operations than scalar ones. For the time being,
@@ -452,7 +477,7 @@ def : ProcessorModel<"g5", G5Model,
 def : ProcessorModel<"e500", PPCE500Model,
                   [DirectiveE500,
                    FeatureICBT, FeatureBookE,
-                   FeatureISEL, FeatureMFTB, FeatureSPE]>;
+                   FeatureISEL, FeatureMFTB, FeatureMSYNC, FeatureSPE]>;
 def : ProcessorModel<"e500mc", PPCE500mcModel,
                   [DirectiveE500mc,
                    FeatureSTFIWX, FeatureICBT, FeatureBookE,

@@ -1,5 +1,1 @@
-add_mlir_dialect(Rise Rise)
-set(LLVM_TARGET_DEFINITIONS Rise.td)
-mlir_tablegen(Rise.h.inc -gen-op-decls)
-mlir_tablegen(Rise.cpp.inc -gen-op-defs)
-add_public_tablegen_target(MLIRRiseOpsIncGen)
+add_mlir_dialect(Rise rise)

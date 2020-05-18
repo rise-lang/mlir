@@ -141,7 +141,6 @@ defm int_amdgcn_workgroup_id : AMDGPUReadPreloadRegisterIntrinsic_xyz_named
                                <"__builtin_amdgcn_workgroup_id">;
 
 def int_amdgcn_dispatch_ptr :
-  GCCBuiltin<"__builtin_amdgcn_dispatch_ptr">,
   Intrinsic<[LLVMQualPointerType<llvm_i8_ty, 4>], [],
   [IntrNoMem, IntrSpeculatable]>;
 
@@ -218,8 +217,8 @@ def int_amdgcn_s_waitcnt : GCCBuiltin<"__builtin_amdgcn_s_waitcnt">,
 def int_amdgcn_div_scale : Intrinsic<
   // 1st parameter: Numerator
   // 2nd parameter: Denominator
-  // 3rd parameter: Constant to select between first and
-  //                second. (0 = first, 1 = second).
+  // 3rd parameter: Select quotient. Must equal Numerator or Denominator.
+  //                (0 = Denominator, 1 = Numerator).
   [llvm_anyfloat_ty, llvm_i1_ty],
   [LLVMMatchType<0>, LLVMMatchType<0>, llvm_i1_ty],
   [IntrNoMem, IntrSpeculatable, ImmArg<2>]
@@ -276,6 +275,7 @@ def int_amdgcn_rsq_legacy :  GCCBuiltin<"__builtin_amdgcn_rsq_legacy">,
   [llvm_float_ty], [llvm_float_ty], [IntrNoMem, IntrSpeculatable]
 >;
 
+// out = 1.0 / sqrt(a) result clamped to +/- max_float.
 def int_amdgcn_rsq_clamp : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem, IntrSpeculatable]>;
 
@@ -920,7 +920,7 @@ class AMDGPUStructBufferLoad<LLVMType data_ty = llvm_any_ty> : Intrinsic <
                       //                      swizzled buffer (bit 3 = swz))
   [IntrReadMem, ImmArg<4>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<0>;
-def int_amdgcn_struct_buffer_load_format : AMDGPUStructBufferLoad<llvm_anyfloat_ty>;
+def int_amdgcn_struct_buffer_load_format : AMDGPUStructBufferLoad;
 def int_amdgcn_struct_buffer_load : AMDGPUStructBufferLoad;
 
 class AMDGPURawBufferStore<LLVMType data_ty = llvm_any_ty> : Intrinsic <
@@ -951,7 +951,7 @@ class AMDGPUStructBufferStore<LLVMType data_ty = llvm_any_ty> : Intrinsic <
                       //                      swizzled buffer (bit 3 = swz))
   [IntrWriteMem, ImmArg<5>], "", [SDNPMemOperand]>,
   AMDGPURsrcIntrinsic<1>;
-def int_amdgcn_struct_buffer_store_format : AMDGPUStructBufferStore<llvm_anyfloat_ty>;
+def int_amdgcn_struct_buffer_store_format : AMDGPUStructBufferStore;
 def int_amdgcn_struct_buffer_store : AMDGPUStructBufferStore;
 
 class AMDGPURawBufferAtomic<LLVMType data_ty = llvm_any_ty> : Intrinsic <
@@ -1349,6 +1349,9 @@ def int_amdgcn_fcmp :
   Intrinsic<[llvm_anyint_ty], [llvm_anyfloat_ty, LLVMMatchType<1>, llvm_i32_ty],
             [IntrNoMem, IntrConvergent, ImmArg<2>]>;
 
+def int_amdgcn_ballot :
+  Intrinsic<[llvm_anyint_ty], [llvm_i1_ty], [IntrNoMem, IntrConvergent]>;
+
 def int_amdgcn_readfirstlane :
   GCCBuiltin<"__builtin_amdgcn_readfirstlane">,
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem, IntrConvergent]>;
@@ -1372,8 +1375,8 @@ def int_amdgcn_writelane :
   [IntrNoMem, IntrConvergent]
 >;
 
-def int_amdgcn_alignbit :
-  GCCBuiltin<"__builtin_amdgcn_alignbit">, Intrinsic<[llvm_i32_ty],
+// FIXME: Deprecated. This is equivalent to llvm.fshr
+def int_amdgcn_alignbit : Intrinsic<[llvm_i32_ty],
   [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
   [IntrNoMem, IntrSpeculatable]
 >;
@@ -1874,6 +1877,12 @@ def int_amdgcn_unreachable : Intrinsic<[], [], [IntrConvergent]>;
 // pass based on !fpmath metadata.
 def int_amdgcn_fdiv_fast : Intrinsic<
   [llvm_float_ty], [llvm_float_ty, llvm_float_ty],
+  [IntrNoMem, IntrSpeculatable]
+>;
+
+// Represent a relocation constant.
+def int_amdgcn_reloc_constant : Intrinsic<
+  [llvm_i32_ty], [llvm_metadata_ty],
   [IntrNoMem, IntrSpeculatable]
 >;
 }

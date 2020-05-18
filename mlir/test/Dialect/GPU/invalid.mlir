@@ -54,7 +54,7 @@ func @launch_func_missing_parent_module_attribute(%sz : index) {
 
 module attributes {gpu.container_module} {
   func @launch_func_missing_callee_attribute(%sz : index) {
-    // expected-error@+1 {{string attribute 'kernel' must be specified}}
+    // expected-error@+1 {{symbol reference attribute 'kernel' must be specified}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz) {foo = "bar"}
         : (index, index, index, index, index, index) -> ()
     return
@@ -64,32 +64,9 @@ module attributes {gpu.container_module} {
 // -----
 
 module attributes {gpu.container_module} {
-  func @launch_func_missing_module_attribute(%sz : index) {
-    // expected-error@+1 {{attribute 'kernel_module' must be specified}}
-    "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz) {kernel = "launch_func_missing_kernel_attr"}
-        : (index, index, index, index, index, index) -> ()
-    return
-  }
-}
-
-// -----
-
-module attributes {gpu.container_module} {
   func @launch_func_no_function_attribute(%sz : index) {
-    // expected-error@+1 {{string attribute 'kernel' must be specified}}
+    // expected-error@+1 {{symbol reference attribute 'kernel' must be specified}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz) {kernel = 10}
-        : (index, index, index, index, index, index) -> ()
-    return
-  }
-}
-
-// -----
-
-module attributes {gpu.container_module} {
-  func @launch_func_module_attribute_wrong_type(%sz : index) {
-    // expected-error@+1 {{symbol reference attribute 'kernel_module' must be specified}}
-    "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-    {kernel = "launch_func_module_attribute_wrong_type", kernel_module = 10}
         : (index, index, index, index, index, index) -> ()
     return
   }
@@ -101,9 +78,20 @@ module attributes {gpu.container_module} {
   func @launch_func_undefined_module(%sz : index) {
     // expected-error@+1 {{kernel module 'kernels' is undefined}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-    { kernel = "kernel_1", kernel_module = @kernels }
+    { kernel = @kernels::@kernel_1 }
         : (index, index, index, index, index, index) -> ()
     return
+  }
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  module @kernels {
+    // expected-error@+1 {{'gpu.func' op expects parent op 'gpu.module'}}
+    gpu.func @kernel_1(%arg1 : !llvm<"float*">) {
+      gpu.return
+    }
   }
 }
 
@@ -116,7 +104,7 @@ module attributes {gpu.container_module} {
   func @launch_func_missing_module_attribute(%sz : index) {
     // expected-error@+1 {{kernel module 'kernels' is undefined}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-    { kernel = "kernel_1", kernel_module = @kernels }
+    { kernel = @kernels::@kernel_1 }
         : (index, index, index, index, index, index) -> ()
     return
   }
@@ -128,10 +116,46 @@ module attributes {gpu.container_module} {
   gpu.module @kernels { }
 
   func @launch_func_undefined_function(%sz : index) {
-    // expected-error@+1 {{kernel function 'kernel_1' is undefined}}
+    // expected-error@+1 {{kernel function '@kernels::@kernel_1' is undefined}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-    { kernel = "kernel_1", kernel_module = @kernels }
+    { kernel = @kernels::@kernel_1 }
         : (index, index, index, index, index, index) -> ()
+    return
+  }
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  module @kernels {
+    gpu.func @kernel_1(%arg1 : !llvm<"float*">) kernel {
+      gpu.return
+    }
+  }
+
+  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm<"float*">) {
+    // expected-error@+1 {{kernel module 'kernels' is undefined}}
+    "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz, %arg)
+    {kernel = @kernels::@kernel_1}
+        : (index, index, index, index, index, index, !llvm<"float*">) -> ()
+    return
+  }
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  gpu.module @kernels {
+    gpu.func @kernel_1(%arg1 : !llvm<"float*">) {
+      gpu.return
+    }
+  }
+
+  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm<"float*">) {
+    // expected-error@+1 {{kernel function is missing the 'gpu.kernel' attribute}}
+    "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz, %arg)
+    {kernel = @kernels::@kernel_1}
+        : (index, index, index, index, index, index, !llvm<"float*">) -> ()
     return
   }
 }
@@ -145,28 +169,10 @@ module attributes {gpu.container_module} {
     }
   }
 
-  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm<"float*">) {
-    // xpected-error@+1 {{kernel function is missing the 'gpu.kernel' attribute}}
-    "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz, %arg)
-    {kernel = "kernel_1", kernel_module = @kernels}
-        : (index, index, index, index, index, index, !llvm<"float*">) -> ()
-    return
-  }
-}
-
-// -----
-
-module attributes {gpu.container_module} {
-  gpu.module @kernels {
-    gpu.func @kernel_1(%arg1 : !llvm<"float*">) attributes { gpu.kernel } {
-      gpu.return
-    }
-  }
-
   func @launch_func_kernel_operand_size(%sz : index, %arg : !llvm<"float*">) {
     // expected-error@+1 {{got 2 kernel operands but expected 1}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz, %arg, %arg)
-        {kernel = "kernel_1", kernel_module = @kernels}
+        {kernel = @kernels::@kernel_1}
         : (index, index, index, index, index, index, !llvm<"float*">,
            !llvm<"float*">) -> ()
     return
@@ -177,7 +183,7 @@ module attributes {gpu.container_module} {
 
 module attributes {gpu.container_module} {
   gpu.module @kernels {
-    gpu.func @kernel_1(%arg1 : f32) attributes { gpu.kernel } {
+    gpu.func @kernel_1(%arg1 : f32) kernel {
       gpu.return
     }
   }
@@ -185,7 +191,7 @@ module attributes {gpu.container_module} {
   func @launch_func_kernel_operand_types(%sz : index, %arg : f32) {
     // expected-err@+1 {{type of function argument 0 does not match}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz, %arg)
-        {kernel = "kernel_1", kernel_module = @kernels}
+        {kernel = @kernels::@kernel_1}
         : (index, index, index, index, index, index, f32) -> ()
     return
   }
@@ -250,6 +256,14 @@ func @reduce_op_and_body(%arg0 : f32) {
 func @reduce_invalid_op(%arg0 : f32) {
   // expected-error@+1 {{gpu.all_reduce' op attribute 'op' failed to satisfy constraint}}
   %res = "gpu.all_reduce"(%arg0) ({}) {op = "foo"} : (f32) -> (f32)
+  return
+}
+
+// -----
+
+func @reduce_invalid_op_type(%arg0 : f32) {
+  // expected-error@+1 {{`and` accumulator is only compatible with Integer type}}
+  %res = "gpu.all_reduce"(%arg0) ({}) {op = "and"} : (f32) -> (f32)
   return
 }
 
@@ -333,7 +347,7 @@ module {
 // -----
 
 module {
-  module @gpu_funcs attributes {gpu.kernel_module} {
+  gpu.module @gpu_funcs {
     // expected-error @+1 {{requires 'type' attribute of function type}}
     "gpu.func"() ({
       gpu.return
@@ -344,7 +358,7 @@ module {
 // -----
 
 module {
-  module @gpu_funcs attributes {gpu.kernel_module} {
+  gpu.module @gpu_funcs {
     // expected-error @+1 {{expected memref type in attribution}}
     gpu.func @kernel() workgroup(%0: i32) {
       gpu.return
@@ -355,7 +369,7 @@ module {
 // -----
 
 module {
-  module @gpu_funcs attributes {gpu.kernel_module} {
+  gpu.module @gpu_funcs {
     // expected-error @+1 {{expected memory space 3 in attribution}}
     gpu.func @kernel() workgroup(%0: memref<4xf32>) {
       gpu.return
@@ -366,7 +380,7 @@ module {
 // -----
 
 module {
-  module @gpu_funcs attributes {gpu.kernel_module} {
+  gpu.module @gpu_funcs {
     // expected-error @+1 {{expected memory space 5 in attribution}}
     gpu.func @kernel() private(%0: memref<4xf32>) {
       gpu.return
@@ -377,7 +391,7 @@ module {
 // -----
 
 module {
-  module @gpu_funcs attributes {gpu.kernel_module} {
+  gpu.module @gpu_funcs {
     // expected-error @+1 {{expected memory space 5 in attribution}}
     gpu.func @kernel() private(%0: memref<4xf32>) {
       gpu.return

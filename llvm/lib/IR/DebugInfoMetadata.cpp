@@ -75,6 +75,21 @@ DILocation *DILocation::getImpl(LLVMContext &Context, unsigned Line,
                    Storage, Context.pImpl->DILocations);
 }
 
+const
+DILocation *DILocation::getMergedLocations(ArrayRef<const DILocation *> Locs) {
+  if (Locs.empty())
+    return nullptr;
+  if (Locs.size() == 1)
+    return Locs[0];
+  auto *Merged = Locs[0];
+  for (auto I = std::next(Locs.begin()), E = Locs.end(); I != E; ++I) {
+    Merged = getMergedLocation(Merged, *I);
+    if (Merged == nullptr)
+      break;
+  }
+  return Merged;
+}
+
 const DILocation *DILocation::getMergedLocation(const DILocation *LocA,
                                                 const DILocation *LocB) {
   if (!LocA || !LocB)
@@ -332,7 +347,7 @@ DISubrange *DISubrange::getImpl(LLVMContext &Context, Metadata *CountNode,
   DEFINE_GETIMPL_STORE(DISubrange, (CountNode, Lo), Ops);
 }
 
-DIEnumerator *DIEnumerator::getImpl(LLVMContext &Context, int64_t Value,
+DIEnumerator *DIEnumerator::getImpl(LLVMContext &Context, APInt Value,
                                     bool IsUnsigned, MDString *Name,
                                     StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
@@ -390,17 +405,18 @@ DICompositeType *DICompositeType::getImpl(
     uint32_t AlignInBits, uint64_t OffsetInBits, DIFlags Flags,
     Metadata *Elements, unsigned RuntimeLang, Metadata *VTableHolder,
     Metadata *TemplateParams, MDString *Identifier, Metadata *Discriminator,
-    StorageType Storage, bool ShouldCreate) {
+    Metadata *DataLocation, StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
 
   // Keep this in sync with buildODRType.
-  DEFINE_GETIMPL_LOOKUP(
-      DICompositeType, (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
-                        AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang,
-                        VTableHolder, TemplateParams, Identifier, Discriminator));
-  Metadata *Ops[] = {File,     Scope,        Name,           BaseType,
-                     Elements, VTableHolder, TemplateParams, Identifier,
-                     Discriminator};
+  DEFINE_GETIMPL_LOOKUP(DICompositeType,
+                        (Tag, Name, File, Line, Scope, BaseType, SizeInBits,
+                         AlignInBits, OffsetInBits, Flags, Elements,
+                         RuntimeLang, VTableHolder, TemplateParams, Identifier,
+                         Discriminator, DataLocation));
+  Metadata *Ops[] = {File,          Scope,        Name,           BaseType,
+                     Elements,      VTableHolder, TemplateParams, Identifier,
+                     Discriminator, DataLocation};
   DEFINE_GETIMPL_STORE(DICompositeType, (Tag, Line, RuntimeLang, SizeInBits,
                                          AlignInBits, OffsetInBits, Flags),
                        Ops);
@@ -411,7 +427,8 @@ DICompositeType *DICompositeType::buildODRType(
     Metadata *File, unsigned Line, Metadata *Scope, Metadata *BaseType,
     uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
     DIFlags Flags, Metadata *Elements, unsigned RuntimeLang,
-    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator) {
+    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator,
+    Metadata *DataLocation) {
   assert(!Identifier.getString().empty() && "Expected valid identifier");
   if (!Context.isODRUniquingDebugTypes())
     return nullptr;
@@ -420,7 +437,8 @@ DICompositeType *DICompositeType::buildODRType(
     return CT = DICompositeType::getDistinct(
                Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits,
                AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang,
-               VTableHolder, TemplateParams, &Identifier, Discriminator);
+               VTableHolder, TemplateParams, &Identifier, Discriminator,
+               DataLocation);
 
   // Only mutate CT if it's a forward declaration and the new operands aren't.
   assert(CT->getRawIdentifier() == &Identifier && "Wrong ODR identifier?");
@@ -430,9 +448,9 @@ DICompositeType *DICompositeType::buildODRType(
   // Mutate CT in place.  Keep this in sync with getImpl.
   CT->mutate(Tag, Line, RuntimeLang, SizeInBits, AlignInBits, OffsetInBits,
              Flags);
-  Metadata *Ops[] = {File,     Scope,        Name,           BaseType,
-                     Elements, VTableHolder, TemplateParams, &Identifier,
-                     Discriminator};
+  Metadata *Ops[] = {File,          Scope,        Name,           BaseType,
+                     Elements,      VTableHolder, TemplateParams, &Identifier,
+                     Discriminator, DataLocation};
   assert((std::end(Ops) - std::begin(Ops)) == (int)CT->getNumOperands() &&
          "Mismatched number of operands");
   for (unsigned I = 0, E = CT->getNumOperands(); I != E; ++I)
@@ -446,7 +464,8 @@ DICompositeType *DICompositeType::getODRType(
     Metadata *File, unsigned Line, Metadata *Scope, Metadata *BaseType,
     uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
     DIFlags Flags, Metadata *Elements, unsigned RuntimeLang,
-    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator) {
+    Metadata *VTableHolder, Metadata *TemplateParams, Metadata *Discriminator,
+    Metadata *DataLocation) {
   assert(!Identifier.getString().empty() && "Expected valid identifier");
   if (!Context.isODRUniquingDebugTypes())
     return nullptr;
@@ -455,7 +474,7 @@ DICompositeType *DICompositeType::getODRType(
     CT = DICompositeType::getDistinct(
         Context, Tag, Name, File, Line, Scope, BaseType, SizeInBits,
         AlignInBits, OffsetInBits, Flags, Elements, RuntimeLang, VTableHolder,
-        TemplateParams, &Identifier, Discriminator);
+        TemplateParams, &Identifier, Discriminator, DataLocation);
   return CT;
 }
 
@@ -479,8 +498,9 @@ DISubroutineType *DISubroutineType::getImpl(LLVMContext &Context, DIFlags Flags,
 // FIXME: Implement this string-enum correspondence with a .def file and macros,
 // so that the association is explicit rather than implied.
 static const char *ChecksumKindName[DIFile::CSK_Last] = {
-  "CSK_MD5",
-  "CSK_SHA1"
+    "CSK_MD5",
+    "CSK_SHA1",
+    "CSK_SHA256",
 };
 
 StringRef DIFile::getChecksumKindAsString(ChecksumKind CSKind) {
@@ -495,6 +515,7 @@ Optional<DIFile::ChecksumKind> DIFile::getChecksumKind(StringRef CSKindStr) {
   return StringSwitch<Optional<DIFile::ChecksumKind>>(CSKindStr)
       .Case("CSK_MD5", DIFile::CSK_MD5)
       .Case("CSK_SHA1", DIFile::CSK_SHA1)
+      .Case("CSK_SHA256", DIFile::CSK_SHA256)
       .Default(None);
 }
 
@@ -521,16 +542,23 @@ DICompileUnit *DICompileUnit::getImpl(
     Metadata *GlobalVariables, Metadata *ImportedEntities, Metadata *Macros,
     uint64_t DWOId, bool SplitDebugInlining, bool DebugInfoForProfiling,
     unsigned NameTableKind, bool RangesBaseAddress, MDString *SysRoot,
-    StorageType Storage, bool ShouldCreate) {
+    MDString *SDK, StorageType Storage, bool ShouldCreate) {
   assert(Storage != Uniqued && "Cannot unique DICompileUnit");
   assert(isCanonical(Producer) && "Expected canonical MDString");
   assert(isCanonical(Flags) && "Expected canonical MDString");
   assert(isCanonical(SplitDebugFilename) && "Expected canonical MDString");
 
-  Metadata *Ops[] = {
-      File,      Producer,      Flags,           SplitDebugFilename,
-      EnumTypes, RetainedTypes, GlobalVariables, ImportedEntities,
-      Macros,    SysRoot};
+  Metadata *Ops[] = {File,
+                     Producer,
+                     Flags,
+                     SplitDebugFilename,
+                     EnumTypes,
+                     RetainedTypes,
+                     GlobalVariables,
+                     ImportedEntities,
+                     Macros,
+                     SysRoot,
+                     SDK};
   return storeImpl(new (array_lengthof(Ops)) DICompileUnit(
                        Context, Storage, SourceLanguage, IsOptimized,
                        RuntimeVersion, EmissionKind, DWOId, SplitDebugInlining,
@@ -660,12 +688,7 @@ DISubprogram *DISubprogram::getImpl(
 
 bool DISubprogram::describes(const Function *F) const {
   assert(F && "Invalid function");
-  if (F->getSubprogram() == this)
-    return true;
-  StringRef Name = getLinkageName();
-  if (Name.empty())
-    Name = getName();
-  return F->getName() == Name;
+  return F->getSubprogram() == this;
 }
 
 DILexicalBlock *DILexicalBlock::getImpl(LLVMContext &Context, Metadata *Scope,
@@ -713,35 +736,38 @@ DICommonBlock *DICommonBlock::getImpl(LLVMContext &Context, Metadata *Scope,
   DEFINE_GETIMPL_STORE(DICommonBlock, (LineNo), Ops);
 }
 
-DIModule *DIModule::getImpl(LLVMContext &Context, Metadata *Scope,
-                            MDString *Name, MDString *ConfigurationMacros,
-                            MDString *IncludePath, StorageType Storage,
+DIModule *DIModule::getImpl(LLVMContext &Context, Metadata *File,
+                            Metadata *Scope, MDString *Name,
+                            MDString *ConfigurationMacros,
+                            MDString *IncludePath, MDString *APINotesFile,
+                            unsigned LineNo, StorageType Storage,
                             bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DIModule,
-                        (Scope, Name, ConfigurationMacros, IncludePath));
-  Metadata *Ops[] = {Scope, Name, ConfigurationMacros, IncludePath};
-  DEFINE_GETIMPL_STORE_NO_CONSTRUCTOR_ARGS(DIModule, Ops);
+  DEFINE_GETIMPL_LOOKUP(DIModule, (File, Scope, Name, ConfigurationMacros,
+                                   IncludePath, APINotesFile, LineNo));
+  Metadata *Ops[] = {File,        Scope,       Name, ConfigurationMacros,
+                     IncludePath, APINotesFile};
+  DEFINE_GETIMPL_STORE(DIModule, (LineNo), Ops);
 }
 
-DITemplateTypeParameter *DITemplateTypeParameter::getImpl(LLVMContext &Context,
-                                                          MDString *Name,
-                                                          Metadata *Type,
-                                                          StorageType Storage,
-                                                          bool ShouldCreate) {
+DITemplateTypeParameter *
+DITemplateTypeParameter::getImpl(LLVMContext &Context, MDString *Name,
+                                 Metadata *Type, bool isDefault,
+                                 StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DITemplateTypeParameter, (Name, Type));
+  DEFINE_GETIMPL_LOOKUP(DITemplateTypeParameter, (Name, Type, isDefault));
   Metadata *Ops[] = {Name, Type};
-  DEFINE_GETIMPL_STORE_NO_CONSTRUCTOR_ARGS(DITemplateTypeParameter, Ops);
+  DEFINE_GETIMPL_STORE(DITemplateTypeParameter, (isDefault), Ops);
 }
 
 DITemplateValueParameter *DITemplateValueParameter::getImpl(
     LLVMContext &Context, unsigned Tag, MDString *Name, Metadata *Type,
-    Metadata *Value, StorageType Storage, bool ShouldCreate) {
+    bool isDefault, Metadata *Value, StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DITemplateValueParameter, (Tag, Name, Type, Value));
+  DEFINE_GETIMPL_LOOKUP(DITemplateValueParameter,
+                        (Tag, Name, Type, isDefault, Value));
   Metadata *Ops[] = {Name, Type, Value};
-  DEFINE_GETIMPL_STORE(DITemplateValueParameter, (Tag), Ops);
+  DEFINE_GETIMPL_STORE(DITemplateValueParameter, (Tag, isDefault), Ops);
 }
 
 DIGlobalVariable *
@@ -925,6 +951,7 @@ bool DIExpression::isValid() const {
     case dwarf::DW_OP_dup:
     case dwarf::DW_OP_regx:
     case dwarf::DW_OP_bregx:
+    case dwarf::DW_OP_push_object_address:
       break;
     }
   }
@@ -1107,7 +1134,9 @@ DIExpression *DIExpression::append(const DIExpression *Expr,
   }
 
   NewOps.append(Ops.begin(), Ops.end());
-  return DIExpression::get(Expr->getContext(), NewOps);
+  auto *result = DIExpression::get(Expr->getContext(), NewOps);
+  assert(result->isValid() && "concatenated expression is not valid");
+  return result;
 }
 
 DIExpression *DIExpression::appendToStack(const DIExpression *Expr,

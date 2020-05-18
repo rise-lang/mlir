@@ -17,14 +17,13 @@
 using namespace llvm;
 using namespace llvm::support::endian;
 using namespace llvm::ELF;
-
-namespace lld {
-namespace elf {
+using namespace lld;
+using namespace lld::elf;
 
 // Page(Expr) is the page address of the expression Expr, defined
 // as (Expr & ~0xFFF). (This applies even if the machine page size
 // supported by the platform has a different value.)
-uint64_t getAArch64Page(uint64_t expr) {
+uint64_t elf::getAArch64Page(uint64_t expr) {
   return expr & ~static_cast<uint64_t>(0xFFF);
 }
 
@@ -601,8 +600,10 @@ AArch64BtiPac::AArch64BtiPac() {
   // the function in an executable being taken by a shared library.
   // FIXME: There is a potential optimization to omit the BTI if we detect
   // that the address of the PLT entry isn't taken.
+  // The PAC PLT entries require dynamic loader support and this isn't known
+  // from properties in the objects, so we use the command line flag.
   btiEntry = btiHeader && !config->shared;
-  pacEntry = (config->andFeatures & GNU_PROPERTY_AARCH64_FEATURE_1_PAC);
+  pacEntry = config->zPacPlt;
 
   if (btiEntry || pacEntry) {
     pltEntrySize = 24;
@@ -696,7 +697,4 @@ static TargetInfo *getTargetInfo() {
   return &t;
 }
 
-TargetInfo *getAArch64TargetInfo() { return getTargetInfo(); }
-
-} // namespace elf
-} // namespace lld
+TargetInfo *elf::getAArch64TargetInfo() { return getTargetInfo(); }

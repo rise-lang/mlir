@@ -28,6 +28,9 @@
 include "mlir/IR/OpBase.td"
 #endif // OP_BASE
 
+include "mlir/Interfaces/SideEffectInterfaces.td"
+
+
 def Rise_Dialect : Dialect {
   let name = "rise";
   let cppNamespace = "";
@@ -109,7 +112,7 @@ def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
 }
 
 def RiseWrapOp : Rise_Op<"wrap"> {
-  let summary = "rise wrap";
+let summary = "rise wrap";
   let arguments = (ins AnyType : $typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
   let results = (outs AnyType : $wrapped);
   let parser = [{ return parse$cppClass(parser, result); }];
@@ -176,7 +179,7 @@ def RiseInOp : Rise_Op<"in"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def LiteralOp : Rise_Op<"literal", [NoSideEffect]> {
+def LiteralOp : Rise_Op<"literal"> {
   let summary = "literal";
   let arguments = (ins LiteralAttr : $literal);
   let results = (outs AnyType);
@@ -202,7 +205,7 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def ApplyOp : Rise_Op<"apply", [NoSideEffect]> {
+def ApplyOp : Rise_Op<"apply"> {
   let summary = "apply";
   let description =
       "This operation is used for mirroring function application of lambda "
@@ -217,7 +220,7 @@ def ApplyOp : Rise_Op<"apply", [NoSideEffect]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def MapSeqOp : Rise_Op<"mapSeq", [NoSideEffect]> {
+def MapSeqOp : Rise_Op<"mapSeq"> {
   let summary = "mapSeq";
   let description =
       "This operation returns a function which expects a function from s to t "
@@ -229,7 +232,7 @@ def MapSeqOp : Rise_Op<"mapSeq", [NoSideEffect]> {
   let results = (outs FunType : $mapSeqFun);
 }
 
-def MapParOp : Rise_Op<"mapPar", [NoSideEffect]> {
+def MapParOp : Rise_Op<"mapPar"> {
   let summary = "mapPar";
   let description =
       "This operation returns a function which expects a function from s to t "
@@ -241,7 +244,7 @@ def MapParOp : Rise_Op<"mapPar", [NoSideEffect]> {
   let results = (outs FunType : $mapParFun);
 }
 
-def ReduceSeqOp : Rise_Op<"reduceSeq", [NoSideEffect]> {
+def ReduceSeqOp : Rise_Op<"reduceSeq"> {
   let summary = "reduceSeq";
   let description =
       "This operation returns a function which expects an accumulator function "
@@ -255,7 +258,7 @@ def ReduceSeqOp : Rise_Op<"reduceSeq", [NoSideEffect]> {
   let results = (outs FunType : $reduceFun);
 }
 
-def ZipOp : Rise_Op<"zip", [NoSideEffect]> {
+def ZipOp : Rise_Op<"zip"> {
   let summary = "rise zip operation";
   let description =
       "This operation returns a function which expects an array of size n with "
@@ -267,7 +270,7 @@ def ZipOp : Rise_Op<"zip", [NoSideEffect]> {
   let results = (outs FunType : $zipFun);
 }
 
-def TupleOp : Rise_Op<"tuple", [NoSideEffect]> {
+def TupleOp : Rise_Op<"tuple"> {
   let summary = "rise tuple operation";
   let description =
       "This operation returns a function which expects two arguments of type "
@@ -277,7 +280,7 @@ def TupleOp : Rise_Op<"tuple", [NoSideEffect]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def FstOp : Rise_Op<"fst", [NoSideEffect]> {
+def FstOp : Rise_Op<"fst"> {
   let summary = "rise fst operation";
   let description =
       "This operation returns a function which expects a tuple <s,t> and "
@@ -287,7 +290,7 @@ def FstOp : Rise_Op<"fst", [NoSideEffect]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def SndOp : Rise_Op<"snd", [NoSideEffect]> {
+def SndOp : Rise_Op<"snd"> {
   let summary = "rise snd operation";
   let description =
       "This operation returns a function which expects a tuple <s,t> and "
@@ -304,34 +307,9 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
       "We will experiment with using the standard return operation instead.";
   let arguments = (ins Variadic<AnyType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
-  let builders = [OpBuilder<"Builder *b, OperationState &result",
-                            [{ build(b, result, llvm::None); }]>];
-}
-
-//===----------------------------------------------------------------------===//
-// Arithmetic operations
-//===----------------------------------------------------------------------===//
-
-def AddOp : Rise_Op<"add", [NoSideEffect]> {
-  let summary = "rise add operation";
-  let description =
-      "This operation returns a function which expects two arguments of type "
-      "t and returns their sum of type t. We will experiment with adopting "
-      "the standard arithmetics operations.";
-  let arguments = (ins DataTypeAttr : $t);
-  let results = (outs FunType : $addFun);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def MulOp : Rise_Op<"mul", [NoSideEffect]> {
-  let summary = "rise mul operation";
-  let description =
-      "This operation returns a function which expects two arguments of type "
-      "t and returns their product of type t. We will experiment with adopting "
-      "the standard arithmetics operations.";
-  let arguments = (ins DataTypeAttr : $t);
-  let results = (outs FunType : $mulFun);
-  let parser = [{ return parse$cppClass(parser, result); }];
+  let builders = [OpBuilder<
+    "OpBuilder &b, OperationState &result", [{ build(b, result, llvm::None); }]
+  >];
 }
 
 #endif // RISE_OPS

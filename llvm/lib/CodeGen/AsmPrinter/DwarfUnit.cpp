@@ -1045,6 +1045,8 @@ void DwarfUnit::constructTemplateTypeParameterDIE(
     addType(ParamDIE, TP->getType());
   if (!TP->getName().empty())
     addString(ParamDIE, dwarf::DW_AT_name, TP->getName());
+  if (TP->isDefault() && (DD->getDwarfVersion() >= 5))
+    addFlag(ParamDIE, dwarf::DW_AT_default_value);
 }
 
 void DwarfUnit::constructTemplateValueParameterDIE(
@@ -1057,6 +1059,8 @@ void DwarfUnit::constructTemplateValueParameterDIE(
     addType(ParamDIE, VP->getType());
   if (!VP->getName().empty())
     addString(ParamDIE, dwarf::DW_AT_name, VP->getName());
+  if (VP->isDefault() && (DD->getDwarfVersion() >= 5))
+    addFlag(ParamDIE, dwarf::DW_AT_default_value);
   if (Metadata *Val = VP->getValue()) {
     if (ConstantInt *CI = mdconst::dyn_extract<ConstantInt>(Val))
       addConstantValue(ParamDIE, CI, VP->getType());
@@ -1122,6 +1126,13 @@ DIE *DwarfUnit::getOrCreateModule(const DIModule *M) {
               M->getConfigurationMacros());
   if (!M->getIncludePath().empty())
     addString(MDie, dwarf::DW_AT_LLVM_include_path, M->getIncludePath());
+  if (!M->getAPINotesFile().empty())
+    addString(MDie, dwarf::DW_AT_LLVM_apinotes, M->getAPINotesFile());
+  if (M->getFile())
+    addUInt(MDie, dwarf::DW_AT_decl_file, None,
+            getOrCreateSourceID(M->getFile()));
+  if (M->getLineNo())
+    addUInt(MDie, dwarf::DW_AT_decl_line, None, M->getLineNo());
 
   return &MDie;
 }
@@ -1403,6 +1414,17 @@ void DwarfUnit::constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
               CTy->getSizeInBits() / CHAR_BIT);
   }
 
+  if (DIVariable *Var = CTy->getDataLocation()) {
+    if (auto *VarDIE = getDIE(Var))
+      addDIEEntry(Buffer, dwarf::DW_AT_data_location, *VarDIE);
+  } else if (DIExpression *Expr = CTy->getDataLocationExp()) {
+    DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+    DIEDwarfExpression DwarfExpr(*Asm, getCU(), *Loc);
+    DwarfExpr.setMemoryLocationKind();
+    DwarfExpr.addExpression(Expr);
+    addBlock(Buffer, dwarf::DW_AT_data_location, DwarfExpr.finalize());
+  }
+
   // Emit the element type.
   addType(Buffer, CTy->getBaseType());
 
@@ -1443,8 +1465,7 @@ void DwarfUnit::constructEnumTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
       DIE &Enumerator = createAndAddDIE(dwarf::DW_TAG_enumerator, Buffer);
       StringRef Name = Enum->getName();
       addString(Enumerator, dwarf::DW_AT_name, Name);
-      auto Value = static_cast<uint64_t>(Enum->getValue());
-      addConstantValue(Enumerator, IsUnsigned, Value);
+      addConstantValue(Enumerator, Enum->getValue(), IsUnsigned);
       if (IndexEnumerators)
         addGlobalName(Name, Enumerator, Context);
     }

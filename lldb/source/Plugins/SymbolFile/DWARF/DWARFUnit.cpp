@@ -259,23 +259,33 @@ void DWARFUnit::ExtractDIEsRWLocked() {
 // .debug_str_offsets. At the same time, the corresponding split debug unit also
 // may use DW_FORM_strx* forms pointing to its own .debug_str_offsets.dwo and
 // for that case, we should find the offset (skip the section header).
-static void SetDwoStrOffsetsBase(DWARFUnit *dwo_cu) {
+void DWARFUnit::SetDwoStrOffsetsBase() {
   lldb::offset_t baseOffset = 0;
 
-  const DWARFDataExtractor &strOffsets =
-      dwo_cu->GetSymbolFileDWARF().GetDWARFContext().getOrLoadStrOffsetsData();
-  uint64_t length = strOffsets.GetU32(&baseOffset);
-  if (length == 0xffffffff)
-    length = strOffsets.GetU64(&baseOffset);
+  if (const llvm::DWARFUnitIndex::Entry *entry = m_header.GetIndexEntry()) {
+    if (const auto *contribution =
+            entry->getContribution(llvm::DW_SECT_STR_OFFSETS))
+      baseOffset = contribution->Offset;
+    else
+      return;
+  }
 
-  // Check version.
-  if (strOffsets.GetU16(&baseOffset) < 5)
-    return;
+  if (GetVersion() >= 5) {
+    const DWARFDataExtractor &strOffsets =
+        GetSymbolFileDWARF().GetDWARFContext().getOrLoadStrOffsetsData();
+    uint64_t length = strOffsets.GetU32(&baseOffset);
+    if (length == 0xffffffff)
+      length = strOffsets.GetU64(&baseOffset);
 
-  // Skip padding.
-  baseOffset += 2;
+    // Check version.
+    if (strOffsets.GetU16(&baseOffset) < 5)
+      return;
 
-  dwo_cu->SetStrOffsetsBase(baseOffset);
+    // Skip padding.
+    baseOffset += 2;
+  }
+
+  SetStrOffsetsBase(baseOffset);
 }
 
 // m_die_array_mutex must be already held as read/write.
@@ -334,8 +344,10 @@ void DWARFUnit::AddUnitDIE(const DWARFDebugInfoEntry &cu_die) {
     }
   }
 
-  if (m_is_dwo)
+  if (m_is_dwo) {
+    SetDwoStrOffsetsBase();
     return;
+  }
 
   std::shared_ptr<SymbolFileDWARFDwo> dwo_symbol_file =
       m_dwarf.GetDwoSymbolFileForCompileUnit(*this, cu_die);
@@ -377,10 +389,6 @@ void DWARFUnit::AddUnitDIE(const DWARFDebugInfoEntry &cu_die) {
     dwo_cu->SetLoclistsBase(llvm::DWARFListTableHeader::getHeaderSize(DWARF32));
   dwo_cu->SetBaseAddress(GetBaseAddress());
 
-  for (size_t i = 0; i < dwo_symbol_file->DebugInfo()->GetNumUnits(); ++i) {
-    DWARFUnit *unit = dwo_symbol_file->DebugInfo()->GetUnitAtIndex(i);
-    SetDwoStrOffsetsBase(unit);
-  }
   m_dwo = std::shared_ptr<DWARFUnit>(std::move(dwo_symbol_file), dwo_cu);
 }
 
@@ -467,10 +475,17 @@ DWARFUnit::GetLocationTable(const DataExtractor &data) const {
   return std::make_unique<llvm::DWARFDebugLoc>(llvm_data);
 }
 
-const DWARFDataExtractor &DWARFUnit::GetLocationData() const {
+DWARFDataExtractor DWARFUnit::GetLocationData() const {
   DWARFContext &Ctx = GetSymbolFileDWARF().GetDWARFContext();
-  return GetVersion() >= 5 ? Ctx.getOrLoadLocListsData()
-                           : Ctx.getOrLoadLocData();
+  const DWARFDataExtractor &data =
+      GetVersion() >= 5 ? Ctx.getOrLoadLocListsData() : Ctx.getOrLoadLocData();
+  if (const llvm::DWARFUnitIndex::Entry *entry = m_header.GetIndexEntry()) {
+    if (const auto *contribution = entry->getContribution(llvm::DW_SECT_EXT_LOC))
+      return DWARFDataExtractor(data, contribution->Offset,
+                                contribution->Length);
+    return DWARFDataExtractor();
+  }
+  return data;
 }
 
 void DWARFUnit::SetRangesBase(dw_addr_t ranges_base) {
@@ -801,12 +816,13 @@ DWARFUnitHeader::extract(const DWARFDataExtractor &data,
           llvm::inconvertibleErrorCode(),
           "Package unit with a non-zero abbreviation offset");
     }
-    auto *unit_contrib = header.m_index_entry->getOffset();
+    auto *unit_contrib = header.m_index_entry->getContribution();
     if (!unit_contrib || unit_contrib->Length != header.m_length + 4) {
       return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                      "Inconsistent DWARF package unit index");
     }
-    auto *abbr_entry = header.m_index_entry->getOffset(llvm::DW_SECT_ABBREV);
+    auto *abbr_entry =
+        header.m_index_entry->getContribution(llvm::DW_SECT_ABBREV);
     if (!abbr_entry) {
       return llvm::createStringError(
           llvm::inconvertibleErrorCode(),
@@ -898,6 +914,12 @@ uint32_t DWARFUnit::GetHeaderByteSize() const {
     return GetVersion() < 5 ? 23 : 24;
   }
   llvm_unreachable("invalid UnitType.");
+}
+
+llvm::Optional<uint64_t>
+DWARFUnit::GetStringOffsetSectionItem(uint32_t index) const {
+  offset_t offset = GetStrOffsetsBase() + index * 4;
+  return m_dwarf.GetDWARFContext().getOrLoadStrOffsetsData().GetU32(&offset);
 }
 
 llvm::Expected<DWARFRangeList>

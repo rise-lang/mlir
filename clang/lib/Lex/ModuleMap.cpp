@@ -282,7 +282,7 @@ void ModuleMap::resolveHeader(Module *Mod,
     // resolved. (Such a module still can't be built though, except from
     // preprocessed source.)
     if (!Header.Size && !Header.ModTime)
-      Mod->markUnavailable();
+      Mod->markUnavailable(/*Unimportable=*/false);
   }
 }
 
@@ -544,6 +544,9 @@ void ModuleMap::diagnoseHeaderInclusion(Module *RequestingModule,
 static bool isBetterKnownHeader(const ModuleMap::KnownHeader &New,
                                 const ModuleMap::KnownHeader &Old) {
   // Prefer available modules.
+  // FIXME: Considering whether the module is available rather than merely
+  // importable is non-hermetic and can result in surprising behavior for
+  // prebuilt modules. Consider only checking for importability here.
   if (New.getModule()->isAvailable() && !Old.getModule()->isAvailable())
     return true;
 
@@ -659,7 +662,20 @@ ModuleMap::findOrCreateModuleForHeaderInUmbrellaDir(const FileEntry *File) {
 }
 
 ArrayRef<ModuleMap::KnownHeader>
-ModuleMap::findAllModulesForHeader(const FileEntry *File) const {
+ModuleMap::findAllModulesForHeader(const FileEntry *File) {
+  HeadersMap::iterator Known = findKnownHeader(File);
+  if (Known != Headers.end())
+    return Known->second;
+
+  if (findOrCreateModuleForHeaderInUmbrellaDir(File))
+    return Headers.find(File)->second;
+
+  return None;
+}
+
+ArrayRef<ModuleMap::KnownHeader>
+ModuleMap::findResolvedModulesForHeader(const FileEntry *File) const {
+  // FIXME: Is this necessary?
   resolveHeaderDirectives(File);
   auto It = Headers.find(File);
   if (It == Headers.end())
@@ -1094,7 +1110,7 @@ Module *ModuleMap::createShadowedModule(StringRef Name, bool IsFramework,
       new Module(Name, SourceLocation(), /*Parent=*/nullptr, IsFramework,
                  /*IsExplicit=*/false, NumCreatedModules++);
   Result->ShadowingModule = ShadowingModule;
-  Result->IsAvailable = false;
+  Result->markUnavailable(/*Unimportable*/true);
   ModuleScopeIDs[Result] = CurrentModuleScopeID;
   ShadowModules.push_back(Result);
 
@@ -1105,6 +1121,7 @@ void ModuleMap::setUmbrellaHeader(Module *Mod, const FileEntry *UmbrellaHeader,
                                   Twine NameAsWritten) {
   Headers[UmbrellaHeader].push_back(KnownHeader(Mod, NormalHeader));
   Mod->Umbrella = UmbrellaHeader;
+  Mod->HasUmbrellaDir = false;
   Mod->UmbrellaAsWritten = NameAsWritten.str();
   UmbrellaDirs[UmbrellaHeader->getDir()] = Mod;
 
@@ -1116,6 +1133,7 @@ void ModuleMap::setUmbrellaHeader(Module *Mod, const FileEntry *UmbrellaHeader,
 void ModuleMap::setUmbrellaDir(Module *Mod, const DirectoryEntry *UmbrellaDir,
                                Twine NameAsWritten) {
   Mod->Umbrella = UmbrellaDir;
+  Mod->HasUmbrellaDir = true;
   Mod->UmbrellaAsWritten = NameAsWritten.str();
   UmbrellaDirs[UmbrellaDir] = Mod;
 }
@@ -1240,6 +1258,11 @@ const FileEntry *ModuleMap::getModuleMapFileForUniquing(const Module *M) const {
 void ModuleMap::setInferredModuleAllowedBy(Module *M, const FileEntry *ModMap) {
   assert(M->IsInferred && "module not inferred");
   InferredModuleAllowedBy[M] = ModMap;
+}
+
+void ModuleMap::addAdditionalModuleMapFile(const Module *M,
+                                           const FileEntry *ModuleMap) {
+  AdditionalModMaps[M].insert(ModuleMap);
 }
 
 LLVM_DUMP_METHOD void ModuleMap::dump() {
@@ -2089,9 +2112,9 @@ void ModuleMapParser::parseModuleDecl() {
 
   // If the module meets all requirements but is still unavailable, mark the
   // whole tree as unavailable to prevent it from building.
-  if (!ActiveModule->IsAvailable && !ActiveModule->IsMissingRequirement &&
+  if (!ActiveModule->IsAvailable && !ActiveModule->IsUnimportable &&
       ActiveModule->Parent) {
-    ActiveModule->getTopLevelModule()->markUnavailable();
+    ActiveModule->getTopLevelModule()->markUnavailable(/*Unimportable=*/false);
     ActiveModule->getTopLevelModule()->MissingHeaders.append(
       ActiveModule->MissingHeaders.begin(), ActiveModule->MissingHeaders.end());
   }

@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 //
 // This checker improves modeling of a few simple library functions.
-// It does not generate warnings.
 //
 // This checker provides a specification format - `Summary' - and
 // contains descriptions of some library functions in this format. Each
@@ -51,6 +50,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
@@ -61,7 +61,8 @@ using namespace clang;
 using namespace clang::ento;
 
 namespace {
-class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
+class StdLibraryFunctionsChecker
+    : public Checker<check::PreCall, check::PostCall, eval::Call> {
   /// Below is a series of typedefs necessary to define function specs.
   /// We avoid nesting types here because each additional qualifier
   /// would need to be repeated in every function spec.
@@ -70,14 +71,6 @@ class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
   /// Specify how much the analyzer engine should entrust modeling this function
   /// to us. If he doesn't, he performs additional invalidations.
   enum InvalidationKind { NoEvalCall, EvalCallAsPure };
-
-  /// A pair of ValueRangeKind and IntRangeVector would describe a range
-  /// imposed on a particular argument or return value symbol.
-  ///
-  /// Given a range, should the argument stay inside or outside this range?
-  /// The special `ComparesToArgument' value indicates that we should
-  /// impose a constraint that involves other argument or return value symbols.
-  enum ValueRangeKind { OutOfRange, WithinRange, ComparesToArgument };
 
   // The universal integral type to use in value range descriptions.
   // Unsigned to make sure overflows are well-defined.
@@ -93,44 +86,54 @@ class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
   /// ArgNo in CallExpr and CallEvent is defined as Unsigned, but
   /// obviously uint32_t should be enough for all practical purposes.
   typedef uint32_t ArgNo;
-  static const ArgNo Ret = std::numeric_limits<ArgNo>::max();
+  static const ArgNo Ret;
 
-  /// Incapsulates a single range on a single symbol within a branch.
-  class ValueRange {
-    ArgNo ArgN;          // Argument to which we apply the range.
-    ValueRangeKind Kind; // Kind of range definition.
+  class ValueConstraint;
+
+  // Pointer to the ValueConstraint. We need a copyable, polymorphic and
+  // default initialize able type (vector needs that). A raw pointer was good,
+  // however, we cannot default initialize that. unique_ptr makes the Summary
+  // class non-copyable, therefore not an option. Releasing the copyability
+  // requirement would render the initialization of the Summary map infeasible.
+  using ValueConstraintPtr = std::shared_ptr<ValueConstraint>;
+
+  /// Polymorphic base class that represents a constraint on a given argument
+  /// (or return value) of a function. Derived classes implement different kind
+  /// of constraints, e.g range constraints or correlation between two
+  /// arguments.
+  class ValueConstraint {
+  public:
+    ValueConstraint(ArgNo ArgN) : ArgN(ArgN) {}
+    virtual ~ValueConstraint() {}
+    /// Apply the effects of the constraint on the given program state. If null
+    /// is returned then the constraint is not feasible.
+    virtual ProgramStateRef apply(ProgramStateRef State, const CallEvent &Call,
+                                  const Summary &Summary) const = 0;
+    virtual ValueConstraintPtr negate() const {
+      llvm_unreachable("Not implemented");
+    };
+    ArgNo getArgNo() const { return ArgN; }
+
+  protected:
+    ArgNo ArgN; // Argument to which we apply the constraint.
+  };
+
+  /// Given a range, should the argument stay inside or outside this range?
+  enum RangeKind { OutOfRange, WithinRange };
+
+  /// Encapsulates a single range on a single symbol within a branch.
+  class RangeConstraint : public ValueConstraint {
+    RangeKind Kind;      // Kind of range definition.
     IntRangeVector Args; // Polymorphic arguments.
 
   public:
-    ValueRange(ArgNo ArgN, ValueRangeKind Kind, const IntRangeVector &Args)
-        : ArgN(ArgN), Kind(Kind), Args(Args) {}
-
-    ArgNo getArgNo() const { return ArgN; }
-    ValueRangeKind getKind() const { return Kind; }
-
-    BinaryOperator::Opcode getOpcode() const {
-      assert(Kind == ComparesToArgument);
-      assert(Args.size() == 1);
-      BinaryOperator::Opcode Op =
-          static_cast<BinaryOperator::Opcode>(Args[0].first);
-      assert(BinaryOperator::isComparisonOp(Op) &&
-             "Only comparison ops are supported for ComparesToArgument");
-      return Op;
-    }
-
-    ArgNo getOtherArgNo() const {
-      assert(Kind == ComparesToArgument);
-      assert(Args.size() == 1);
-      return static_cast<ArgNo>(Args[0].second);
-    }
+    RangeConstraint(ArgNo ArgN, RangeKind Kind, const IntRangeVector &Args)
+        : ValueConstraint(ArgN), Kind(Kind), Args(Args) {}
 
     const IntRangeVector &getRanges() const {
-      assert(Kind != ComparesToArgument);
       return Args;
     }
 
-    // We avoid creating a virtual apply() method because
-    // it makes initializer lists harder to write.
   private:
     ProgramStateRef applyAsOutOfRange(ProgramStateRef State,
                                       const CallEvent &Call,
@@ -138,47 +141,113 @@ class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
     ProgramStateRef applyAsWithinRange(ProgramStateRef State,
                                        const CallEvent &Call,
                                        const Summary &Summary) const;
-    ProgramStateRef applyAsComparesToArgument(ProgramStateRef State,
-                                              const CallEvent &Call,
-                                              const Summary &Summary) const;
-
   public:
     ProgramStateRef apply(ProgramStateRef State, const CallEvent &Call,
-                          const Summary &Summary) const {
+                          const Summary &Summary) const override {
       switch (Kind) {
       case OutOfRange:
         return applyAsOutOfRange(State, Call, Summary);
       case WithinRange:
         return applyAsWithinRange(State, Call, Summary);
-      case ComparesToArgument:
-        return applyAsComparesToArgument(State, Call, Summary);
       }
-      llvm_unreachable("Unknown ValueRange kind!");
+      llvm_unreachable("Unknown range kind!");
+    }
+
+    ValueConstraintPtr negate() const override {
+      RangeConstraint Tmp(*this);
+      switch (Kind) {
+      case OutOfRange:
+        Tmp.Kind = WithinRange;
+        break;
+      case WithinRange:
+        Tmp.Kind = OutOfRange;
+        break;
+      }
+      return std::make_shared<RangeConstraint>(Tmp);
     }
   };
 
-  /// The complete list of ranges that defines a single branch.
-  typedef std::vector<ValueRange> ValueRangeSet;
+  class ComparisonConstraint : public ValueConstraint {
+    BinaryOperator::Opcode Opcode;
+    ArgNo OtherArgN;
+
+  public:
+    ComparisonConstraint(ArgNo ArgN, BinaryOperator::Opcode Opcode,
+                         ArgNo OtherArgN)
+        : ValueConstraint(ArgN), Opcode(Opcode), OtherArgN(OtherArgN) {}
+    ArgNo getOtherArgNo() const { return OtherArgN; }
+    BinaryOperator::Opcode getOpcode() const { return Opcode; }
+    ProgramStateRef apply(ProgramStateRef State, const CallEvent &Call,
+                          const Summary &Summary) const override;
+  };
+
+  class NotNullConstraint : public ValueConstraint {
+    using ValueConstraint::ValueConstraint;
+    // This variable has a role when we negate the constraint.
+    bool CannotBeNull = true;
+
+  public:
+    ProgramStateRef apply(ProgramStateRef State, const CallEvent &Call,
+                          const Summary &Summary) const override {
+      SVal V = getArgSVal(Call, getArgNo());
+      if (V.isUndef())
+        return State;
+
+      DefinedOrUnknownSVal L = V.castAs<DefinedOrUnknownSVal>();
+      if (!L.getAs<Loc>())
+        return State;
+
+      return State->assume(L, CannotBeNull);
+    }
+
+    ValueConstraintPtr negate() const override {
+      NotNullConstraint Tmp(*this);
+      Tmp.CannotBeNull = !this->CannotBeNull;
+      return std::make_shared<NotNullConstraint>(Tmp);
+    }
+  };
+
+  /// The complete list of constraints that defines a single branch.
+  typedef std::vector<ValueConstraintPtr> ConstraintSet;
 
   using ArgTypes = std::vector<QualType>;
-  using Ranges = std::vector<ValueRangeSet>;
+  using Cases = std::vector<ConstraintSet>;
 
-  /// Includes information about function prototype (which is necessary to
-  /// ensure we're modeling the right function and casting values properly),
-  /// approach to invalidation, and a list of branches - essentially, a list
-  /// of list of ranges - essentially, a list of lists of lists of segments.
+  /// Includes information about
+  ///   * function prototype (which is necessary to
+  ///     ensure we're modeling the right function and casting values properly),
+  ///   * approach to invalidation,
+  ///   * a list of branches - a list of list of ranges -
+  ///     A branch represents a path in the exploded graph of a function (which
+  ///     is a tree). So, a branch is a series of assumptions. In other words,
+  ///     branches represent split states and additional assumptions on top of
+  ///     the splitting assumption.
+  ///     For example, consider the branches in `isalpha(x)`
+  ///       Branch 1)
+  ///         x is in range ['A', 'Z'] or in ['a', 'z']
+  ///         then the return value is not 0. (I.e. out-of-range [0, 0])
+  ///       Branch 2)
+  ///         x is out-of-range ['A', 'Z'] and out-of-range ['a', 'z']
+  ///         then the return value is 0.
+  ///   * a list of argument constraints, that must be true on every branch.
+  ///     If these constraints are not satisfied that means a fatal error
+  ///     usually resulting in undefined behaviour.
   struct Summary {
     const ArgTypes ArgTys;
     const QualType RetTy;
     const InvalidationKind InvalidationKd;
-    Ranges Cases;
-    ValueRangeSet ArgConstraints;
+    Cases CaseConstraints;
+    ConstraintSet ArgConstraints;
 
     Summary(ArgTypes ArgTys, QualType RetTy, InvalidationKind InvalidationKd)
         : ArgTys(ArgTys), RetTy(RetTy), InvalidationKd(InvalidationKd) {}
 
-    Summary &Case(ValueRangeSet VRS) {
-      Cases.push_back(VRS);
+    Summary &Case(ConstraintSet&& CS) {
+      CaseConstraints.push_back(std::move(CS));
+      return *this;
+    }
+    Summary &ArgConstraint(ValueConstraintPtr VC) {
+      ArgConstraints.push_back(VC);
       return *this;
     }
 
@@ -188,9 +257,6 @@ class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
              "We should have had no significant void types in the spec");
       assert(T.isCanonical() &&
              "We should only have canonical types in the spec");
-      // FIXME: lift this assert (but not the ones above!)
-      assert(T->isIntegralOrEnumerationType() &&
-             "We only support integral ranges in the spec");
     }
 
   public:
@@ -200,53 +266,72 @@ class StdLibraryFunctionsChecker : public Checker<check::PostCall, eval::Call> {
       return T;
     }
 
-    /// Try our best to figure out if the call expression is the call of
+    /// Try our best to figure out if the summary's signature matches
     /// *the* library function to which this specification applies.
-    bool matchesCall(const CallExpr *CE) const;
+    bool matchesSignature(const FunctionDecl *FD) const;
   };
-
-  // The same function (as in, function identifier) may have different
-  // summaries assigned to it, with different argument and return value types.
-  // We call these "variants" of the function. This can be useful for handling
-  // C++ function overloads, and also it can be used when the same function
-  // may have different definitions on different platforms.
-  typedef std::vector<Summary> Summaries;
 
   // The map of all functions supported by the checker. It is initialized
   // lazily, and it doesn't change after initialization.
-  mutable llvm::StringMap<Summaries> FunctionSummaryMap;
+  using FunctionSummaryMapType = llvm::DenseMap<const FunctionDecl *, Summary>;
+  mutable FunctionSummaryMapType FunctionSummaryMap;
+
+  mutable std::unique_ptr<BugType> BT_InvalidArg;
 
   // Auxiliary functions to support ArgNo within all structures
   // in a unified manner.
   static QualType getArgType(const Summary &Summary, ArgNo ArgN) {
     return Summary.getArgType(ArgN);
   }
-  static QualType getArgType(const CallEvent &Call, ArgNo ArgN) {
-    return ArgN == Ret ? Call.getResultType().getCanonicalType()
-                       : Call.getArgExpr(ArgN)->getType().getCanonicalType();
-  }
-  static QualType getArgType(const CallExpr *CE, ArgNo ArgN) {
-    return ArgN == Ret ? CE->getType().getCanonicalType()
-                       : CE->getArg(ArgN)->getType().getCanonicalType();
-  }
   static SVal getArgSVal(const CallEvent &Call, ArgNo ArgN) {
     return ArgN == Ret ? Call.getReturnValue() : Call.getArgSVal(ArgN);
   }
 
 public:
+  void checkPreCall(const CallEvent &Call, CheckerContext &C) const;
   void checkPostCall(const CallEvent &Call, CheckerContext &C) const;
   bool evalCall(const CallEvent &Call, CheckerContext &C) const;
 
+  enum CheckKind {
+    CK_StdCLibraryFunctionArgsChecker,
+    CK_StdCLibraryFunctionsTesterChecker,
+    CK_NumCheckKinds
+  };
+  DefaultBool ChecksEnabled[CK_NumCheckKinds];
+  CheckerNameRef CheckNames[CK_NumCheckKinds];
+
+  bool DisplayLoadedSummaries = false;
+
 private:
   Optional<Summary> findFunctionSummary(const FunctionDecl *FD,
-                                        const CallExpr *CE,
+                                        CheckerContext &C) const;
+  Optional<Summary> findFunctionSummary(const CallEvent &Call,
                                         CheckerContext &C) const;
 
   void initFunctionSummaries(CheckerContext &C) const;
+
+  void reportBug(const CallEvent &Call, ExplodedNode *N,
+                 CheckerContext &C) const {
+    if (!ChecksEnabled[CK_StdCLibraryFunctionArgsChecker])
+      return;
+    // TODO Add detailed diagnostic.
+    StringRef Msg = "Function argument constraint is not satisfied";
+    if (!BT_InvalidArg)
+      BT_InvalidArg = std::make_unique<BugType>(
+          CheckNames[CK_StdCLibraryFunctionArgsChecker],
+          "Unsatisfied argument constraints", categories::LogicError);
+    auto R = std::make_unique<PathSensitiveBugReport>(*BT_InvalidArg, Msg, N);
+    bugreporter::trackExpressionValue(N, Call.getArgExpr(0), *R);
+    C.emitReport(std::move(R));
+  }
 };
+
+const StdLibraryFunctionsChecker::ArgNo StdLibraryFunctionsChecker::Ret =
+    std::numeric_limits<ArgNo>::max();
+
 } // end of anonymous namespace
 
-ProgramStateRef StdLibraryFunctionsChecker::ValueRange::applyAsOutOfRange(
+ProgramStateRef StdLibraryFunctionsChecker::RangeConstraint::applyAsOutOfRange(
     ProgramStateRef State, const CallEvent &Call,
     const Summary &Summary) const {
 
@@ -273,7 +358,7 @@ ProgramStateRef StdLibraryFunctionsChecker::ValueRange::applyAsOutOfRange(
   return State;
 }
 
-ProgramStateRef StdLibraryFunctionsChecker::ValueRange::applyAsWithinRange(
+ProgramStateRef StdLibraryFunctionsChecker::RangeConstraint::applyAsWithinRange(
     ProgramStateRef State, const CallEvent &Call,
     const Summary &Summary) const {
 
@@ -330,8 +415,7 @@ ProgramStateRef StdLibraryFunctionsChecker::ValueRange::applyAsWithinRange(
   return State;
 }
 
-ProgramStateRef
-StdLibraryFunctionsChecker::ValueRange::applyAsComparesToArgument(
+ProgramStateRef StdLibraryFunctionsChecker::ComparisonConstraint::apply(
     ProgramStateRef State, const CallEvent &Call,
     const Summary &Summary) const {
 
@@ -344,7 +428,7 @@ StdLibraryFunctionsChecker::ValueRange::applyAsComparesToArgument(
   BinaryOperator::Opcode Op = getOpcode();
   ArgNo OtherArg = getOtherArgNo();
   SVal OtherV = getArgSVal(Call, OtherArg);
-  QualType OtherT = getArgType(Call, OtherArg);
+  QualType OtherT = getArgType(Summary, OtherArg);
   // Note: we avoid integral promotion for comparison.
   OtherV = SVB.evalCast(OtherV, T, OtherT);
   if (auto CompV = SVB.evalBinOp(State, Op, V, OtherV, CondT)
@@ -353,29 +437,52 @@ StdLibraryFunctionsChecker::ValueRange::applyAsComparesToArgument(
   return State;
 }
 
-void StdLibraryFunctionsChecker::checkPostCall(const CallEvent &Call,
-                                               CheckerContext &C) const {
-  const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(Call.getDecl());
-  if (!FD)
-    return;
-
-  const CallExpr *CE = dyn_cast_or_null<CallExpr>(Call.getOriginExpr());
-  if (!CE)
-    return;
-
-  Optional<Summary> FoundSummary = findFunctionSummary(FD, CE, C);
+void StdLibraryFunctionsChecker::checkPreCall(const CallEvent &Call,
+                                              CheckerContext &C) const {
+  Optional<Summary> FoundSummary = findFunctionSummary(Call, C);
   if (!FoundSummary)
     return;
 
-  // Now apply ranges.
+  const Summary &Summary = *FoundSummary;
+  ProgramStateRef State = C.getState();
+
+  ProgramStateRef NewState = State;
+  for (const ValueConstraintPtr& VC : Summary.ArgConstraints) {
+    ProgramStateRef SuccessSt = VC->apply(NewState, Call, Summary);
+    ProgramStateRef FailureSt = VC->negate()->apply(NewState, Call, Summary);
+    // The argument constraint is not satisfied.
+    if (FailureSt && !SuccessSt) {
+      if (ExplodedNode *N = C.generateErrorNode(NewState))
+        reportBug(Call, N, C);
+      break;
+    } else {
+      // We will apply the constraint even if we cannot reason about the
+      // argument. This means both SuccessSt and FailureSt can be true. If we
+      // weren't applying the constraint that would mean that symbolic
+      // execution continues on a code whose behaviour is undefined.
+      assert(SuccessSt);
+      NewState = SuccessSt;
+    }
+  }
+  if (NewState && NewState != State)
+    C.addTransition(NewState);
+}
+
+void StdLibraryFunctionsChecker::checkPostCall(const CallEvent &Call,
+                                               CheckerContext &C) const {
+  Optional<Summary> FoundSummary = findFunctionSummary(Call, C);
+  if (!FoundSummary)
+    return;
+
+  // Now apply the constraints.
   const Summary &Summary = *FoundSummary;
   ProgramStateRef State = C.getState();
 
   // Apply case/branch specifications.
-  for (const auto &VRS : Summary.Cases) {
+  for (const auto &VRS : Summary.CaseConstraints) {
     ProgramStateRef NewState = State;
     for (const auto &VR: VRS) {
-      NewState = VR.apply(NewState, Call, Summary);
+      NewState = VR->apply(NewState, Call, Summary);
       if (!NewState)
         break;
     }
@@ -387,15 +494,7 @@ void StdLibraryFunctionsChecker::checkPostCall(const CallEvent &Call,
 
 bool StdLibraryFunctionsChecker::evalCall(const CallEvent &Call,
                                           CheckerContext &C) const {
-  const auto *FD = dyn_cast_or_null<FunctionDecl>(Call.getDecl());
-  if (!FD)
-    return false;
-
-  const auto *CE = dyn_cast_or_null<CallExpr>(Call.getOriginExpr());
-  if (!CE)
-    return false;
-
-  Optional<Summary> FoundSummary = findFunctionSummary(FD, CE, C);
+  Optional<Summary> FoundSummary = findFunctionSummary(Call, C);
   if (!FoundSummary)
     return false;
 
@@ -404,6 +503,7 @@ bool StdLibraryFunctionsChecker::evalCall(const CallEvent &Call,
   case EvalCallAsPure: {
     ProgramStateRef State = C.getState();
     const LocationContext *LC = C.getLocationContext();
+    const auto *CE = cast_or_null<CallExpr>(Call.getOriginExpr());
     SVal V = C.getSValBuilder().conjureSymbolVal(
         CE, LC, CE->getType().getCanonicalType(), C.blockCount());
     State = State->BindExpr(CE, LC, V);
@@ -418,14 +518,14 @@ bool StdLibraryFunctionsChecker::evalCall(const CallEvent &Call,
   llvm_unreachable("Unknown invalidation kind!");
 }
 
-bool StdLibraryFunctionsChecker::Summary::matchesCall(
-    const CallExpr *CE) const {
+bool StdLibraryFunctionsChecker::Summary::matchesSignature(
+    const FunctionDecl *FD) const {
   // Check number of arguments:
-  if (CE->getNumArgs() != ArgTys.size())
+  if (FD->param_size() != ArgTys.size())
     return false;
 
   // Check return type if relevant:
-  if (!RetTy.isNull() && RetTy != CE->getType().getCanonicalType())
+  if (!RetTy.isNull() && RetTy != FD->getReturnType().getCanonicalType())
     return false;
 
   // Check argument types when relevant:
@@ -437,8 +537,7 @@ bool StdLibraryFunctionsChecker::Summary::matchesCall(
 
     assertTypeSuitableForSummary(FormalT);
 
-    QualType ActualT = StdLibraryFunctionsChecker::getArgType(CE, I);
-    assert(ActualT.isCanonical());
+    QualType ActualT = FD->getParamDecl(I)->getType().getCanonicalType();
     if (ActualT != FormalT)
       return false;
   }
@@ -448,39 +547,40 @@ bool StdLibraryFunctionsChecker::Summary::matchesCall(
 
 Optional<StdLibraryFunctionsChecker::Summary>
 StdLibraryFunctionsChecker::findFunctionSummary(const FunctionDecl *FD,
-                                                const CallExpr *CE,
                                                 CheckerContext &C) const {
-  // Note: we cannot always obtain FD from CE
-  // (eg. virtual call, or call by pointer).
-  assert(CE);
-
   if (!FD)
     return None;
 
   initFunctionSummaries(C);
 
-  IdentifierInfo *II = FD->getIdentifier();
-  if (!II)
-    return None;
-  StringRef Name = II->getName();
-  if (Name.empty() || !C.isCLibraryFunction(FD, Name))
-    return None;
-
-  auto FSMI = FunctionSummaryMap.find(Name);
+  auto FSMI = FunctionSummaryMap.find(FD->getCanonicalDecl());
   if (FSMI == FunctionSummaryMap.end())
     return None;
+  return FSMI->second;
+}
 
-  // Verify that function signature matches the spec in advance.
-  // Otherwise we might be modeling the wrong function.
-  // Strict checking is important because we will be conducting
-  // very integral-type-sensitive operations on arguments and
-  // return values.
-  const Summaries &SpecVariants = FSMI->second;
-  for (const Summary &Spec : SpecVariants)
-    if (Spec.matchesCall(CE))
-      return Spec;
+Optional<StdLibraryFunctionsChecker::Summary>
+StdLibraryFunctionsChecker::findFunctionSummary(const CallEvent &Call,
+                                                CheckerContext &C) const {
+  const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(Call.getDecl());
+  if (!FD)
+    return None;
+  return findFunctionSummary(FD, C);
+}
 
-  return None;
+llvm::Optional<const FunctionDecl *>
+lookupGlobalCFunction(StringRef Name, const ASTContext &ACtx) {
+  IdentifierInfo &II = ACtx.Idents.get(Name);
+  auto LookupRes = ACtx.getTranslationUnitDecl()->lookup(&II);
+  if (LookupRes.size() == 0)
+    return None;
+
+  assert(LookupRes.size() == 1 && "In C, identifiers should be unique");
+  Decl *D = LookupRes.front()->getCanonicalDecl();
+  auto *FD = dyn_cast<FunctionDecl>(D);
+  if (!FD)
+    return None;
+  return FD->getCanonicalDecl();
 }
 
 void StdLibraryFunctionsChecker::initFunctionSummaries(
@@ -500,18 +600,33 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
   // or long long, so three summary variants would be enough).
   // Of course, function variants are also useful for C++ overloads.
   const QualType
-      Irrelevant; // A placeholder, whenever we do not care about the type.
+      Irrelevant{}; // A placeholder, whenever we do not care about the type.
   const QualType IntTy = ACtx.IntTy;
   const QualType LongTy = ACtx.LongTy;
   const QualType LongLongTy = ACtx.LongLongTy;
   const QualType SizeTy = ACtx.getSizeType();
+  const QualType VoidPtrTy = ACtx.VoidPtrTy; // void *
+  const QualType VoidPtrRestrictTy =
+      ACtx.getRestrictType(VoidPtrTy); // void *restrict
+  const QualType ConstVoidPtrTy =
+      ACtx.getPointerType(ACtx.VoidTy.withConst()); // const void *
+  const QualType ConstCharPtrTy =
+      ACtx.getPointerType(ACtx.CharTy.withConst()); // const char *
+  const QualType ConstVoidPtrRestrictTy =
+      ACtx.getRestrictType(ConstVoidPtrTy); // const void *restrict
 
   const RangeInt IntMax = BVF.getMaxValue(IntTy).getLimitedValue();
   const RangeInt LongMax = BVF.getMaxValue(LongTy).getLimitedValue();
   const RangeInt LongLongMax = BVF.getMaxValue(LongLongTy).getLimitedValue();
 
-  const RangeInt UCharMax =
-      BVF.getMaxValue(ACtx.UnsignedCharTy).getLimitedValue();
+  // Set UCharRangeMax to min of int or uchar maximum value.
+  // The C standard states that the arguments of functions like isalpha must
+  // be representable as an unsigned char. Their type is 'int', so the max
+  // value of the argument should be min(UCharMax, IntMax). This just happen
+  // to be true for commonly used and well tested instruction set
+  // architectures, but not for others.
+  const RangeInt UCharRangeMax =
+      std::min(BVF.getMaxValue(ACtx.UnsignedCharTy).getLimitedValue(), IntMax);
 
   // The platform dependent value of EOF.
   // Try our best to parse this from the Preprocessor, otherwise fallback to -1.
@@ -521,6 +636,47 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
       return *OptInt;
     return -1;
   }();
+
+  // Auxiliary class to aid adding summaries to the summary map.
+  struct AddToFunctionSummaryMap {
+    const ASTContext &ACtx;
+    FunctionSummaryMapType &Map;
+    bool DisplayLoadedSummaries;
+    AddToFunctionSummaryMap(const ASTContext &ACtx, FunctionSummaryMapType &FSM,
+                            bool DisplayLoadedSummaries)
+        : ACtx(ACtx), Map(FSM), DisplayLoadedSummaries(DisplayLoadedSummaries) {
+    }
+
+    // Add a summary to a FunctionDecl found by lookup. The lookup is performed
+    // by the given Name, and in the global scope. The summary will be attached
+    // to the found FunctionDecl only if the signatures match.
+    void operator()(StringRef Name, const Summary &S) {
+      IdentifierInfo &II = ACtx.Idents.get(Name);
+      auto LookupRes = ACtx.getTranslationUnitDecl()->lookup(&II);
+      if (LookupRes.size() == 0)
+        return;
+      for (Decl *D : LookupRes) {
+        if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+          if (S.matchesSignature(FD)) {
+            auto Res = Map.insert({FD->getCanonicalDecl(), S});
+            assert(Res.second && "Function already has a summary set!");
+            (void)Res;
+            if (DisplayLoadedSummaries) {
+              llvm::errs() << "Loaded summary for: ";
+              FD->print(llvm::errs());
+              llvm::errs() << "\n";
+            }
+            return;
+          }
+        }
+      }
+    }
+    // Add several summaries for the given name.
+    void operator()(StringRef Name, const std::vector<Summary> &Summaries) {
+      for (const Summary &S : Summaries)
+        operator()(Name, S);
+    }
+  } addToFunctionSummaryMap(ACtx, FunctionSummaryMap, DisplayLoadedSummaries);
 
   // We are finally ready to define specifications for all supported functions.
   //
@@ -547,47 +703,60 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
   // return value, however the correct range is [-1, 10].
   //
   // Please update the list of functions in the header after editing!
-  //
 
-  // Below are helper functions to create the summaries.
-  auto ArgumentCondition = [](ArgNo ArgN, ValueRangeKind Kind,
-                              IntRangeVector Ranges) -> ValueRange {
-    ValueRange VR{ArgN, Kind, Ranges};
-    return VR;
+  // Below are helpers functions to create the summaries.
+  auto ArgumentCondition = [](ArgNo ArgN, RangeKind Kind,
+                              IntRangeVector Ranges) {
+    return std::make_shared<RangeConstraint>(ArgN, Kind, Ranges);
   };
-  auto ReturnValueCondition = [](ValueRangeKind Kind,
-                                 IntRangeVector Ranges) -> ValueRange {
-    ValueRange VR{Ret, Kind, Ranges};
-    return VR;
-  };
+  struct {
+    auto operator()(RangeKind Kind, IntRangeVector Ranges) {
+      return std::make_shared<RangeConstraint>(Ret, Kind, Ranges);
+    }
+    auto operator()(BinaryOperator::Opcode Op, ArgNo OtherArgN) {
+      return std::make_shared<ComparisonConstraint>(Ret, Op, OtherArgN);
+    }
+  } ReturnValueCondition;
   auto Range = [](RangeInt b, RangeInt e) {
     return IntRangeVector{std::pair<RangeInt, RangeInt>{b, e}};
   };
   auto SingleValue = [](RangeInt v) {
     return IntRangeVector{std::pair<RangeInt, RangeInt>{v, v}};
   };
-  auto IsLessThan = [](ArgNo ArgN) { return IntRangeVector{{BO_LE, ArgN}}; };
+  auto LessThanOrEq = BO_LE;
+  auto NotNull = [&](ArgNo ArgN) {
+    return std::make_shared<NotNullConstraint>(ArgN);
+  };
 
   using RetType = QualType;
-
   // Templates for summaries that are reused by many functions.
   auto Getc = [&]() {
     return Summary(ArgTypes{Irrelevant}, RetType{IntTy}, NoEvalCall)
-        .Case(
-            {ReturnValueCondition(WithinRange, {{EOFv, EOFv}, {0, UCharMax}})});
+        .Case({ReturnValueCondition(WithinRange,
+                                    {{EOFv, EOFv}, {0, UCharRangeMax}})});
   };
   auto Read = [&](RetType R, RangeInt Max) {
     return Summary(ArgTypes{Irrelevant, Irrelevant, SizeTy}, RetType{R},
                    NoEvalCall)
-        .Case({ReturnValueCondition(ComparesToArgument, IsLessThan(2)),
+        .Case({ReturnValueCondition(LessThanOrEq, ArgNo(2)),
                ReturnValueCondition(WithinRange, Range(-1, Max))});
   };
   auto Fread = [&]() {
-    return Summary(ArgTypes{Irrelevant, Irrelevant, SizeTy, Irrelevant},
+    return Summary(ArgTypes{VoidPtrRestrictTy, Irrelevant, SizeTy, Irrelevant},
                    RetType{SizeTy}, NoEvalCall)
         .Case({
-            ReturnValueCondition(ComparesToArgument, IsLessThan(2)),
-        });
+            ReturnValueCondition(LessThanOrEq, ArgNo(2)),
+        })
+        .ArgConstraint(NotNull(ArgNo(0)));
+  };
+  auto Fwrite = [&]() {
+    return Summary(
+               ArgTypes{ConstVoidPtrRestrictTy, Irrelevant, SizeTy, Irrelevant},
+               RetType{SizeTy}, NoEvalCall)
+        .Case({
+            ReturnValueCondition(LessThanOrEq, ArgNo(2)),
+        })
+        .ArgConstraint(NotNull(ArgNo(0)));
   };
   auto Getline = [&](RetType R, RangeInt Max) {
     return Summary(ArgTypes{Irrelevant, Irrelevant, Irrelevant}, RetType{R},
@@ -595,206 +764,210 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
         .Case({ReturnValueCondition(WithinRange, {{-1, -1}, {1, Max}})});
   };
 
-  FunctionSummaryMap = {
-      // The isascii() family of functions.
-      {
-          "isalnum",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  // Boils down to isupper() or islower() or isdigit().
-                  .Case(
-                      {ArgumentCondition(0U, WithinRange,
-                                         {{'0', '9'}, {'A', 'Z'}, {'a', 'z'}}),
-                       ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  // The locale-specific range.
-                  // No post-condition. We are completely unaware of
-                  // locale-specific return values.
-                  .Case({ArgumentCondition(0U, WithinRange, {{128, UCharMax}})})
-                  .Case({ArgumentCondition(0U, OutOfRange,
-                                           {{'0', '9'},
-                                            {'A', 'Z'},
-                                            {'a', 'z'},
-                                            {128, UCharMax}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isalpha",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange,
-                                           {{'A', 'Z'}, {'a', 'z'}}),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  // The locale-specific range.
-                  .Case({ArgumentCondition(0U, WithinRange, {{128, UCharMax}})})
-                  .Case({ArgumentCondition(
-                             0U, OutOfRange,
-                             {{'A', 'Z'}, {'a', 'z'}, {128, UCharMax}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isascii",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange, Range(0, 127)),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(0U, OutOfRange, Range(0, 127)),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isblank",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange,
-                                           {{'\t', '\t'}, {' ', ' '}}),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(0U, OutOfRange,
-                                           {{'\t', '\t'}, {' ', ' '}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "iscntrl",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange,
-                                           {{0, 32}, {127, 127}}),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case(
-                      {ArgumentCondition(0U, OutOfRange, {{0, 32}, {127, 127}}),
-                       ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isdigit",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange, Range('0', '9')),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(0U, OutOfRange, Range('0', '9')),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isgraph",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange, Range(33, 126)),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(0U, OutOfRange, Range(33, 126)),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "islower",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  // Is certainly lowercase.
-                  .Case({ArgumentCondition(0U, WithinRange, Range('a', 'z')),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  // Is ascii but not lowercase.
-                  .Case({ArgumentCondition(0U, WithinRange, Range(0, 127)),
-                         ArgumentCondition(0U, OutOfRange, Range('a', 'z')),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})
-                  // The locale-specific range.
-                  .Case({ArgumentCondition(0U, WithinRange, {{128, UCharMax}})})
-                  // Is not an unsigned char.
-                  .Case({ArgumentCondition(0U, OutOfRange, Range(0, UCharMax)),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isprint",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(0U, WithinRange, Range(32, 126)),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(0U, OutOfRange, Range(32, 126)),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "ispunct",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case({ArgumentCondition(
-                             0U, WithinRange,
-                             {{'!', '/'}, {':', '@'}, {'[', '`'}, {'{', '~'}}),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case({ArgumentCondition(
-                             0U, OutOfRange,
-                             {{'!', '/'}, {':', '@'}, {'[', '`'}, {'{', '~'}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isspace",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  // Space, '\f', '\n', '\r', '\t', '\v'.
-                  .Case({ArgumentCondition(0U, WithinRange,
-                                           {{9, 13}, {' ', ' '}}),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  // The locale-specific range.
-                  .Case({ArgumentCondition(0U, WithinRange, {{128, UCharMax}})})
-                  .Case({ArgumentCondition(
-                             0U, OutOfRange,
-                             {{9, 13}, {' ', ' '}, {128, UCharMax}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isupper",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  // Is certainly uppercase.
-                  .Case({ArgumentCondition(0U, WithinRange, Range('A', 'Z')),
-                         ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  // The locale-specific range.
-                  .Case({ArgumentCondition(0U, WithinRange, {{128, UCharMax}})})
-                  // Other.
-                  .Case({ArgumentCondition(0U, OutOfRange,
-                                           {{'A', 'Z'}, {128, UCharMax}}),
-                         ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
-      {
-          "isxdigit",
-          Summaries{
-              Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
-                  .Case(
-                      {ArgumentCondition(0U, WithinRange,
-                                         {{'0', '9'}, {'A', 'F'}, {'a', 'f'}}),
-                       ReturnValueCondition(OutOfRange, SingleValue(0))})
-                  .Case(
-                      {ArgumentCondition(0U, OutOfRange,
-                                         {{'0', '9'}, {'A', 'F'}, {'a', 'f'}}),
-                       ReturnValueCondition(WithinRange, SingleValue(0))})},
-      },
+  // The isascii() family of functions.
+  // The behavior is undefined if the value of the argument is not
+  // representable as unsigned char or is not equal to EOF. See e.g. C99
+  // 7.4.1.2 The isalpha function (p: 181-182).
+  addToFunctionSummaryMap(
+      "isalnum",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          // Boils down to isupper() or islower() or isdigit().
+          .Case({ArgumentCondition(0U, WithinRange,
+                                   {{'0', '9'}, {'A', 'Z'}, {'a', 'z'}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          // The locale-specific range.
+          // No post-condition. We are completely unaware of
+          // locale-specific return values.
+          .Case({ArgumentCondition(0U, WithinRange, {{128, UCharRangeMax}})})
+          .Case(
+              {ArgumentCondition(
+                   0U, OutOfRange,
+                   {{'0', '9'}, {'A', 'Z'}, {'a', 'z'}, {128, UCharRangeMax}}),
+               ReturnValueCondition(WithinRange, SingleValue(0))})
+          .ArgConstraint(ArgumentCondition(
+              0U, WithinRange, {{EOFv, EOFv}, {0, UCharRangeMax}})));
+  addToFunctionSummaryMap(
+      "isalpha",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, {{'A', 'Z'}, {'a', 'z'}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          // The locale-specific range.
+          .Case({ArgumentCondition(0U, WithinRange, {{128, UCharRangeMax}})})
+          .Case({ArgumentCondition(
+                     0U, OutOfRange,
+                     {{'A', 'Z'}, {'a', 'z'}, {128, UCharRangeMax}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isascii",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, Range(0, 127)),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, Range(0, 127)),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isblank",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, {{'\t', '\t'}, {' ', ' '}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, {{'\t', '\t'}, {' ', ' '}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "iscntrl",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, {{0, 32}, {127, 127}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, {{0, 32}, {127, 127}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isdigit",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, Range('0', '9')),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, Range('0', '9')),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isgraph",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, Range(33, 126)),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, Range(33, 126)),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "islower",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          // Is certainly lowercase.
+          .Case({ArgumentCondition(0U, WithinRange, Range('a', 'z')),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          // Is ascii but not lowercase.
+          .Case({ArgumentCondition(0U, WithinRange, Range(0, 127)),
+                 ArgumentCondition(0U, OutOfRange, Range('a', 'z')),
+                 ReturnValueCondition(WithinRange, SingleValue(0))})
+          // The locale-specific range.
+          .Case({ArgumentCondition(0U, WithinRange, {{128, UCharRangeMax}})})
+          // Is not an unsigned char.
+          .Case({ArgumentCondition(0U, OutOfRange, Range(0, UCharRangeMax)),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isprint",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange, Range(32, 126)),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange, Range(32, 126)),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "ispunct",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(
+                     0U, WithinRange,
+                     {{'!', '/'}, {':', '@'}, {'[', '`'}, {'{', '~'}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(
+                     0U, OutOfRange,
+                     {{'!', '/'}, {':', '@'}, {'[', '`'}, {'{', '~'}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isspace",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          // Space, '\f', '\n', '\r', '\t', '\v'.
+          .Case({ArgumentCondition(0U, WithinRange, {{9, 13}, {' ', ' '}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          // The locale-specific range.
+          .Case({ArgumentCondition(0U, WithinRange, {{128, UCharRangeMax}})})
+          .Case({ArgumentCondition(0U, OutOfRange,
+                                   {{9, 13}, {' ', ' '}, {128, UCharRangeMax}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isupper",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          // Is certainly uppercase.
+          .Case({ArgumentCondition(0U, WithinRange, Range('A', 'Z')),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          // The locale-specific range.
+          .Case({ArgumentCondition(0U, WithinRange, {{128, UCharRangeMax}})})
+          // Other.
+          .Case({ArgumentCondition(0U, OutOfRange,
+                                   {{'A', 'Z'}, {128, UCharRangeMax}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
+  addToFunctionSummaryMap(
+      "isxdigit",
+      Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+          .Case({ArgumentCondition(0U, WithinRange,
+                                   {{'0', '9'}, {'A', 'F'}, {'a', 'f'}}),
+                 ReturnValueCondition(OutOfRange, SingleValue(0))})
+          .Case({ArgumentCondition(0U, OutOfRange,
+                                   {{'0', '9'}, {'A', 'F'}, {'a', 'f'}}),
+                 ReturnValueCondition(WithinRange, SingleValue(0))}));
 
-      // The getc() family of functions that returns either a char or an EOF.
-      {"getc", Summaries{Getc()}},
-      {"fgetc", Summaries{Getc()}},
-      {"getchar",
-       Summaries{Summary(ArgTypes{}, RetType{IntTy}, NoEvalCall)
+  // The getc() family of functions that returns either a char or an EOF.
+  addToFunctionSummaryMap("getc", Getc());
+  addToFunctionSummaryMap("fgetc", Getc());
+  addToFunctionSummaryMap(
+      "getchar", Summary(ArgTypes{}, RetType{IntTy}, NoEvalCall)
                      .Case({ReturnValueCondition(
-                         WithinRange, {{EOFv, EOFv}, {0, UCharMax}})})}},
+                         WithinRange, {{EOFv, EOFv}, {0, UCharRangeMax}})}));
 
-      // read()-like functions that never return more than buffer size.
-      // We are not sure how ssize_t is defined on every platform, so we
-      // provide three variants that should cover common cases.
-      {"read", Summaries{Read(IntTy, IntMax), Read(LongTy, LongMax),
-                         Read(LongLongTy, LongLongMax)}},
-      {"write", Summaries{Read(IntTy, IntMax), Read(LongTy, LongMax),
-                          Read(LongLongTy, LongLongMax)}},
-      {"fread", Summaries{Fread()}},
-      {"fwrite", Summaries{Fread()}},
-      // getline()-like functions either fail or read at least the delimiter.
-      {"getline", Summaries{Getline(IntTy, IntMax), Getline(LongTy, LongMax),
-                            Getline(LongLongTy, LongLongMax)}},
-      {"getdelim", Summaries{Getline(IntTy, IntMax), Getline(LongTy, LongMax),
-                             Getline(LongLongTy, LongLongMax)}},
-  };
+  // read()-like functions that never return more than buffer size.
+  // We are not sure how ssize_t is defined on every platform, so we
+  // provide three variants that should cover common cases.
+  addToFunctionSummaryMap("read", {Read(IntTy, IntMax), Read(LongTy, LongMax),
+                                   Read(LongLongTy, LongLongMax)});
+  addToFunctionSummaryMap("write", {Read(IntTy, IntMax), Read(LongTy, LongMax),
+                                    Read(LongLongTy, LongLongMax)});
+  addToFunctionSummaryMap("fread", Fread());
+  addToFunctionSummaryMap("fwrite", Fwrite());
+  // getline()-like functions either fail or read at least the delimiter.
+  addToFunctionSummaryMap("getline",
+                          {Getline(IntTy, IntMax), Getline(LongTy, LongMax),
+                           Getline(LongLongTy, LongLongMax)});
+  addToFunctionSummaryMap("getdelim",
+                          {Getline(IntTy, IntMax), Getline(LongTy, LongMax),
+                           Getline(LongLongTy, LongLongMax)});
+
+  // Functions for testing.
+  if (ChecksEnabled[CK_StdCLibraryFunctionsTesterChecker]) {
+    addToFunctionSummaryMap(
+        "__two_constrained_args",
+        Summary(ArgTypes{IntTy, IntTy}, RetType{IntTy}, EvalCallAsPure)
+            .ArgConstraint(ArgumentCondition(0U, WithinRange, SingleValue(1)))
+            .ArgConstraint(ArgumentCondition(1U, WithinRange, SingleValue(1))));
+    addToFunctionSummaryMap(
+        "__arg_constrained_twice",
+        Summary(ArgTypes{IntTy}, RetType{IntTy}, EvalCallAsPure)
+            .ArgConstraint(ArgumentCondition(0U, OutOfRange, SingleValue(1)))
+            .ArgConstraint(ArgumentCondition(0U, OutOfRange, SingleValue(2))));
+    addToFunctionSummaryMap(
+        "__defaultparam",
+        Summary(ArgTypes{Irrelevant, IntTy}, RetType{IntTy}, EvalCallAsPure)
+            .ArgConstraint(NotNull(ArgNo(0))));
+    addToFunctionSummaryMap("__variadic",
+                            Summary(ArgTypes{VoidPtrTy, ConstCharPtrTy},
+                                    RetType{IntTy}, EvalCallAsPure)
+                                .ArgConstraint(NotNull(ArgNo(0)))
+                                .ArgConstraint(NotNull(ArgNo(1))));
+  }
 }
 
 void ento::registerStdCLibraryFunctionsChecker(CheckerManager &mgr) {
-  // If this checker grows large enough to support C++, Objective-C, or other
-  // standard libraries, we could use multiple register...Checker() functions,
-  // which would register various checkers with the help of the same Checker
-  // class, turning on different function summaries.
-  mgr.registerChecker<StdLibraryFunctionsChecker>();
+  auto *Checker = mgr.registerChecker<StdLibraryFunctionsChecker>();
+  Checker->DisplayLoadedSummaries =
+      mgr.getAnalyzerOptions().getCheckerBooleanOption(
+          Checker, "DisplayLoadedSummaries");
 }
 
-bool ento::shouldRegisterStdCLibraryFunctionsChecker(const LangOptions &LO) {
+bool ento::shouldRegisterStdCLibraryFunctionsChecker(const CheckerManager &mgr) {
   return true;
 }
+
+#define REGISTER_CHECKER(name)                                                 \
+  void ento::register##name(CheckerManager &mgr) {                             \
+    StdLibraryFunctionsChecker *checker =                                      \
+        mgr.getChecker<StdLibraryFunctionsChecker>();                          \
+    checker->ChecksEnabled[StdLibraryFunctionsChecker::CK_##name] = true;      \
+    checker->CheckNames[StdLibraryFunctionsChecker::CK_##name] =               \
+        mgr.getCurrentCheckerName();                                           \
+  }                                                                            \
+                                                                               \
+  bool ento::shouldRegister##name(const CheckerManager &mgr) { return true; }
+
+REGISTER_CHECKER(StdCLibraryFunctionArgsChecker)
+REGISTER_CHECKER(StdCLibraryFunctionsTesterChecker)

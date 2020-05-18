@@ -50,6 +50,7 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/Threading.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/YAMLParser.h"
 
@@ -338,14 +339,14 @@ std::string tools::getCPUName(const ArgList &Args, const llvm::Triple &T,
   }
 }
 
-unsigned tools::getLTOParallelism(const ArgList &Args, const Driver &D) {
-  unsigned Parallelism = 0;
+llvm::StringRef tools::getLTOParallelism(const ArgList &Args, const Driver &D) {
   Arg *LtoJobsArg = Args.getLastArg(options::OPT_flto_jobs_EQ);
-  if (LtoJobsArg &&
-      StringRef(LtoJobsArg->getValue()).getAsInteger(10, Parallelism))
-    D.Diag(diag::err_drv_invalid_int_value) << LtoJobsArg->getAsString(Args)
-                                            << LtoJobsArg->getValue();
-  return Parallelism;
+  if (!LtoJobsArg)
+    return {};
+  if (!llvm::get_threadpool_strategy(LtoJobsArg->getValue()))
+    D.Diag(diag::err_drv_invalid_int_value)
+        << LtoJobsArg->getAsString(Args) << LtoJobsArg->getValue();
+  return LtoJobsArg->getValue();
 }
 
 // CloudABI uses -ffunction-sections and -fdata-sections by default.
@@ -389,13 +390,19 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
     CmdArgs.push_back(Args.MakeArgString(Twine("-plugin-opt=mcpu=") + CPU));
 
   if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    // The optimization level matches
+    // CompilerInvocation.cpp:getOptimizationLevel().
     StringRef OOpt;
     if (A->getOption().matches(options::OPT_O4) ||
         A->getOption().matches(options::OPT_Ofast))
       OOpt = "3";
-    else if (A->getOption().matches(options::OPT_O))
+    else if (A->getOption().matches(options::OPT_O)) {
       OOpt = A->getValue();
-    else if (A->getOption().matches(options::OPT_O0))
+      if (OOpt == "g")
+        OOpt = "1";
+      else if (OOpt == "s" || OOpt == "z")
+        OOpt = "2";
+    } else if (A->getOption().matches(options::OPT_O0))
       OOpt = "0";
     if (!OOpt.empty())
       CmdArgs.push_back(Args.MakeArgString(Twine("-plugin-opt=O") + OOpt));
@@ -410,7 +417,8 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
   if (IsThinLTO)
     CmdArgs.push_back("-plugin-opt=thinlto");
 
-  if (unsigned Parallelism = getLTOParallelism(Args, ToolChain.getDriver()))
+  StringRef Parallelism = getLTOParallelism(Args, ToolChain.getDriver());
+  if (!Parallelism.empty())
     CmdArgs.push_back(
         Args.MakeArgString("-plugin-opt=jobs=" + Twine(Parallelism)));
 
@@ -1325,7 +1333,7 @@ void tools::AddHIPLinkerScript(const ToolChain &TC, Compilation &C,
   llvm::raw_string_ostream LksStream(LksBuffer);
 
   // Get the HIP offload tool chain.
-  auto *HIPTC = static_cast<const toolchains::CudaToolChain *>(
+  auto *HIPTC = static_cast<const toolchains::HIPToolChain *>(
       C.getSingleOffloadToolChain<Action::OFK_HIP>());
   assert(HIPTC->getTriple().getArch() == llvm::Triple::amdgcn &&
          "Wrong platform");

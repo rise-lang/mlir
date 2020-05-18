@@ -115,8 +115,6 @@ private:
   // Operands are allocated by an ArrayRecycler.
   MachineOperand *Operands = nullptr;   // Pointer to the first operand.
   unsigned NumOperands = 0;             // Number of operands on instruction.
-  using OperandCapacity = ArrayRecycler<MachineOperand>::Capacity;
-  OperandCapacity CapOperands;          // Capacity of the Operands array.
 
   uint16_t Flags = 0;                   // Various bits of additional
                                         // information about machine
@@ -128,6 +126,11 @@ private:
                                         // information.  Do not use this for
                                         // anything other than to convey comment
                                         // information to AsmPrinter.
+
+  // OperandCapacity has uint8_t size, so it should be next to AsmPrinterFlags
+  // to properly pack.
+  using OperandCapacity = ArrayRecycler<MachineOperand>::Capacity;
+  OperandCapacity CapOperands;          // Capacity of the Operands array.
 
   /// Internal implementation detail class that provides out-of-line storage for
   /// extra info used by the machine instruction when this info cannot be stored
@@ -261,6 +264,10 @@ private:
 
   // MachineInstrs are pool-allocated and owned by MachineFunction.
   friend class MachineFunction;
+
+  void
+  dumprImpl(const MachineRegisterInfo &MRI, unsigned Depth, unsigned MaxDepth,
+            SmallPtrSetImpl<const MachineInstr *> &AlreadySeenInstrs) const;
 
 public:
   MachineInstr(const MachineInstr &) = delete;
@@ -685,7 +692,11 @@ public:
 
   /// Return true if this is a call instruction that may have an associated
   /// call site entry in the debug info.
-  bool isCandidateForCallSiteEntry() const;
+  bool isCandidateForCallSiteEntry(QueryType Type = IgnoreBundle) const;
+  /// Return true if copying, moving, or erasing this instruction requires
+  /// updating Call Site Info (see \ref copyCallSiteInfo, \ref moveCallSiteInfo,
+  /// \ref eraseCallSiteInfo).
+  bool shouldUpdateCallSiteInfo() const;
 
   /// Returns true if the specified instruction stops control flow
   /// from executing the instruction immediately following it.  Examples include
@@ -1534,6 +1545,10 @@ public:
              bool AddNewLine = true,
              const TargetInstrInfo *TII = nullptr) const;
   void dump() const;
+  /// Print on dbgs() the current instruction and the instructions defining its
+  /// operands and so on until we reach \p MaxDepth.
+  void dumpr(const MachineRegisterInfo &MRI,
+             unsigned MaxDepth = UINT_MAX) const;
   /// @}
 
   //===--------------------------------------------------------------------===//

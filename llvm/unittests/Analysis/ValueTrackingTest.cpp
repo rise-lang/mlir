@@ -7,9 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -39,7 +41,7 @@ protected:
     M = parseModule(Assembly);
     ASSERT_TRUE(M);
 
-    Function *F = M->getFunction("test");
+    F = M->getFunction("test");
     ASSERT_TRUE(F) << "Test must have a function @test";
     if (!F)
       return;
@@ -56,6 +58,7 @@ protected:
 
   LLVMContext Context;
   std::unique_ptr<Module> M;
+  Function *F = nullptr;
   Instruction *A = nullptr;
 };
 
@@ -462,6 +465,126 @@ TEST_F(MatchSelectPatternTest, DoubleCastBad) {
   expectPattern({SPF_UNKNOWN, SPNB_NA, false});
 }
 
+TEST_F(MatchSelectPatternTest, NotNotSMin) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp sgt i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %an, i8 %bn\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_SMIN, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotSMinSwap) {
+  parseAssembly(
+      "define <2 x i8> @test(<2 x i8> %a, <2 x i8> %b) {\n"
+      "  %cmp = icmp slt <2 x i8> %a, %b\n"
+      "  %an = xor <2 x i8> %a, <i8 -1, i8-1>\n"
+      "  %bn = xor <2 x i8> %b, <i8 -1, i8-1>\n"
+      "  %A = select <2 x i1> %cmp, <2 x i8> %bn, <2 x i8> %an\n"
+      "  ret <2 x i8> %A\n"
+      "}\n");
+  expectPattern({SPF_SMIN, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotSMax) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp slt i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %an, i8 %bn\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_SMAX, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotSMaxSwap) {
+  parseAssembly(
+      "define <2 x i8> @test(<2 x i8> %a, <2 x i8> %b) {\n"
+      "  %cmp = icmp sgt <2 x i8> %a, %b\n"
+      "  %an = xor <2 x i8> %a, <i8 -1, i8-1>\n"
+      "  %bn = xor <2 x i8> %b, <i8 -1, i8-1>\n"
+      "  %A = select <2 x i1> %cmp, <2 x i8> %bn, <2 x i8> %an\n"
+      "  ret <2 x i8> %A\n"
+      "}\n");
+  expectPattern({SPF_SMAX, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotUMin) {
+  parseAssembly(
+      "define <2 x i8> @test(<2 x i8> %a, <2 x i8> %b) {\n"
+      "  %cmp = icmp ugt <2 x i8> %a, %b\n"
+      "  %an = xor <2 x i8> %a, <i8 -1, i8-1>\n"
+      "  %bn = xor <2 x i8> %b, <i8 -1, i8-1>\n"
+      "  %A = select <2 x i1> %cmp, <2 x i8> %an, <2 x i8> %bn\n"
+      "  ret <2 x i8> %A\n"
+      "}\n");
+  expectPattern({SPF_UMIN, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotUMinSwap) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp ult i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %bn, i8 %an\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_UMIN, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotUMax) {
+  parseAssembly(
+      "define <2 x i8> @test(<2 x i8> %a, <2 x i8> %b) {\n"
+      "  %cmp = icmp ult <2 x i8> %a, %b\n"
+      "  %an = xor <2 x i8> %a, <i8 -1, i8-1>\n"
+      "  %bn = xor <2 x i8> %b, <i8 -1, i8-1>\n"
+      "  %A = select <2 x i1> %cmp, <2 x i8> %an, <2 x i8> %bn\n"
+      "  ret <2 x i8> %A\n"
+      "}\n");
+  expectPattern({SPF_UMAX, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotUMaxSwap) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp ugt i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %bn, i8 %an\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_UMAX, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotEq) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp eq i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %bn, i8 %an\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_UNKNOWN, SPNB_NA, false});
+}
+
+TEST_F(MatchSelectPatternTest, NotNotNe) {
+  parseAssembly(
+      "define i8 @test(i8 %a, i8 %b) {\n"
+      "  %cmp = icmp ne i8 %a, %b\n"
+      "  %an = xor i8 %a, -1\n"
+      "  %bn = xor i8 %b, -1\n"
+      "  %A = select i1 %cmp, i8 %bn, i8 %an\n"
+      "  ret i8 %A\n"
+      "}\n");
+  expectPattern({SPF_UNKNOWN, SPNB_NA, false});
+}
+
 TEST(ValueTracking, GuaranteedToTransferExecutionToSuccessor) {
   StringRef Assembly =
       "declare void @nounwind_readonly(i32*) nounwind readonly "
@@ -525,7 +648,7 @@ TEST_F(ValueTrackingTest, ComputeNumSignBits_PR32045) {
   EXPECT_EQ(ComputeNumSignBits(A, M->getDataLayout()), 1u);
 }
 
-// No guarantees for canonical IR in this analysis, so this just bails out. 
+// No guarantees for canonical IR in this analysis, so this just bails out.
 TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle) {
   parseAssembly(
       "define <2 x i32> @test() {\n"
@@ -536,7 +659,7 @@ TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle) {
 }
 
 // No guarantees for canonical IR in this analysis, so a shuffle element that
-// references an undef value means this can't return any extra information. 
+// references an undef value means this can't return any extra information.
 TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle2) {
   parseAssembly(
       "define <2 x i32> @test(<2 x i1> %x) {\n"
@@ -545,6 +668,132 @@ TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle2) {
       "  ret <2 x i32> %A\n"
       "}\n");
   EXPECT_EQ(ComputeNumSignBits(A, M->getDataLayout()), 1u);
+}
+
+TEST(ValueTracking, propagatesPoison) {
+  std::string AsmHead = "declare i32 @g(i32)\n"
+                        "define void @f(i32 %x, i32 %y, float %fx, float %fy, "
+                        "i1 %cond, i8* %p) {\n";
+  std::string AsmTail = "  ret void\n}";
+  // (propagates poison?, IR instruction)
+  SmallVector<std::pair<bool, std::string>, 32> Data = {
+      {true, "add i32 %x, %y"},
+      {true, "add nsw nuw i32 %x, %y"},
+      {true, "ashr i32 %x, %y"},
+      {true, "lshr exact i32 %x, 31"},
+      {true, "fcmp oeq float %fx, %fy"},
+      {true, "icmp eq i32 %x, %y"},
+      {true, "getelementptr i8, i8* %p, i32 %x"},
+      {true, "getelementptr inbounds i8, i8* %p, i32 %x"},
+      {true, "bitcast float %fx to i32"},
+      {false, "select i1 %cond, i32 %x, i32 %y"},
+      {false, "freeze i32 %x"},
+      {true, "udiv i32 %x, %y"},
+      {true, "urem i32 %x, %y"},
+      {true, "sdiv exact i32 %x, %y"},
+      {true, "srem i32 %x, %y"},
+      {false, "call i32 @g(i32 %x)"}};
+
+  std::string AssemblyStr = AsmHead;
+  for (auto &Itm : Data)
+    AssemblyStr += Itm.second + "\n";
+  AssemblyStr += AsmTail;
+
+  LLVMContext Context;
+  SMDiagnostic Error;
+  auto M = parseAssemblyString(AssemblyStr, Error, Context);
+  assert(M && "Bad assembly?");
+
+  auto *F = M->getFunction("f");
+  assert(F && "Bad assembly?");
+
+  auto &BB = F->getEntryBlock();
+
+  int Index = 0;
+  for (auto &I : BB) {
+    if (isa<ReturnInst>(&I))
+      break;
+    EXPECT_EQ(propagatesPoison(&I), Data[Index].first)
+        << "Incorrect answer at instruction " << Index << " = " << I;
+    Index++;
+  }
+}
+
+TEST(ValueTracking, canCreatePoison) {
+  std::string AsmHead =
+      "declare i32 @g(i32)\n"
+      "define void @f(i32 %x, i32 %y, float %fx, float %fy, i1 %cond, "
+      "<4 x i32> %vx, <4 x i32> %vx2, <vscale x 4 x i32> %svx, i8* %p) {\n";
+  std::string AsmTail = "  ret void\n}";
+  // (can create poison?, IR instruction)
+  SmallVector<std::pair<bool, std::string>, 32> Data = {
+      {false, "add i32 %x, %y"},
+      {true, "add nsw nuw i32 %x, %y"},
+      {true, "shl i32 %x, %y"},
+      {true, "shl <4 x i32> %vx, %vx2"},
+      {true, "shl nsw i32 %x, %y"},
+      {true, "shl nsw <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 3>"},
+      {false, "shl i32 %x, 31"},
+      {true, "shl i32 %x, 32"},
+      {false, "shl <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 3>"},
+      {true, "shl <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 32>"},
+      {true, "ashr i32 %x, %y"},
+      {true, "ashr exact i32 %x, %y"},
+      {false, "ashr i32 %x, 31"},
+      {true, "ashr exact i32 %x, 31"},
+      {false, "ashr <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 3>"},
+      {true, "ashr <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 32>"},
+      {true, "ashr exact <4 x i32> %vx, <i32 0, i32 1, i32 2, i32 3>"},
+      {true, "lshr i32 %x, %y"},
+      {true, "lshr exact i32 %x, 31"},
+      {false, "udiv i32 %x, %y"},
+      {true, "udiv exact i32 %x, %y"},
+      {false, "getelementptr i8, i8* %p, i32 %x"},
+      {true, "getelementptr inbounds i8, i8* %p, i32 %x"},
+      {true, "fneg nnan float %fx"},
+      {false, "fneg float %fx"},
+      {false, "fadd float %fx, %fy"},
+      {true, "fadd nnan float %fx, %fy"},
+      {false, "urem i32 %x, %y"},
+      {true, "fptoui float %fx to i32"},
+      {true, "fptosi float %fx to i32"},
+      {false, "bitcast float %fx to i32"},
+      {false, "select i1 %cond, i32 %x, i32 %y"},
+      {true, "select nnan i1 %cond, float %fx, float %fy"},
+      {true, "extractelement <4 x i32> %vx, i32 %x"},
+      {false, "extractelement <4 x i32> %vx, i32 3"},
+      {true, "extractelement <vscale x 4 x i32> %svx, i32 4"},
+      {true, "insertelement <4 x i32> %vx, i32 %x, i32 %y"},
+      {false, "insertelement <4 x i32> %vx, i32 %x, i32 3"},
+      {true, "insertelement <vscale x 4 x i32> %svx, i32 %x, i32 4"},
+      {false, "freeze i32 %x"},
+      {true, "call i32 @g(i32 %x)"},
+      {true, "fcmp nnan oeq float %fx, %fy"},
+      {false, "fcmp oeq float %fx, %fy"}};
+
+  std::string AssemblyStr = AsmHead;
+  for (auto &Itm : Data)
+    AssemblyStr += Itm.second + "\n";
+  AssemblyStr += AsmTail;
+
+  LLVMContext Context;
+  SMDiagnostic Error;
+  auto M = parseAssemblyString(AssemblyStr, Error, Context);
+  assert(M && "Bad assembly?");
+
+  auto *F = M->getFunction("f");
+  assert(F && "Bad assembly?");
+
+  auto &BB = F->getEntryBlock();
+
+  int Index = 0;
+  for (auto &I : BB) {
+    if (isa<ReturnInst>(&I))
+      break;
+    EXPECT_EQ(canCreatePoison(&I), Data[Index].first)
+        << "Incorrect answer at instruction " << Index << " = " << I;
+    Index++;
+  }
 }
 
 TEST_F(ComputeKnownBitsTest, ComputeKnownBits) {
@@ -573,6 +822,19 @@ TEST_F(ComputeKnownBitsTest, ComputeKnownMulBits) {
       "  ret i32 %A\n"
       "}\n");
   expectKnownBits(/*zero*/ 95u, /*one*/ 32u);
+}
+
+TEST_F(ComputeKnownBitsTest, KnownNonZeroShift) {
+  // %q is known nonzero without known bits.
+  // Because %q is nonzero, %A[0] is known to be zero.
+  parseAssembly(
+      "define i8 @test(i8 %p, i8* %pq) {\n"
+      "  %q = load i8, i8* %pq, !range !0\n"
+      "  %A = shl i8 %p, %q\n"
+      "  ret i8 %A\n"
+      "}\n"
+      "!0 = !{ i8 1, i8 5 }\n");
+  expectKnownBits(/*zero*/ 1u, /*one*/ 0u);
 }
 
 TEST_F(ComputeKnownBitsTest, ComputeKnownFshl) {
@@ -692,6 +954,44 @@ TEST_F(ComputeKnownBitsTest, ComputeKnownUSubSatZerosPreserved) {
       "}\n"
       "declare i8 @llvm.usub.sat.i8(i8, i8)\n");
   expectKnownBits(/*zero*/ 2u, /*one*/ 0u);
+}
+
+TEST_F(ComputeKnownBitsTest, ComputeKnownBitsPtrToIntTrunc) {
+  // ptrtoint truncates the pointer type.
+  parseAssembly(
+      "define void @test(i8** %p) {\n"
+      "  %A = load i8*, i8** %p\n"
+      "  %i = ptrtoint i8* %A to i32\n"
+      "  %m = and i32 %i, 31\n"
+      "  %c = icmp eq i32 %m, 0\n"
+      "  call void @llvm.assume(i1 %c)\n"
+      "  ret void\n"
+      "}\n"
+      "declare void @llvm.assume(i1)\n");
+  AssumptionCache AC(*F);
+  KnownBits Known = computeKnownBits(
+      A, M->getDataLayout(), /* Depth */ 0, &AC, F->front().getTerminator());
+  EXPECT_EQ(Known.Zero.getZExtValue(), 31u);
+  EXPECT_EQ(Known.One.getZExtValue(), 0u);
+}
+
+TEST_F(ComputeKnownBitsTest, ComputeKnownBitsPtrToIntZext) {
+  // ptrtoint zero extends the pointer type.
+  parseAssembly(
+      "define void @test(i8** %p) {\n"
+      "  %A = load i8*, i8** %p\n"
+      "  %i = ptrtoint i8* %A to i128\n"
+      "  %m = and i128 %i, 31\n"
+      "  %c = icmp eq i128 %m, 0\n"
+      "  call void @llvm.assume(i1 %c)\n"
+      "  ret void\n"
+      "}\n"
+      "declare void @llvm.assume(i1)\n");
+  AssumptionCache AC(*F);
+  KnownBits Known = computeKnownBits(
+      A, M->getDataLayout(), /* Depth */ 0, &AC, F->front().getTerminator());
+  EXPECT_EQ(Known.Zero.getZExtValue(), 31u);
+  EXPECT_EQ(Known.One.getZExtValue(), 0u);
 }
 
 class IsBytewiseValueTest : public ValueTrackingTest,

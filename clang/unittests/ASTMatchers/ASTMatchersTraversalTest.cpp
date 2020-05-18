@@ -1123,6 +1123,19 @@ TEST(MatchBinaryOperator, HasOperatorName) {
   EXPECT_TRUE(notMatches("void x() { true && false; }", OperatorOr));
 }
 
+TEST(MatchBinaryOperator, HasAnyOperatorName) {
+  StatementMatcher Matcher =
+      binaryOperator(hasAnyOperatorName("+", "-", "*", "/"));
+
+  EXPECT_TRUE(matches("int x(int I) { return I + 2; }", Matcher));
+  EXPECT_TRUE(matches("int x(int I) { return I - 2; }", Matcher));
+  EXPECT_TRUE(matches("int x(int I) { return I * 2; }", Matcher));
+  EXPECT_TRUE(matches("int x(int I) { return I / 2; }", Matcher));
+  EXPECT_TRUE(notMatches("int x(int I) { return I % 2; }", Matcher));
+  // Ensure '+= isn't mistaken.
+  EXPECT_TRUE(notMatches("void x(int &I) { I += 1; }", Matcher));
+}
+
 TEST(MatchBinaryOperator, HasLHSAndHasRHS) {
   StatementMatcher OperatorTrueFalse =
     binaryOperator(hasLHS(cxxBoolLiteral(equals(true))),
@@ -1145,6 +1158,17 @@ TEST(MatchBinaryOperator, HasEitherOperand) {
   EXPECT_TRUE(matches("void x() { true || false; }", HasOperand));
   EXPECT_TRUE(matches("void x() { false && true; }", HasOperand));
   EXPECT_TRUE(notMatches("void x() { true || true; }", HasOperand));
+}
+
+TEST(MatchBinaryOperator, HasOperands) {
+  StatementMatcher HasOperands = binaryOperator(
+      hasOperands(integerLiteral(equals(1)), integerLiteral(equals(2))));
+  EXPECT_TRUE(matches("void x() { 1 + 2; }", HasOperands));
+  EXPECT_TRUE(matches("void x() { 2 + 1; }", HasOperands));
+  EXPECT_TRUE(notMatches("void x() { 1 + 1; }", HasOperands));
+  EXPECT_TRUE(notMatches("void x() { 2 + 2; }", HasOperands));
+  EXPECT_TRUE(notMatches("void x() { 0 + 0; }", HasOperands));
+  EXPECT_TRUE(notMatches("void x() { 0 + 1; }", HasOperands));
 }
 
 TEST(Matcher, BinaryOperatorTypes) {
@@ -1253,6 +1277,18 @@ TEST(MatchUnaryOperator, HasOperatorName) {
 
   EXPECT_TRUE(matches("void x() { !true; } ", OperatorNot));
   EXPECT_TRUE(notMatches("void x() { true; } ", OperatorNot));
+}
+
+TEST(MatchUnaryOperator, HasAnyOperatorName) {
+  StatementMatcher Matcher = unaryOperator(hasAnyOperatorName("-", "*", "++"));
+
+  EXPECT_TRUE(matches("int x(int *I) { return *I; }", Matcher));
+  EXPECT_TRUE(matches("int x(int I) { return -I; }", Matcher));
+  EXPECT_TRUE(matches("void x(int &I) { I++; }", Matcher));
+  EXPECT_TRUE(matches("void x(int &I) { ++I; }", Matcher));
+  EXPECT_TRUE(notMatches("void x(int &I) { I--; }", Matcher));
+  EXPECT_TRUE(notMatches("void x(int &I) { --I; }", Matcher));
+  EXPECT_TRUE(notMatches("int *x(int &I) { return &I; }", Matcher));
 }
 
 TEST(MatchUnaryOperator, HasUnaryOperand) {

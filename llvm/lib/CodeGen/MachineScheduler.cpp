@@ -1567,7 +1567,9 @@ void BaseMemOpClusterMutation::clusterNeighboringMemOps(
   for (SUnit *SU : MemOps) {
     SmallVector<const MachineOperand *, 4> BaseOps;
     int64_t Offset;
-    if (TII->getMemOperandsWithOffset(*SU->getInstr(), BaseOps, Offset, TRI))
+    bool OffsetIsScalable;
+    if (TII->getMemOperandsWithOffset(*SU->getInstr(), BaseOps, Offset,
+                                      OffsetIsScalable, TRI))
       MemOpRecords.push_back(MemOpInfo(SU, BaseOps, Offset));
 #ifndef NDEBUG
     for (auto *Op : BaseOps)
@@ -2730,6 +2732,9 @@ void GenericScheduler::initialize(ScheduleDAGMI *dag) {
   DAG = static_cast<ScheduleDAGMILive*>(dag);
   SchedModel = DAG->getSchedModel();
   TRI = DAG->TRI;
+
+  if (RegionPolicy.ComputeDFSResult)
+    DAG->computeDFSResult();
 
   Rem.init(DAG, SchedModel);
   Top.init(DAG, SchedModel, &Rem);

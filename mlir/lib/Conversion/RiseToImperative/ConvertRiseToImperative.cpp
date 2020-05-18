@@ -3,23 +3,20 @@
 //
 
 #include "mlir/Conversion/RiseToImperative/ConvertRiseToImperative.h"
-#include "mlir/Dialect/LoopOps/LoopOps.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/LoopOps/LoopOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/Functional.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
 
@@ -32,45 +29,27 @@ using namespace mlir::rise;
 
 namespace {
 struct ConvertRiseToImperativePass
-    : public ModulePass<ConvertRiseToImperativePass> {
-  void runOnModule() override;
+    : public RiseToImperativeBase<ConvertRiseToImperativePass> {
+  void runOnOperation() override;
 };
 } // namespace
 
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
-/// Apply
-struct ApplyToImpLowering : public OpRewritePattern<ApplyOp> {
-  using OpRewritePattern<ApplyOp>::OpRewritePattern;
-
-  PatternMatchResult matchAndRewrite(ApplyOp applyOp,
-                                     PatternRewriter &rewriter) const override;
-};
-
-PatternMatchResult
-ApplyToImpLowering::matchAndRewrite(ApplyOp applyOp,
-                                    PatternRewriter &rewriter) const {
-  MLIRContext *context = rewriter.getContext();
-  Location loc = applyOp.getLoc();
-  // TODO: do
-  //    emitError(loc) << "yoyoyo";
-  return matchSuccess();
-}
-
 struct RiseToImperativePattern : public OpRewritePattern<FuncOp> {
   using OpRewritePattern<FuncOp>::OpRewritePattern;
-  PatternMatchResult match(FuncOp funcOp) const override;
+  LogicalResult match(FuncOp funcOp) const override;
   void rewrite(FuncOp funcOp, PatternRewriter &rewriter) const override;
   //  PatternMatchResult matchAndRewrite(FuncOp riseFun,
   //                                     PatternRewriter &rewriter) const
   //                                     override;
 };
 
-PatternMatchResult RiseToImperativePattern::match(FuncOp funcOp) const {
+LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
   bool riseInside = false;
   if (funcOp.isExternal())
-    return matchFailure();
+    return failure();
   // I currently check whether a rise.in is inside the func.
   funcOp.walk([&](Operation *op) {
     //    if (op->getDialect()->getNamespace().equals(
@@ -80,9 +59,9 @@ PatternMatchResult RiseToImperativePattern::match(FuncOp funcOp) const {
   });
 
   if (riseInside) {
-    return matchSuccess();
+    return success();
   } else {
-    return matchFailure();
+    return failure();
   }
 }
 
@@ -434,7 +413,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
       auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
       auto forLoop =
-          rewriter.create<mlir::loop::ForOp>(loc, lowerBound, upperBound, step);
+          rewriter.create<mlir::scf::ForOp>(loc, lowerBound, upperBound, step);
       loopInductionVar = forLoop.getInductionVar();
       forLoopBody = forLoop.getBody();
     } else if (loweringTarget == "affine") {
@@ -446,9 +425,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     rewriter.setInsertionPointToStart(forLoopBody);
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
-    if (!reductionLambda) {
-      reductionLambda = expandToLambda(reductionFun, rewriter);
-    }
+//    if (!reductionLambda) {
+//      reductionLambda = expandToLambda(reductionFun, rewriter);
+//    }
 
     RiseIdxOp xi;
 
@@ -567,7 +546,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
           appliedFun->getLoc(), n.getValue().getIntValue());
       auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
-      auto forLoop = rewriter.create<mlir::loop::ForOp>(
+      auto forLoop = rewriter.create<mlir::scf::ForOp>(
           appliedFun->getLoc(), lowerBound, upperBound, step);
       loopInductionVar = forLoop.getInductionVar();
       forLoopBody = forLoop.getBody();
@@ -581,9 +560,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-    if (!fLambda) {
-      fLambda = expandToLambda(f, rewriter);
-    }
+//    if (!fLambda) {
+//      fLambda = expandToLambda(f, rewriter);
+//    }
 
     RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
@@ -658,7 +637,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
           appliedFun->getLoc(), n.getValue().getIntValue());
       auto step = rewriter.create<ConstantIndexOp>(appliedFun->getLoc(), 1);
 
-      auto forLoop = rewriter.create<mlir::loop::ForOp>(
+      auto forLoop = rewriter.create<mlir::scf::ForOp>(
           appliedFun->getLoc(), lowerBound, upperBound, step);
       loopInductionVar = forLoop.getInductionVar();
       forLoopBody = forLoop.getBody();
@@ -686,9 +665,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-    if (!fLambda) {
-      fLambda = expandToLambda(f, rewriter);
-    }
+//    if (!fLambda) {
+//      fLambda = expandToLambda(f, rewriter);
+//    }
 
     RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
@@ -767,45 +746,47 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     }
     AccT(returnOp, out, rewriter);
     return;
-  } else if (isa<AddOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Add";
-
-    auto summand0 = applyOperands.pop_back_val();
-    auto summand1 = applyOperands.pop_back_val();
-
-    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
-    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
-
-    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
-    //    contSummand0,
-    //                                            contSummand1);
-    auto newAddOp = rewriter.create<RiseBinaryOp>(
-        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        StringAttr::get("add", rewriter.getContext()), contSummand0,
-        contSummand1);
-    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
-                                                    newAddOp.getResult(), out);
-
-    return;
-  } else if (isa<MulOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
-
-    auto factor0 = applyOperands.pop_back_val();
-    auto factor1 = applyOperands.pop_back_val();
-
-    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
-    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
-
-    auto newMulOp = rewriter.create<RiseBinaryOp>(
-        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        StringAttr::get("mul", rewriter.getContext()), contFactor0,
-        contFactor1);
-
-    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
-                                                    newMulOp.getResult(), out);
-
-    return;
-  } else if (isa<ApplyOp>(appliedFun)) {
+  }
+//  else if (isa<AddOp>(appliedFun)) {
+//    emitRemark(appliedFun->getLoc()) << "AccT of Add";
+//
+//    auto summand0 = applyOperands.pop_back_val();
+//    auto summand1 = applyOperands.pop_back_val();
+//
+//    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
+//    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
+//
+//    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
+//    //    contSummand0,
+//    //                                            contSummand1);
+//    auto newAddOp = rewriter.create<RiseBinaryOp>(
+//        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
+//        StringAttr::get("add", rewriter.getContext()), contSummand0,
+//        contSummand1);
+//    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+//                                                    newAddOp.getResult(), out);
+//
+//    return;
+//  } else if (isa<MulOp>(appliedFun)) {
+//    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
+//
+//    auto factor0 = applyOperands.pop_back_val();
+//    auto factor1 = applyOperands.pop_back_val();
+//
+//    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
+//    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
+//
+//    auto newMulOp = rewriter.create<RiseBinaryOp>(
+//        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
+//        StringAttr::get("mul", rewriter.getContext()), contFactor0,
+//        contFactor1);
+//
+//    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+//                                                    newMulOp.getResult(), out);
+//
+//    return;
+//  }
+  else if (isa<ApplyOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Apply";
 
     emitError(appliedFun->getLoc()) << "We should never get here";
@@ -1350,170 +1331,6 @@ void mlir::rise::Substitute(LambdaOp lambda,
   return;
 }
 
-LambdaOp mlir::rise::expandToLambda(mlir::Value value,
-                                    PatternRewriter &rewriter) {
-
-  Value appliedOp;
-  if (isa<AddOp>(value.getDefiningOp())) {
-    emitRemark(value.getLoc()) << "expanding add to lambda";
-
-    LambdaOp newLambda;
-    rewriter.setInsertionPoint(value.getDefiningOp());
-    FunType funType = value.getType().dyn_cast<FunType>();
-
-    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-    auto *entry = new Block();
-    newLambda.region().push_back(entry);
-
-    rewriter.setInsertionPointToStart(entry);
-
-    // get the two summands
-    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-    argumentTypes.push_back(funType.getInput());
-    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
-    entry->addArguments(argumentTypes);
-
-    appliedOp = rewriter.create<AddOp>(
-        value.getLoc(), funType,
-        DataTypeAttr::get(rewriter.getContext(),
-                          cast<AddOp>(value.getDefiningOp()).t()));
-
-    ApplyOp applyOp = rewriter.create<ApplyOp>(
-        value.getLoc(), funType, appliedOp, entry->getArguments());
-    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
-
-    return newLambda;
-
-  } else if (isa<MulOp>(value.getDefiningOp())) {
-    emitRemark(value.getLoc()) << "expanding mul to lambda";
-
-    LambdaOp newLambda;
-    rewriter.setInsertionPoint(value.getDefiningOp());
-    FunType funType = value.getType().dyn_cast<FunType>();
-
-    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-    auto *entry = new Block();
-    newLambda.region().push_back(entry);
-
-    rewriter.setInsertionPointToStart(entry);
-
-    // get the two factors
-    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-    argumentTypes.push_back(funType.getInput());
-    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
-    entry->addArguments(argumentTypes);
-
-    appliedOp = rewriter.create<MulOp>(
-        value.getLoc(), funType,
-        DataTypeAttr::get(rewriter.getContext(),
-                          cast<MulOp>(value.getDefiningOp()).t()));
-
-    ApplyOp applyOp = rewriter.create<ApplyOp>(
-        value.getLoc(), funType, appliedOp, entry->getArguments());
-    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
-
-    return newLambda;
-  } else if (isa<ApplyOp>(value.getDefiningOp())) {
-    //    std::cout << "expanding applied fun." << std::flush;
-    //    LambdaOp newLambda;
-    //    rewriter.setInsertionPoint(value.getDefiningOp());
-    //    FunType funType = value.getType().dyn_cast<FunType>();
-    //
-    //    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-    //    auto *entry = new Block();
-    //    newLambda.region().push_back(entry);
-    //
-    //    rewriter.setInsertionPointToStart(entry);
-    //
-    //
-    //    return expandToLambda(cast<ApplyOp>(value.getDefiningOp()).fun(),
-    //    rewriter);
-    std::cout << " hi1: \n" << std::flush;
-
-    LambdaOp newLambda;
-    rewriter.setInsertionPoint(value.getDefiningOp());
-    FunType funType = value.getType().dyn_cast<FunType>();
-
-    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-    auto *entry = new Block();
-    newLambda.region().push_back(entry);
-
-    rewriter.setInsertionPointToStart(entry);
-    std::cout << " hi1: \n" << std::flush;
-
-    // get the two factors
-    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-    std::cout << " hi1: \n" << std::flush;
-
-    argumentTypes.push_back(funType.getInput());
-    std::cout << " hi1: \n" << std::flush;
-
-    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
-    std::cout << " hi1: \n" << std::flush;
-
-    entry->addArguments(argumentTypes);
-
-    //    appliedOp = rewriter.create<MultOp>(
-    //        value.getLoc(), funType,
-    //        DataTypeAttr::get(rewriter.getContext(),
-    //                          cast<MultOp>(value.getDefiningOp()).t()));
-    std::cout << " hi1: \n" << std::flush;
-    appliedOp =
-        cast<ApplyOp>(rewriter.clone(*(cast<ApplyOp>(value.getDefiningOp()))))
-            .getResult();
-    //    ApplyOp applyOp = rewriter.clone(*(cast<ApplyOp>(value)));
-    std::cout << " hi2: \n" << std::flush;
-
-    ApplyOp applyOp = rewriter.create<ApplyOp>(
-        value.getLoc(), funType, appliedOp, entry->getArguments());
-    rewriter.create<mlir::rise::ReturnOp>(value.getLoc(), ValueRange{applyOp});
-    return newLambda;
-
-  } else if (isa<MapSeqOp>(value.getDefiningOp()) ||
-             isa<MapParOp>(value.getDefiningOp())) {
-    std::cout << "expanding "
-                 "map fun."
-              << std::flush;
-
-    //    LambdaOp newLambda;
-    //    rewriter.setInsertionPoint(value.getDefiningOp());
-    //    FunType funType = value.getType().dyn_cast<FunType>();
-    //
-    //    newLambda = rewriter.create<LambdaOp>(value.getLoc(), funType);
-    //    auto *entry = new Block();
-    //    newLambda.region().push_back(entry);
-    //
-    //    rewriter.setInsertionPointToStart(entry);
-    //
-    //    SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-    //    argumentTypes.push_back(funType.getInput());
-    //    argumentTypes.push_back(funType.getOutput().dyn_cast<FunType>().getInput());
-    //    entry->addArguments(argumentTypes);
-    //
-    //    rewriter.create<MapSeqOp>(value.getLoc(), )
-  } else {
-    emitError(value.getLoc())
-        << "Expanding " << value.getDefiningOp()->getName().getStringRef().str()
-        << " to a Lambda is not supported.";
-  }
-}
-
-Operation createLoopForMap(Value mapOpValue, IndexType &inductionVar,
-                           PatternRewriter &rewriter) {
-  //  auto mapOp = mapOpValue.getDefiningOp();
-  //  auto lowerBound = rewriter.create<ConstantIndexOp>(mapOp->getLoc(), 0);
-  //  auto upperBound = rewriter.create<ConstantIndexOp>(
-  //      mapOp->getLoc(),
-  //      mapOp->getAttrOfType<NatAttr>("n") n.getValue().getIntValue());
-  //  auto step = rewriter.create<ConstantIndexOp>(mapOp->getLoc(), 1);
-  //
-  //  auto forLoop = rewriter.create<mlir::loop::ForOp>(
-  //      mapOpValue.getLoc(), lowerBound, upperBound, step);
-  //
-  //  inductionVar = forLoop.getInductionVar();
-  //
-  //  return forLoop;
-}
 
 /// gather all patterns
 void mlir::populateRiseToImpConversionPatterns(
@@ -1525,8 +1342,8 @@ void mlir::populateRiseToImpConversionPatterns(
 //===----------------------------------------------------------------------===//
 
 /// The pass:
-void ConvertRiseToImperativePass::runOnModule() {
-  auto module = getModule();
+void ConvertRiseToImperativePass::runOnOperation() {
+  auto module = getOperation();
   OwningRewritePatternList patterns;
 
   populateRiseToImpConversionPatterns(patterns, &getContext());
@@ -1535,7 +1352,7 @@ void ConvertRiseToImperativePass::runOnModule() {
 
   //  target.addLegalOp<
   //      CallOp, FuncOp, ModuleOp, ModuleTerminatorOp, linalg::MatmulOp,
-  //      loop::ForOp, loop::ParallelOp, loop::TerminatorOp, AffineForOp,
+  //      scf::ForOp, scf::ParallelOp, scf::TerminatorOp, AffineForOp,
   //      AffineParallelOp, AffineTerminatorOp, AffineStoreOp, AffineLoadOp,
   //      ConstantIndexOp, AllocOp, LoadOp, StoreOp, AddFOp, MulFOp,
   //      linalg::FillOp, mlir::ReturnOp, mlir::rise::LambdaOp,
@@ -1548,8 +1365,8 @@ void ConvertRiseToImperativePass::runOnModule() {
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 
   target.addLegalDialect<StandardOpsDialect>();
-  target.addLegalDialect<loop::LoopOpsDialect>();
-  target.addLegalDialect<AffineOpsDialect>();
+  target.addLegalDialect<scf::SCFDialect>();
+  target.addLegalDialect<AffineDialect>();
   target.addLegalDialect<linalg::LinalgDialect>();
   target.addLegalDialect<rise::RiseDialect>(); // for debugging purposes
 
@@ -1573,11 +1390,7 @@ void ConvertRiseToImperativePass::runOnModule() {
   return;
 }
 
-std::unique_ptr<OpPassBase<ModuleOp>>
+std::unique_ptr<OperationPass<ModuleOp>>
 mlir::rise::createConvertRiseToImperativePass() {
   return std::make_unique<ConvertRiseToImperativePass>();
 }
-
-static PassRegistration<ConvertRiseToImperativePass>
-    pass("convert-rise-to-imperative",
-         "Compile all functional primitives of the rise dialect to imperative");

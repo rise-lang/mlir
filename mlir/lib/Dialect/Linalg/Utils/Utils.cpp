@@ -11,37 +11,36 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgTypes.h"
-#include "mlir/Dialect/LoopOps/LoopOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/STLExtras.h"
 #include "mlir/Transforms/FoldUtils.h"
 
 using namespace mlir;
 using namespace mlir::linalg;
-using namespace mlir::loop;
+using namespace mlir::scf;
 
 Optional<RegionMatcher::BinaryOpKind>
 RegionMatcher::matchAsScalarBinaryOp(GenericOp op) {
   auto &region = op.region();
-  if (!has_single_element(region))
+  if (!llvm::hasSingleElement(region))
     return llvm::None;
 
   Block &block = region.front();
   if (block.getNumArguments() != 2 ||
-      !block.getArgument(0).getType().isIntOrFloat() ||
-      !block.getArgument(1).getType().isIntOrFloat())
+      !block.getArgument(0).getType().isSignlessIntOrFloat() ||
+      !block.getArgument(1).getType().isSignlessIntOrFloat())
     return llvm::None;
 
   auto &ops = block.getOperations();
-  if (!has_single_element(block.without_terminator()))
+  if (!llvm::hasSingleElement(block.without_terminator()))
     return llvm::None;
 
   using mlir::matchers::m_Val;
@@ -97,7 +96,7 @@ mlir::linalg::getAssumedNonViewOperands(LinalgOp linalgOp) {
     res.push_back(op->getOperand(numViews + i));
     auto t = res.back().getType();
     (void)t;
-    assert((t.isIntOrIndexOrFloat() || t.isa<VectorType>()) &&
+    assert((t.isSignlessIntOrIndexOrFloat() || t.isa<VectorType>()) &&
            "expected scalar or vector type");
   }
   return res;

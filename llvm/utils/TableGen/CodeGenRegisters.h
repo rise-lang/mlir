@@ -339,6 +339,9 @@ namespace llvm {
     bool CoveredBySubRegs;
     /// A register class is artificial if all its members are artificial.
     bool Artificial;
+    /// Generate register pressure set for this register class and any class
+    /// synthesized from it.
+    bool GeneratePressureSet;
 
     // Return the Record that defined this class, or NULL if the class was
     // created by TableGen.
@@ -716,7 +719,7 @@ namespace llvm {
     }
 
     // Find a register class from its def.
-    CodeGenRegisterClass *getRegClass(Record*);
+    CodeGenRegisterClass *getRegClass(const Record *) const;
 
     /// getRegisterClassForRegister - Find the register class that contains the
     /// specified physical register.  If the register is not in a register

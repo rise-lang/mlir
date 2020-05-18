@@ -24,7 +24,6 @@ add_llvm_tool(dsymutil
   CFBundle.cpp
   DebugMap.cpp
   DwarfLinkerForBinary.cpp
-  DwarfStreamer.cpp
   MachODebugMapParser.cpp
   MachOUtils.cpp
   SymbolMap.cpp
@@ -37,3 +36,7 @@ add_llvm_tool(dsymutil
 if(APPLE)
   target_link_libraries(dsymutil PRIVATE "-framework CoreFoundation")
 endif(APPLE)
+
+if(HAVE_CXX_ATOMICS_WITH_LIB OR HAVE_CXX_ATOMICS64_WITH_LIB)
+  target_link_libraries(dsymutil PRIVATE atomic)
+endif()

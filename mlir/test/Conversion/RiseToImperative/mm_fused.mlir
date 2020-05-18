@@ -1,5 +1,5 @@
 // RUN: mlir-opt %s
-// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
+// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-scfs -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
@@ -66,8 +66,8 @@ func @mm() {
     %c0 = constant 0 : index
     %c16 = constant 2048 : index
     %c1 = constant 1 : index
-    loop.for %arg0 = %c0 to %c16 step %c1 {
-        loop.for %arg1 = %c0 to %c16 step %c1 {
+    scf.for %arg0 = %c0 to %c16 step %c1 {
+        scf.for %arg1 = %c0 to %c16 step %c1 {
             %val_loaded = load %val[] : memref<f32>
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
@@ -84,8 +84,8 @@ func @mm() {
     %B = alloc() : memref<2048x2048xf32>
 //    %cst_1 = constant 5.000000e+00 : f32
 //    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
-    loop.for %arg0 = %c0 to %c16 step %c1 {
-        loop.for %arg1 = %c0 to %c16 step %c1 {
+    scf.for %arg0 = %c0 to %c16 step %c1 {
+        scf.for %arg1 = %c0 to %c16 step %c1 {
             %val_loaded = load %val[] : memref<f32>
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32

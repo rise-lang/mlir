@@ -249,6 +249,34 @@ CPU part	: 0x0a1
   EXPECT_EQ(sys::detail::getHostCPUNameForARM("CPU implementer : 0x48\n"
                                               "CPU part        : 0xd01"),
             "tsv110");
+
+  // Verify A64FX.
+  const std::string A64FXProcCpuInfo = R"(
+processor       : 0
+BogoMIPS        : 200.00
+Features        : fp asimd evtstrm sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm fcma dcpop sve
+CPU implementer : 0x46
+CPU architecture: 8
+CPU variant     : 0x1
+CPU part        : 0x001
+)";
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(A64FXProcCpuInfo), "a64fx");
+
+  // Verify Nvidia Carmel.
+  const std::string CarmelProcCpuInfo = R"(
+processor       : 0
+model name      : ARMv8 Processor rev 0 (v8l)
+BogoMIPS        : 62.50
+Features        : fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm dcpop
+CPU implementer : 0x4e
+CPU architecture: 8
+CPU variant     : 0x0
+CPU part        : 0x004
+CPU revision    : 0
+)";
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(CarmelProcCpuInfo), "carmel");
 }
 
 #if defined(__APPLE__) || defined(_AIX)

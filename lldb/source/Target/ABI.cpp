@@ -17,6 +17,7 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/Log.h"
 #include "llvm/Support/TargetRegistry.h"
+#include <cctype>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -48,13 +49,20 @@ bool RegInfoBasedABI::GetRegisterInfoByName(ConstString name, RegisterInfo &info
     const char *unique_name_cstr = name.GetCString();
     uint32_t i;
     for (i = 0; i < count; ++i) {
-      if (register_info_array[i].name == unique_name_cstr) {
+      const char *reg_name = register_info_array[i].name;
+      assert(ConstString(reg_name).GetCString() == reg_name &&
+             "register_info_array[i].name not from a ConstString?");
+      if (reg_name == unique_name_cstr) {
         info = register_info_array[i];
         return true;
       }
     }
     for (i = 0; i < count; ++i) {
-      if (register_info_array[i].alt_name == unique_name_cstr) {
+      const char *reg_alt_name = register_info_array[i].alt_name;
+      assert((reg_alt_name == nullptr ||
+              ConstString(reg_alt_name).GetCString() == reg_alt_name) &&
+             "register_info_array[i].alt_name not from a ConstString?");
+      if (reg_alt_name == unique_name_cstr) {
         info = register_info_array[i];
         return true;
       }
@@ -89,10 +97,8 @@ ValueObjectSP ABI::GetReturnValueObject(Thread &thread, CompilerType &ast_type,
     if (!persistent_expression_state)
       return {};
 
-    auto prefix = persistent_expression_state->GetPersistentVariablePrefix();
     ConstString persistent_variable_name =
-        persistent_expression_state->GetNextPersistentVariableName(target,
-                                                                   prefix);
+        persistent_expression_state->GetNextPersistentVariableName();
 
     lldb::ValueObjectSP const_valobj_sp;
 

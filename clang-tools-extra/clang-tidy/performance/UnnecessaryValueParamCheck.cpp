@@ -67,16 +67,13 @@ bool isExplicitTemplateSpecialization(const FunctionDecl &Function) {
 UnnecessaryValueParamCheck::UnnecessaryValueParamCheck(
     StringRef Name, ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context),
-      IncludeStyle(utils::IncludeSorter::parseIncludeStyle(
-          Options.getLocalOrGlobal("IncludeStyle", "llvm"))),
+      IncludeStyle(Options.getLocalOrGlobal("IncludeStyle",
+                                            utils::IncludeSorter::getMapping(),
+                                            utils::IncludeSorter::IS_LLVM)),
       AllowedTypes(
           utils::options::parseStringList(Options.get("AllowedTypes", ""))) {}
 
 void UnnecessaryValueParamCheck::registerMatchers(MatchFinder *Finder) {
-  // This check is specific to C++ and doesn't apply to languages like
-  // Objective-C.
-  if (!getLangOpts().CPlusPlus)
-    return;
   const auto ExpensiveValueParamDecl = parmVarDecl(
       hasType(qualType(
           hasCanonicalType(matchers::isExpensiveToCopy()),
@@ -179,8 +176,8 @@ void UnnecessaryValueParamCheck::registerPPCallbacks(
 
 void UnnecessaryValueParamCheck::storeOptions(
     ClangTidyOptions::OptionMap &Opts) {
-  Options.store(Opts, "IncludeStyle",
-                utils::IncludeSorter::toString(IncludeStyle));
+  Options.store(Opts, "IncludeStyle", IncludeStyle,
+                utils::IncludeSorter::getMapping());
   Options.store(Opts, "AllowedTypes",
                 utils::options::serializeStringList(AllowedTypes));
 }

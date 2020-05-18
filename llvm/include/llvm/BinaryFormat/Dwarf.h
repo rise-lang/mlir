@@ -357,7 +357,8 @@ enum Constants {
 };
 
 /// Constants for the DW_APPLE_PROPERTY_attributes attribute.
-/// Keep this list in sync with clang's DeclSpec.h ObjCPropertyAttributeKind!
+/// Keep this list in sync with clang's DeclObjCCommon.h
+/// ObjCPropertyAttribute::Kind!
 enum ApplePropertyAttributes {
 #define HANDLE_DW_APPLE_PROPERTY(ID, NAME) DW_APPLE_PROPERTY_##NAME = ID,
 #include "llvm/BinaryFormat/Dwarf.def"
@@ -470,6 +471,7 @@ StringRef ArrayOrderString(unsigned Order);
 StringRef LNStandardString(unsigned Standard);
 StringRef LNExtendedString(unsigned Encoding);
 StringRef MacinfoString(unsigned Encoding);
+StringRef MacroString(unsigned Encoding);
 StringRef RangeListEncodingString(unsigned Encoding);
 StringRef LocListEncodingString(unsigned Encoding);
 StringRef CallFrameString(unsigned Encoding, Triple::ArchType Arch);
@@ -498,6 +500,7 @@ unsigned getLanguage(StringRef LanguageString);
 unsigned getCallingConvention(StringRef LanguageString);
 unsigned getAttributeEncoding(StringRef EncodingString);
 unsigned getMacinfo(StringRef MacinfoString);
+unsigned getMacro(StringRef MacroString);
 /// @}
 
 /// \defgroup DwarfConstantsVersioning Dwarf version for constants

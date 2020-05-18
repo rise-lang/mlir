@@ -10,21 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Analysis/AffineAnalysis.h"
-#include "mlir/Analysis/AffineStructures.h"
-#include "mlir/Analysis/Passes.h"
 #include "mlir/Analysis/Utils.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
-#include "mlir/IR/Builders.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/LoopFusionUtils.h"
 #include "mlir/Transforms/LoopUtils.h"
 #include "mlir/Transforms/Passes.h"
-
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "test-loop-fusion"
 
@@ -49,7 +41,7 @@ static llvm::cl::opt<bool> clTestLoopFusionTransformation(
 
 namespace {
 
-struct TestLoopFusion : public FunctionPass<TestLoopFusion> {
+struct TestLoopFusion : public PassWrapper<TestLoopFusion, FunctionPass> {
   void runOnFunction() override;
 };
 
@@ -91,7 +83,7 @@ static std::string getSliceStr(const mlir::ComputationSliceState &sliceUnion) {
   std::string result;
   llvm::raw_string_ostream os(result);
   // Slice insertion point format [loop-depth, operation-block-index]
-  unsigned ipd = getNestingDepth(*sliceUnion.insertPoint);
+  unsigned ipd = getNestingDepth(&*sliceUnion.insertPoint);
   unsigned ipb = getBlockIndex(*sliceUnion.insertPoint);
   os << "insert point: (" << std::to_string(ipd) << ", " << std::to_string(ipb)
      << ")";
@@ -154,13 +146,12 @@ using LoopFunc = function_ref<bool(AffineForOp, AffineForOp, unsigned, unsigned,
 // Run tests on all combinations of src/dst loop nests in 'depthToLoops'.
 // If 'return_on_change' is true, returns on first invocation of 'fn' which
 // returns true.
-static bool
-iterateLoops(DenseMap<unsigned, SmallVector<AffineForOp, 2>> &depthToLoops,
-             LoopFunc fn, bool return_on_change = false) {
+static bool iterateLoops(ArrayRef<SmallVector<AffineForOp, 2>> depthToLoops,
+                         LoopFunc fn, bool return_on_change = false) {
   bool changed = false;
-  for (auto &depthAndLoops : depthToLoops) {
-    unsigned loopDepth = depthAndLoops.first;
-    auto &loops = depthAndLoops.second;
+  for (unsigned loopDepth = 0, end = depthToLoops.size(); loopDepth < end;
+       ++loopDepth) {
+    auto &loops = depthToLoops[loopDepth];
     unsigned numLoops = loops.size();
     for (unsigned j = 0; j < numLoops; ++j) {
       for (unsigned k = 0; k < numLoops; ++k) {
@@ -176,7 +167,7 @@ iterateLoops(DenseMap<unsigned, SmallVector<AffineForOp, 2>> &depthToLoops,
 }
 
 void TestLoopFusion::runOnFunction() {
-  DenseMap<unsigned, SmallVector<AffineForOp, 2>> depthToLoops;
+  std::vector<SmallVector<AffineForOp, 2>> depthToLoops;
   if (clTestLoopFusionTransformation) {
     // Run loop fusion until a fixed point is reached.
     do {

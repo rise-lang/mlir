@@ -71,6 +71,9 @@ def InsecureAPI : Package<"insecureAPI">, ParentPackage<Security>;
 def SecurityAlpha : Package<"security">, ParentPackage<Alpha>;
 def Taint : Package<"taint">, ParentPackage<SecurityAlpha>;
 
+def CERT : Package<"cert">, ParentPackage<SecurityAlpha>;
+def POS : Package<"pos">, ParentPackage<CERT>;
+
 def Unix : Package<"unix">;
 def UnixAlpha : Package<"unix">, ParentPackage<Alpha>;
 def CString : Package<"cstring">, ParentPackage<Unix>;
@@ -290,6 +293,22 @@ let ParentPackage = APIModeling in {
 
 def StdCLibraryFunctionsChecker : Checker<"StdCLibraryFunctions">,
   HelpText<"Improve modeling of the C standard library functions">,
+  Dependencies<[NonNullParamChecker, CallAndMessageChecker]>,
+  CheckerOptions<[
+    CmdLineOption<Boolean,
+                  "DisplayLoadedSummaries",
+                  "If set to true, the checker displays the found summaries "
+                  "for the given translation unit.",
+                  "false",
+                  Released>
+  ]>,
+  Documentation<NotDocumented>;
+
+def StdCLibraryFunctionArgsChecker : Checker<"StdCLibraryFunctionArgs">,
+  HelpText<"Check constraints of arguments of C standard library functions, "
+           "such as whether the parameter of isalpha is in the range [0, 255] "
+           "or is EOF.">,
+  Dependencies<[StdCLibraryFunctionsChecker]>,
   Documentation<NotDocumented>;
 
 def TrustNonnullChecker : Checker<"TrustNonnull">,
@@ -829,6 +848,15 @@ def FloatLoopCounter : Checker<"FloatLoopCounter">,
 
 } // end "security"
 
+let ParentPackage = POS in {
+
+  def PutenvWithAuto : Checker<"34c">,
+  HelpText<"Finds calls to the 'putenv' function which pass a pointer to "
+           "an automatic variable as the argument.">,
+  Documentation<HasDocumentation>;
+
+} // end "alpha.cert.pos"
+
 let ParentPackage = SecurityAlpha in {
 
 def ArrayBoundChecker : Checker<"ArrayBound">,
@@ -1257,6 +1285,30 @@ def AnalysisOrderChecker : Checker<"AnalysisOrder">,
                   Released,
                   Hide>,
     CmdLineOption<Boolean,
+                  "PreStmtCXXDeleteExpr",
+                  "",
+                  "false",
+                  Released,
+                  Hide>,
+    CmdLineOption<Boolean,
+                  "PostStmtCXXDeleteExpr",
+                  "",
+                  "false",
+                  Released,
+                  Hide>,
+    CmdLineOption<Boolean,
+                  "PreStmtCXXConstructExpr",
+                  "",
+                  "false",
+                  Released,
+                  Hide>,
+    CmdLineOption<Boolean,
+                  "PostStmtCXXConstructExpr",
+                  "",
+                  "false",
+                  Released,
+                  Hide>,
+    CmdLineOption<Boolean,
                   "PreStmtOffsetOfExpr",
                   "",
                   "false",
@@ -1282,6 +1334,12 @@ def AnalysisOrderChecker : Checker<"AnalysisOrder">,
                   Hide>,
     CmdLineOption<Boolean,
                   "EndFunction",
+                  "",
+                  "false",
+                  Released,
+                  Hide>,
+    CmdLineOption<Boolean,
+                  "EndAnalysis",
                   "",
                   "false",
                   Released,
@@ -1381,6 +1439,16 @@ def TaintTesterChecker : Checker<"TaintTest">,
   HelpText<"Mark tainted symbols as such.">,
   Documentation<NotDocumented>;
 
+// This checker *technically* depends on SteamChecker, but we don't allow
+// dependency checkers to emit diagnostics, and a debug checker isn't worth
+// the chore needed to create a modeling portion on its own. Since this checker
+// is for development purposes only anyways, make sure that StreamChecker is
+// also enabled, at least for the time being.
+def StreamTesterChecker : Checker<"StreamTester">,
+  HelpText<"Add test functions to StreamChecker for test and debugging "
+           "purposes.">,
+  Documentation<NotDocumented>;
+
 def ExprInspectionChecker : Checker<"ExprInspection">,
   HelpText<"Check the analyzer's understanding of expressions">,
   Documentation<NotDocumented>;
@@ -1401,6 +1469,12 @@ def DebugContainerModeling : Checker<"DebugContainerModeling">,
 def DebugIteratorModeling : Checker<"DebugIteratorModeling">,
   HelpText<"Check the analyzer's understanding of C++ iterators">,
   Dependencies<[DebugContainerModeling, IteratorModeling]>,
+  Documentation<NotDocumented>;
+
+def StdCLibraryFunctionsTesterChecker : Checker<"StdCLibraryFunctionsTester">,
+  HelpText<"Add test functions to the summary map, so testing of individual "
+           "summary constituents becomes possible.">,
+  Dependencies<[StdCLibraryFunctionsChecker]>,
   Documentation<NotDocumented>;
 
 } // end "debug"

@@ -192,10 +192,10 @@ public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
 
-  static mlir::LogicalResult
-  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
-                               mlir::MLIRContext *context, Nat size,
-                               Type elementType);
+//  static mlir::LogicalResult
+//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
+//                               mlir::MLIRContext *context, Nat size,
+//                               Type elementType);
 
   /// This method is used to get an instance of ArrayType.
   static ArrayType get(mlir::MLIRContext *context, Nat size,

@@ -11,7 +11,7 @@
 namespace mlir {
 class ModuleOp;
 template <typename T>
-class OpPassBase;
+class OperationPass;
 class OwningRewritePatternList;
 
 void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
@@ -19,10 +19,12 @@ void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
 void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
 
+#define GEN_PASS_CLASSES
+#include "mlir/Dialect/Rise/Passes.h.inc"
+
 namespace rise {
 
-std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToStandardPass();
-std::unique_ptr<OpPassBase<ModuleOp>> createConvertRiseToImperativePass();
+std::unique_ptr<OperationPass<ModuleOp>> createConvertRiseToImperativePass();
 
 } // namespace rise
 } // namespace mlir

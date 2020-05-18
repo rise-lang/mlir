@@ -11,12 +11,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/PriorityWorklist.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -34,6 +41,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/InitializePasses.h"
@@ -45,6 +53,11 @@
 
 using namespace llvm;
 using namespace llvm::PatternMatch;
+
+static cl::opt<bool> ForceReductionIntrinsic(
+    "force-reduction-intrinsics", cl::Hidden,
+    cl::desc("Force creating reduction intrinsics for testing."),
+    cl::init(false));
 
 #define DEBUG_TYPE "loop-utils"
 
@@ -824,7 +837,7 @@ bool llvm::hasIterationCountInvariantInParent(Loop *InnerLoop,
   return true;
 }
 
-Value *llvm::createMinMaxOp(IRBuilder<> &Builder,
+Value *llvm::createMinMaxOp(IRBuilderBase &Builder,
                             RecurrenceDescriptor::MinMaxRecurrenceKind RK,
                             Value *Left, Value *Right) {
   CmpInst::Predicate P = CmpInst::ICMP_NE;
@@ -853,7 +866,7 @@ Value *llvm::createMinMaxOp(IRBuilder<> &Builder,
 
   // We only match FP sequences that are 'fast', so we can unconditionally
   // set it on any generated instructions.
-  IRBuilder<>::FastMathFlagGuard FMFG(Builder);
+  IRBuilderBase::FastMathFlagGuard FMFG(Builder);
   FastMathFlags FMF;
   FMF.setFast();
   Builder.setFastMathFlags(FMF);
@@ -871,11 +884,11 @@ Value *llvm::createMinMaxOp(IRBuilder<> &Builder,
 
 // Helper to generate an ordered reduction.
 Value *
-llvm::getOrderedReduction(IRBuilder<> &Builder, Value *Acc, Value *Src,
+llvm::getOrderedReduction(IRBuilderBase &Builder, Value *Acc, Value *Src,
                           unsigned Op,
                           RecurrenceDescriptor::MinMaxRecurrenceKind MinMaxKind,
                           ArrayRef<Value *> RedOps) {
-  unsigned VF = Src->getType()->getVectorNumElements();
+  unsigned VF = cast<VectorType>(Src->getType())->getNumElements();
 
   // Extract and apply reduction ops in ascending order:
   // e.g. ((((Acc + Scl[0]) + Scl[1]) + Scl[2]) + ) ... + Scl[VF-1]
@@ -902,29 +915,27 @@ llvm::getOrderedReduction(IRBuilder<> &Builder, Value *Acc, Value *Src,
 
 // Helper to generate a log2 shuffle reduction.
 Value *
-llvm::getShuffleReduction(IRBuilder<> &Builder, Value *Src, unsigned Op,
+llvm::getShuffleReduction(IRBuilderBase &Builder, Value *Src, unsigned Op,
                           RecurrenceDescriptor::MinMaxRecurrenceKind MinMaxKind,
                           ArrayRef<Value *> RedOps) {
-  unsigned VF = Src->getType()->getVectorNumElements();
+  unsigned VF = cast<VectorType>(Src->getType())->getNumElements();
   // VF is a power of 2 so we can emit the reduction using log2(VF) shuffles
   // and vector ops, reducing the set of values being computed by half each
   // round.
   assert(isPowerOf2_32(VF) &&
          "Reduction emission only supported for pow2 vectors!");
   Value *TmpVec = Src;
-  SmallVector<Constant *, 32> ShuffleMask(VF, nullptr);
+  SmallVector<int, 32> ShuffleMask(VF);
   for (unsigned i = VF; i != 1; i >>= 1) {
     // Move the upper half of the vector to the lower half.
     for (unsigned j = 0; j != i / 2; ++j)
-      ShuffleMask[j] = Builder.getInt32(i / 2 + j);
+      ShuffleMask[j] = i / 2 + j;
 
     // Fill the rest of the mask with undef.
-    std::fill(&ShuffleMask[i / 2], ShuffleMask.end(),
-              UndefValue::get(Builder.getInt32Ty()));
+    std::fill(&ShuffleMask[i / 2], ShuffleMask.end(), -1);
 
     Value *Shuf = Builder.CreateShuffleVector(
-        TmpVec, UndefValue::get(TmpVec->getType()),
-        ConstantVector::get(ShuffleMask), "rdx.shuf");
+        TmpVec, UndefValue::get(TmpVec->getType()), ShuffleMask, "rdx.shuf");
 
     if (Op != Instruction::ICmp && Op != Instruction::FCmp) {
       // The builder propagates its fast-math-flags setting.
@@ -950,10 +961,10 @@ llvm::getShuffleReduction(IRBuilder<> &Builder, Value *Src, unsigned Op,
 /// Create a simple vector reduction specified by an opcode and some
 /// flags (if generating min/max reductions).
 Value *llvm::createSimpleTargetReduction(
-    IRBuilder<> &Builder, const TargetTransformInfo *TTI, unsigned Opcode,
+    IRBuilderBase &Builder, const TargetTransformInfo *TTI, unsigned Opcode,
     Value *Src, TargetTransformInfo::ReductionFlags Flags,
     ArrayRef<Value *> RedOps) {
-  assert(isa<VectorType>(Src->getType()) && "Type must be a vector");
+  auto *SrcVTy = cast<VectorType>(Src->getType());
 
   std::function<Value *()> BuildFunc;
   using RD = RecurrenceDescriptor;
@@ -978,13 +989,13 @@ Value *llvm::createSimpleTargetReduction(
   case Instruction::FAdd:
     BuildFunc = [&]() {
       auto Rdx = Builder.CreateFAddReduce(
-          Constant::getNullValue(Src->getType()->getVectorElementType()), Src);
+          Constant::getNullValue(SrcVTy->getElementType()), Src);
       return Rdx;
     };
     break;
   case Instruction::FMul:
     BuildFunc = [&]() {
-      Type *Ty = Src->getType()->getVectorElementType();
+      Type *Ty = SrcVTy->getElementType();
       auto Rdx = Builder.CreateFMulReduce(ConstantFP::get(Ty, 1.0), Src);
       return Rdx;
     };
@@ -1015,13 +1026,14 @@ Value *llvm::createSimpleTargetReduction(
     llvm_unreachable("Unhandled opcode");
     break;
   }
-  if (TTI->useReductionIntrinsic(Opcode, Src->getType(), Flags))
+  if (ForceReductionIntrinsic ||
+      TTI->useReductionIntrinsic(Opcode, Src->getType(), Flags))
     return BuildFunc();
   return getShuffleReduction(Builder, Src, Opcode, MinMaxKind, RedOps);
 }
 
 /// Create a vector reduction using a given recurrence descriptor.
-Value *llvm::createTargetReduction(IRBuilder<> &B,
+Value *llvm::createTargetReduction(IRBuilderBase &B,
                                    const TargetTransformInfo *TTI,
                                    RecurrenceDescriptor &Desc, Value *Src,
                                    bool NoNaN) {
@@ -1033,7 +1045,7 @@ Value *llvm::createTargetReduction(IRBuilder<> &B,
 
   // All ops in the reduction inherit fast-math-flags from the recurrence
   // descriptor.
-  IRBuilder<>::FastMathFlagGuard FMFGuard(B);
+  IRBuilderBase::FastMathFlagGuard FMFGuard(B);
   B.setFastMathFlags(Desc.getFastMathFlags());
 
   switch (RecKind) {
@@ -1267,10 +1279,12 @@ static bool canLoopBeDeleted(Loop *L, SmallVector<RewritePhi, 8> &RewritePhiSet)
   return true;
 }
 
-int llvm::rewriteLoopExitValues(Loop *L, LoopInfo *LI,
-    TargetLibraryInfo *TLI, ScalarEvolution *SE, SCEVExpander &Rewriter,
-    DominatorTree *DT, ReplaceExitVal ReplaceExitValue,
-    SmallVector<WeakTrackingVH, 16> &DeadInsts) {
+int llvm::rewriteLoopExitValues(Loop *L, LoopInfo *LI, TargetLibraryInfo *TLI,
+                                ScalarEvolution *SE,
+                                const TargetTransformInfo *TTI,
+                                SCEVExpander &Rewriter, DominatorTree *DT,
+                                ReplaceExitVal ReplaceExitValue,
+                                SmallVector<WeakTrackingVH, 16> &DeadInsts) {
   // Check a pre-condition.
   assert(L->isRecursivelyLCSSAForm(*DT, *LI) &&
          "Indvars did not preserve LCSSA!");
@@ -1354,12 +1368,12 @@ int llvm::rewriteLoopExitValues(Loop *L, LoopInfo *LI,
         // away. Avoid doing so unless we know we have a value which computes
         // the ExitValue already. TODO: This should be merged into SCEV
         // expander to leverage its knowledge of existing expressions.
-        if (ReplaceExitValue != AlwaysRepl &&
-            !isa<SCEVConstant>(ExitValue) && !isa<SCEVUnknown>(ExitValue) &&
-            hasHardUserWithinLoop(L, Inst))
+        if (ReplaceExitValue != AlwaysRepl && !isa<SCEVConstant>(ExitValue) &&
+            !isa<SCEVUnknown>(ExitValue) && hasHardUserWithinLoop(L, Inst))
           continue;
 
-        bool HighCost = Rewriter.isHighCostExpansion(ExitValue, L, Inst);
+        bool HighCost = Rewriter.isHighCostExpansion(
+            ExitValue, L, SCEVCheapExpansionBudget, TTI, Inst);
         Value *ExitVal = Rewriter.expandCodeFor(ExitValue, PN->getType(), Inst);
 
         LLVM_DEBUG(dbgs() << "rewriteLoopExitValues: AfterLoopVal = "
@@ -1495,4 +1509,177 @@ llvm::appendLoopsToWorklist<Loop &>(Loop &L,
 void llvm::appendLoopsToWorklist(LoopInfo &LI,
                                  SmallPriorityWorklist<Loop *, 4> &Worklist) {
   appendReversedLoopsToWorklist(LI, Worklist);
+}
+
+Loop *llvm::cloneLoop(Loop *L, Loop *PL, ValueToValueMapTy &VM,
+                      LoopInfo *LI, LPPassManager *LPM) {
+  Loop &New = *LI->AllocateLoop();
+  if (PL)
+    PL->addChildLoop(&New);
+  else
+    LI->addTopLevelLoop(&New);
+
+  if (LPM)
+    LPM->addLoop(New);
+
+  // Add all of the blocks in L to the new loop.
+  for (Loop::block_iterator I = L->block_begin(), E = L->block_end();
+       I != E; ++I)
+    if (LI->getLoopFor(*I) == L)
+      New.addBasicBlockToLoop(cast<BasicBlock>(VM[*I]), *LI);
+
+  // Add all of the subloops to the new loop.
+  for (Loop *I : *L)
+    cloneLoop(I, &New, VM, LI, LPM);
+
+  return &New;
+}
+
+/// IR Values for the lower and upper bounds of a pointer evolution.  We
+/// need to use value-handles because SCEV expansion can invalidate previously
+/// expanded values.  Thus expansion of a pointer can invalidate the bounds for
+/// a previous one.
+struct PointerBounds {
+  TrackingVH<Value> Start;
+  TrackingVH<Value> End;
+};
+
+/// Expand code for the lower and upper bound of the pointer group \p CG
+/// in \p TheLoop.  \return the values for the bounds.
+static PointerBounds expandBounds(const RuntimeCheckingPtrGroup *CG,
+                                  Loop *TheLoop, Instruction *Loc,
+                                  SCEVExpander &Exp, ScalarEvolution *SE) {
+  // TODO: Add helper to retrieve pointers to CG.
+  Value *Ptr = CG->RtCheck.Pointers[CG->Members[0]].PointerValue;
+  const SCEV *Sc = SE->getSCEV(Ptr);
+
+  unsigned AS = Ptr->getType()->getPointerAddressSpace();
+  LLVMContext &Ctx = Loc->getContext();
+
+  // Use this type for pointer arithmetic.
+  Type *PtrArithTy = Type::getInt8PtrTy(Ctx, AS);
+
+  if (SE->isLoopInvariant(Sc, TheLoop)) {
+    LLVM_DEBUG(dbgs() << "LAA: Adding RT check for a loop invariant ptr:"
+                      << *Ptr << "\n");
+    // Ptr could be in the loop body. If so, expand a new one at the correct
+    // location.
+    Instruction *Inst = dyn_cast<Instruction>(Ptr);
+    Value *NewPtr = (Inst && TheLoop->contains(Inst))
+                        ? Exp.expandCodeFor(Sc, PtrArithTy, Loc)
+                        : Ptr;
+    // We must return a half-open range, which means incrementing Sc.
+    const SCEV *ScPlusOne = SE->getAddExpr(Sc, SE->getOne(PtrArithTy));
+    Value *NewPtrPlusOne = Exp.expandCodeFor(ScPlusOne, PtrArithTy, Loc);
+    return {NewPtr, NewPtrPlusOne};
+  } else {
+    Value *Start = nullptr, *End = nullptr;
+    LLVM_DEBUG(dbgs() << "LAA: Adding RT check for range:\n");
+    Start = Exp.expandCodeFor(CG->Low, PtrArithTy, Loc);
+    End = Exp.expandCodeFor(CG->High, PtrArithTy, Loc);
+    LLVM_DEBUG(dbgs() << "Start: " << *CG->Low << " End: " << *CG->High
+                      << "\n");
+    return {Start, End};
+  }
+}
+
+/// Turns a collection of checks into a collection of expanded upper and
+/// lower bounds for both pointers in the check.
+static SmallVector<std::pair<PointerBounds, PointerBounds>, 4>
+expandBounds(const SmallVectorImpl<RuntimePointerCheck> &PointerChecks, Loop *L,
+             Instruction *Loc, ScalarEvolution *SE, SCEVExpander &Exp) {
+  SmallVector<std::pair<PointerBounds, PointerBounds>, 4> ChecksWithBounds;
+
+  // Here we're relying on the SCEV Expander's cache to only emit code for the
+  // same bounds once.
+  transform(PointerChecks, std::back_inserter(ChecksWithBounds),
+            [&](const RuntimePointerCheck &Check) {
+              PointerBounds First = expandBounds(Check.first, L, Loc, Exp, SE),
+                            Second =
+                                expandBounds(Check.second, L, Loc, Exp, SE);
+              return std::make_pair(First, Second);
+            });
+
+  return ChecksWithBounds;
+}
+
+std::pair<Instruction *, Instruction *> llvm::addRuntimeChecks(
+    Instruction *Loc, Loop *TheLoop,
+    const SmallVectorImpl<RuntimePointerCheck> &PointerChecks,
+    ScalarEvolution *SE) {
+  // TODO: Move noalias annotation code from LoopVersioning here and share with LV if possible.
+  // TODO: Pass  RtPtrChecking instead of PointerChecks and SE separately, if possible
+  const DataLayout &DL = TheLoop->getHeader()->getModule()->getDataLayout();
+  SCEVExpander Exp(*SE, DL, "induction");
+  auto ExpandedChecks = expandBounds(PointerChecks, TheLoop, Loc, SE, Exp);
+
+  LLVMContext &Ctx = Loc->getContext();
+  Instruction *FirstInst = nullptr;
+  IRBuilder<> ChkBuilder(Loc);
+  // Our instructions might fold to a constant.
+  Value *MemoryRuntimeCheck = nullptr;
+
+  // FIXME: this helper is currently a duplicate of the one in
+  // LoopVectorize.cpp.
+  auto GetFirstInst = [](Instruction *FirstInst, Value *V,
+                         Instruction *Loc) -> Instruction * {
+    if (FirstInst)
+      return FirstInst;
+    if (Instruction *I = dyn_cast<Instruction>(V))
+      return I->getParent() == Loc->getParent() ? I : nullptr;
+    return nullptr;
+  };
+
+  for (const auto &Check : ExpandedChecks) {
+    const PointerBounds &A = Check.first, &B = Check.second;
+    // Check if two pointers (A and B) conflict where conflict is computed as:
+    // start(A) <= end(B) && start(B) <= end(A)
+    unsigned AS0 = A.Start->getType()->getPointerAddressSpace();
+    unsigned AS1 = B.Start->getType()->getPointerAddressSpace();
+
+    assert((AS0 == B.End->getType()->getPointerAddressSpace()) &&
+           (AS1 == A.End->getType()->getPointerAddressSpace()) &&
+           "Trying to bounds check pointers with different address spaces");
+
+    Type *PtrArithTy0 = Type::getInt8PtrTy(Ctx, AS0);
+    Type *PtrArithTy1 = Type::getInt8PtrTy(Ctx, AS1);
+
+    Value *Start0 = ChkBuilder.CreateBitCast(A.Start, PtrArithTy0, "bc");
+    Value *Start1 = ChkBuilder.CreateBitCast(B.Start, PtrArithTy1, "bc");
+    Value *End0 = ChkBuilder.CreateBitCast(A.End, PtrArithTy1, "bc");
+    Value *End1 = ChkBuilder.CreateBitCast(B.End, PtrArithTy0, "bc");
+
+    // [A|B].Start points to the first accessed byte under base [A|B].
+    // [A|B].End points to the last accessed byte, plus one.
+    // There is no conflict when the intervals are disjoint:
+    // NoConflict = (B.Start >= A.End) || (A.Start >= B.End)
+    //
+    // bound0 = (B.Start < A.End)
+    // bound1 = (A.Start < B.End)
+    //  IsConflict = bound0 & bound1
+    Value *Cmp0 = ChkBuilder.CreateICmpULT(Start0, End1, "bound0");
+    FirstInst = GetFirstInst(FirstInst, Cmp0, Loc);
+    Value *Cmp1 = ChkBuilder.CreateICmpULT(Start1, End0, "bound1");
+    FirstInst = GetFirstInst(FirstInst, Cmp1, Loc);
+    Value *IsConflict = ChkBuilder.CreateAnd(Cmp0, Cmp1, "found.conflict");
+    FirstInst = GetFirstInst(FirstInst, IsConflict, Loc);
+    if (MemoryRuntimeCheck) {
+      IsConflict =
+          ChkBuilder.CreateOr(MemoryRuntimeCheck, IsConflict, "conflict.rdx");
+      FirstInst = GetFirstInst(FirstInst, IsConflict, Loc);
+    }
+    MemoryRuntimeCheck = IsConflict;
+  }
+
+  if (!MemoryRuntimeCheck)
+    return std::make_pair(nullptr, nullptr);
+
+  // We have to do this trickery because the IRBuilder might fold the check to a
+  // constant expression in which case there is no Instruction anchored in a
+  // the block.
+  Instruction *Check =
+      BinaryOperator::CreateAnd(MemoryRuntimeCheck, ConstantInt::getTrue(Ctx));
+  ChkBuilder.Insert(Check, "memcheck.conflict");
+  FirstInst = GetFirstInst(FirstInst, Check, Loc);
+  return std::make_pair(FirstInst, Check);
 }

@@ -107,7 +107,7 @@ private:
 
   /// Converts \p Op, which must be of floating point type, to the
   /// floating point type \p VT, by either extending or truncating it.
-  SDValue getFPExtOrFPTrunc(SelectionDAG &DAG,
+  SDValue getFPExtOrFPRound(SelectionDAG &DAG,
                             SDValue Op,
                             const SDLoc &DL,
                             EVT VT) const;
@@ -263,6 +263,12 @@ public:
   bool isMemOpUniform(const SDNode *N) const;
   bool isMemOpHasNoClobberedMemOperand(const SDNode *N) const;
 
+  static bool isNonGlobalAddrSpace(unsigned AS) {
+    return AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::REGION_ADDRESS ||
+           AS == AMDGPUAS::PRIVATE_ADDRESS;
+  }
+
+  // FIXME: Missing constant_32bit
   static bool isFlatGlobalAddrSpace(unsigned AS) {
     return AS == AMDGPUAS::GLOBAL_ADDRESS ||
            AS == AMDGPUAS::FLAT_ADDRESS ||
@@ -352,8 +358,7 @@ public:
   MVT getScalarShiftAmountTy(const DataLayout &, EVT) const override;
   bool isFMAFasterThanFMulAndFAdd(const MachineFunction &MF,
                                   EVT VT) const override;
-  bool isFMADLegalForFAddFSub(const SelectionDAG &DAG,
-                              const SDNode *N) const override;
+  bool isFMADLegal(const SelectionDAG &DAG, const SDNode *N) const override;
 
   SDValue splitUnaryVectorOp(SDValue Op, SelectionDAG &DAG) const;
   SDValue splitBinaryVectorOp(SDValue Op, SelectionDAG &DAG) const;
@@ -433,6 +438,10 @@ public:
                                  MachineFunction &MF,
                                  const SIRegisterInfo &TRI,
                                  SIMachineFunctionInfo &Info) const;
+  void allocateSpecialInputVGPRsFixed(CCState &CCInfo,
+                                      MachineFunction &MF,
+                                      const SIRegisterInfo &TRI,
+                                      SIMachineFunctionInfo &Info) const;
 };
 
 } // End namespace llvm

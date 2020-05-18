@@ -30,6 +30,7 @@
 #include "clang/AST/NSAPI.h"
 #include "clang/AST/NonTrivialTypeVisitor.h"
 #include "clang/AST/OperationKinds.h"
+#include "clang/AST/RecordLayout.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/TemplateBase.h"
 #include "clang/AST/Type.h"
@@ -1379,6 +1380,46 @@ CheckBuiltinTargetSupport(Sema &S, unsigned BuiltinID, CallExpr *TheCall,
 static void CheckNonNullArgument(Sema &S, const Expr *ArgExpr,
                                  SourceLocation CallSiteLoc);
 
+bool Sema::CheckTSBuiltinFunctionCall(llvm::Triple::ArchType Arch,
+                                      unsigned BuiltinID, CallExpr *TheCall) {
+  switch (Arch) {
+  default:
+    // Some builtins don't require additional checking, so just consider these
+    // acceptable.
+    return false;
+  case llvm::Triple::arm:
+  case llvm::Triple::armeb:
+  case llvm::Triple::thumb:
+  case llvm::Triple::thumbeb:
+    return CheckARMBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
+  case llvm::Triple::aarch64_be:
+    return CheckAArch64BuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::bpfeb:
+  case llvm::Triple::bpfel:
+    return CheckBPFBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::hexagon:
+    return CheckHexagonBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::mips:
+  case llvm::Triple::mipsel:
+  case llvm::Triple::mips64:
+  case llvm::Triple::mips64el:
+    return CheckMipsBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::systemz:
+    return CheckSystemZBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::x86:
+  case llvm::Triple::x86_64:
+    return CheckX86BuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::ppc:
+  case llvm::Triple::ppc64:
+  case llvm::Triple::ppc64le:
+    return CheckPPCBuiltinFunctionCall(BuiltinID, TheCall);
+  case llvm::Triple::amdgcn:
+    return CheckAMDGCNBuiltinFunctionCall(BuiltinID, TheCall);
+  }
+}
+
 ExprResult
 Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
                                CallExpr *TheCall) {
@@ -1649,11 +1690,16 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
   case Builtin::BI__builtin_nontemporal_store:
     return SemaBuiltinNontemporalOverloaded(TheCallResult);
   case Builtin::BI__builtin_memcpy_inline: {
-    // __builtin_memcpy_inline size argument is a constant by definition.
-    if (TheCall->getArg(2)->EvaluateKnownConstInt(Context).isNullValue())
+    clang::Expr *SizeOp = TheCall->getArg(2);
+    // We warn about copying to or from `nullptr` pointers when `size` is
+    // greater than 0. When `size` is value dependent we cannot evaluate its
+    // value so we bail out.
+    if (SizeOp->isValueDependent())
       break;
-    CheckNonNullArgument(*this, TheCall->getArg(0), TheCall->getExprLoc());
-    CheckNonNullArgument(*this, TheCall->getArg(1), TheCall->getExprLoc());
+    if (!SizeOp->EvaluateKnownConstInt(Context).isNullValue()) {
+      CheckNonNullArgument(*this, TheCall->getArg(0), TheCall->getExprLoc());
+      CheckNonNullArgument(*this, TheCall->getArg(1), TheCall->getExprLoc());
+    }
     break;
   }
 #define BUILTIN(ID, TYPE, ATTRS)
@@ -1843,62 +1889,46 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
       return ExprError();
     break;
   case Builtin::BI__builtin_os_log_format:
+    Cleanup.setExprNeedsCleanups(true);
+    LLVM_FALLTHROUGH;
   case Builtin::BI__builtin_os_log_format_buffer_size:
     if (SemaBuiltinOSLogFormat(TheCall))
       return ExprError();
+    break;
+  case Builtin::BI__builtin_frame_address:
+  case Builtin::BI__builtin_return_address:
+    if (SemaBuiltinConstantArgRange(TheCall, 0, 0, 0xFFFF))
+      return ExprError();
+
+    // -Wframe-address warning if non-zero passed to builtin
+    // return/frame address.
+    Expr::EvalResult Result;
+    if (TheCall->getArg(0)->EvaluateAsInt(Result, getASTContext()) &&
+        Result.Val.getInt() != 0)
+      Diag(TheCall->getBeginLoc(), diag::warn_frame_address)
+          << ((BuiltinID == Builtin::BI__builtin_return_address)
+                  ? "__builtin_return_address"
+                  : "__builtin_frame_address")
+          << TheCall->getSourceRange();
     break;
   }
 
   // Since the target specific builtins for each arch overlap, only check those
   // of the arch we are compiling for.
   if (Context.BuiltinInfo.isTSBuiltin(BuiltinID)) {
-    switch (Context.getTargetInfo().getTriple().getArch()) {
-      case llvm::Triple::arm:
-      case llvm::Triple::armeb:
-      case llvm::Triple::thumb:
-      case llvm::Triple::thumbeb:
-        if (CheckARMBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::aarch64:
-      case llvm::Triple::aarch64_32:
-      case llvm::Triple::aarch64_be:
-        if (CheckAArch64BuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::bpfeb:
-      case llvm::Triple::bpfel:
-        if (CheckBPFBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::hexagon:
-        if (CheckHexagonBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::mips:
-      case llvm::Triple::mipsel:
-      case llvm::Triple::mips64:
-      case llvm::Triple::mips64el:
-        if (CheckMipsBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::systemz:
-        if (CheckSystemZBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::x86:
-      case llvm::Triple::x86_64:
-        if (CheckX86BuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      case llvm::Triple::ppc:
-      case llvm::Triple::ppc64:
-      case llvm::Triple::ppc64le:
-        if (CheckPPCBuiltinFunctionCall(BuiltinID, TheCall))
-          return ExprError();
-        break;
-      default:
-        break;
+    if (Context.BuiltinInfo.isAuxBuiltinID(BuiltinID)) {
+      assert(Context.getAuxTargetInfo() &&
+             "Aux Target Builtin, but not an aux target?");
+
+      if (CheckTSBuiltinFunctionCall(
+              Context.getAuxTargetInfo()->getTriple().getArch(),
+              Context.BuiltinInfo.getAuxBuiltinID(BuiltinID), TheCall))
+        return ExprError();
+    } else {
+      if (CheckTSBuiltinFunctionCall(
+              Context.getTargetInfo().getTriple().getArch(), BuiltinID,
+              TheCall))
+        return ExprError();
     }
   }
 
@@ -1973,6 +2003,115 @@ static QualType getNeonEltType(NeonTypeFlags Flags, ASTContext &Context,
     return Context.DoubleTy;
   }
   llvm_unreachable("Invalid NeonTypeFlag!");
+}
+
+bool Sema::CheckSVEBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
+  // Range check SVE intrinsics that take immediate values.
+  SmallVector<std::tuple<int,int,int>, 3> ImmChecks;
+
+  switch (BuiltinID) {
+  default:
+    return false;
+#define GET_SVE_IMMEDIATE_CHECK
+#include "clang/Basic/arm_sve_sema_rangechecks.inc"
+#undef GET_SVE_IMMEDIATE_CHECK
+  }
+
+  // Perform all the immediate checks for this builtin call.
+  bool HasError = false;
+  for (auto &I : ImmChecks) {
+    int ArgNum, CheckTy, ElementSizeInBits;
+    std::tie(ArgNum, CheckTy, ElementSizeInBits) = I;
+
+    typedef bool(*OptionSetCheckFnTy)(int64_t Value);
+
+    // Function that checks whether the operand (ArgNum) is an immediate
+    // that is one of the predefined values.
+    auto CheckImmediateInSet = [&](OptionSetCheckFnTy CheckImm,
+                                   int ErrDiag) -> bool {
+      // We can't check the value of a dependent argument.
+      Expr *Arg = TheCall->getArg(ArgNum);
+      if (Arg->isTypeDependent() || Arg->isValueDependent())
+        return false;
+
+      // Check constant-ness first.
+      llvm::APSInt Imm;
+      if (SemaBuiltinConstantArg(TheCall, ArgNum, Imm))
+        return true;
+
+      if (!CheckImm(Imm.getSExtValue()))
+        return Diag(TheCall->getBeginLoc(), ErrDiag) << Arg->getSourceRange();
+      return false;
+    };
+
+    switch ((SVETypeFlags::ImmCheckType)CheckTy) {
+    case SVETypeFlags::ImmCheck0_31:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0, 31))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheck0_13:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0, 13))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheck1_16:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 1, 16))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheck0_7:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0, 7))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckExtract:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0,
+                                      (2048 / ElementSizeInBits) - 1))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckShiftRight:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 1, ElementSizeInBits))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckShiftRightNarrow:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 1,
+                                      ElementSizeInBits / 2))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckShiftLeft:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0,
+                                      ElementSizeInBits - 1))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckLaneIndex:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0,
+                                      (128 / (1 * ElementSizeInBits)) - 1))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckLaneIndexCompRotate:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0,
+                                      (128 / (2 * ElementSizeInBits)) - 1))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckLaneIndexDot:
+      if (SemaBuiltinConstantArgRange(TheCall, ArgNum, 0,
+                                      (128 / (4 * ElementSizeInBits)) - 1))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckComplexRot90_270:
+      if (CheckImmediateInSet([](int64_t V) { return V == 90 || V == 270; },
+                              diag::err_rotation_argument_to_cadd))
+        HasError = true;
+      break;
+    case SVETypeFlags::ImmCheckComplexRotAll90:
+      if (CheckImmediateInSet(
+              [](int64_t V) {
+                return V == 0 || V == 90 || V == 180 || V == 270;
+              },
+              diag::err_rotation_argument_to_cmla))
+        HasError = true;
+      break;
+    }
+  }
+
+  return HasError;
 }
 
 bool Sema::CheckNeonBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
@@ -2050,6 +2189,45 @@ bool Sema::CheckMVEBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     return false;
   #include "clang/Basic/arm_mve_builtin_sema.inc"
   }
+}
+
+bool Sema::CheckCDEBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
+  bool Err = false;
+  switch (BuiltinID) {
+  default:
+    return false;
+#include "clang/Basic/arm_cde_builtin_sema.inc"
+  }
+
+  if (Err)
+    return true;
+
+  return CheckARMCoprocessorImmediate(TheCall->getArg(0), /*WantCDE*/ true);
+}
+
+bool Sema::CheckARMCoprocessorImmediate(const Expr *CoprocArg, bool WantCDE) {
+  if (isConstantEvaluated())
+    return false;
+
+  // We can't check the value of a dependent argument.
+  if (CoprocArg->isTypeDependent() || CoprocArg->isValueDependent())
+    return false;
+
+  llvm::APSInt CoprocNoAP;
+  bool IsICE = CoprocArg->isIntegerConstantExpr(CoprocNoAP, Context);
+  (void)IsICE;
+  assert(IsICE && "Coprocossor immediate is not a constant expression");
+  int64_t CoprocNo = CoprocNoAP.getExtValue();
+  assert(CoprocNo >= 0 && "Coprocessor immediate must be non-negative");
+
+  uint32_t CDECoprocMask = Context.getTargetInfo().getARMCDECoprocMask();
+  bool IsCDECoproc = CoprocNo <= 7 && (CDECoprocMask & (1 << CoprocNo));
+
+  if (IsCDECoproc != WantCDE)
+    return Diag(CoprocArg->getBeginLoc(), diag::err_arm_invalid_coproc)
+           << (int)CoprocNo << (int)WantCDE << CoprocArg->getSourceRange();
+
+  return false;
 }
 
 bool Sema::CheckARMBuiltinExclusiveCall(unsigned BuiltinID, CallExpr *TheCall,
@@ -2194,6 +2372,8 @@ bool Sema::CheckARMBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     return true;
   if (CheckMVEBuiltinFunctionCall(BuiltinID, TheCall))
     return true;
+  if (CheckCDEBuiltinFunctionCall(BuiltinID, TheCall))
+    return true;
 
   // For intrinsics which take an immediate value as part of the instruction,
   // range check them here.
@@ -2216,6 +2396,26 @@ bool Sema::CheckARMBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case ARM::BI__builtin_arm_isb:
   case ARM::BI__builtin_arm_dbg:
     return SemaBuiltinConstantArgRange(TheCall, 0, 0, 15);
+  case ARM::BI__builtin_arm_cdp:
+  case ARM::BI__builtin_arm_cdp2:
+  case ARM::BI__builtin_arm_mcr:
+  case ARM::BI__builtin_arm_mcr2:
+  case ARM::BI__builtin_arm_mrc:
+  case ARM::BI__builtin_arm_mrc2:
+  case ARM::BI__builtin_arm_mcrr:
+  case ARM::BI__builtin_arm_mcrr2:
+  case ARM::BI__builtin_arm_mrrc:
+  case ARM::BI__builtin_arm_mrrc2:
+  case ARM::BI__builtin_arm_ldc:
+  case ARM::BI__builtin_arm_ldcl:
+  case ARM::BI__builtin_arm_ldc2:
+  case ARM::BI__builtin_arm_ldc2l:
+  case ARM::BI__builtin_arm_stc:
+  case ARM::BI__builtin_arm_stcl:
+  case ARM::BI__builtin_arm_stc2:
+  case ARM::BI__builtin_arm_stc2l:
+    return SemaBuiltinConstantArgRange(TheCall, 0, 0, 15) ||
+           CheckARMCoprocessorImmediate(TheCall->getArg(0), /*WantCDE*/ false);
   }
 }
 
@@ -2268,6 +2468,9 @@ bool Sema::CheckAArch64BuiltinFunctionCall(unsigned BuiltinID,
   if (CheckNeonBuiltinFunctionCall(BuiltinID, TheCall))
     return true;
 
+  if (CheckSVEBuiltinFunctionCall(BuiltinID, TheCall))
+    return true;
+
   // For intrinsics which take an immediate value as part of the instruction,
   // range check them here.
   unsigned i = 0, l = 0, u = 0;
@@ -2284,17 +2487,33 @@ bool Sema::CheckAArch64BuiltinFunctionCall(unsigned BuiltinID,
 
 bool Sema::CheckBPFBuiltinFunctionCall(unsigned BuiltinID,
                                        CallExpr *TheCall) {
-  assert(BuiltinID == BPF::BI__builtin_preserve_field_info &&
+  assert((BuiltinID == BPF::BI__builtin_preserve_field_info ||
+          BuiltinID == BPF::BI__builtin_btf_type_id) &&
          "unexpected ARM builtin");
 
   if (checkArgCount(*this, TheCall, 2))
     return true;
 
+  Expr *Arg;
+  if (BuiltinID == BPF::BI__builtin_btf_type_id) {
+    // The second argument needs to be a constant int
+    llvm::APSInt Value;
+    Arg = TheCall->getArg(1);
+    if (!Arg->isIntegerConstantExpr(Value, Context)) {
+      Diag(Arg->getBeginLoc(), diag::err_btf_type_id_not_const)
+          << 2 << Arg->getSourceRange();
+      return true;
+    }
+
+    TheCall->setType(Context.UnsignedIntTy);
+    return false;
+  }
+
   // The first argument needs to be a record field access.
   // If it is an array element access, we delay decision
   // to BPF backend to check whether the access is a
   // field access or not.
-  Expr *Arg = TheCall->getArg(0);
+  Arg = TheCall->getArg(0);
   if (Arg->getType()->getAsPlaceholderType() ||
       (Arg->IgnoreParens()->getObjectKind() != OK_BitField &&
        !dyn_cast<MemberExpr>(Arg->IgnoreParens()) &&
@@ -2305,8 +2524,9 @@ bool Sema::CheckBPFBuiltinFunctionCall(unsigned BuiltinID,
   }
 
   // The second argument needs to be a constant int
+  Arg = TheCall->getArg(1);
   llvm::APSInt Value;
-  if (!TheCall->getArg(1)->isIntegerConstantExpr(Value, Context)) {
+  if (!Arg->isIntegerConstantExpr(Value, Context)) {
     Diag(Arg->getBeginLoc(), diag::err_preserve_field_info_not_const)
         << 2 << Arg->getSourceRange();
     return true;
@@ -2835,6 +3055,46 @@ bool Sema::CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     return SemaVSXCheck(TheCall);
   }
   return SemaBuiltinConstantArgRange(TheCall, i, l, u);
+}
+
+bool Sema::CheckAMDGCNBuiltinFunctionCall(unsigned BuiltinID,
+                                          CallExpr *TheCall) {
+  switch (BuiltinID) {
+  case AMDGPU::BI__builtin_amdgcn_fence: {
+    ExprResult Arg = TheCall->getArg(0);
+    auto ArgExpr = Arg.get();
+    Expr::EvalResult ArgResult;
+
+    if (!ArgExpr->EvaluateAsInt(ArgResult, Context))
+      return Diag(ArgExpr->getExprLoc(), diag::err_typecheck_expect_int)
+             << ArgExpr->getType();
+    int ord = ArgResult.Val.getInt().getZExtValue();
+
+    // Check valididty of memory ordering as per C11 / C++11's memody model.
+    switch (static_cast<llvm::AtomicOrderingCABI>(ord)) {
+    case llvm::AtomicOrderingCABI::acquire:
+    case llvm::AtomicOrderingCABI::release:
+    case llvm::AtomicOrderingCABI::acq_rel:
+    case llvm::AtomicOrderingCABI::seq_cst:
+      break;
+    default: {
+      return Diag(ArgExpr->getBeginLoc(),
+                  diag::warn_atomic_op_has_invalid_memory_order)
+             << ArgExpr->getSourceRange();
+    }
+    }
+
+    Arg = TheCall->getArg(1);
+    ArgExpr = Arg.get();
+    Expr::EvalResult ArgResult1;
+    // Check that sync scope is a constant literal
+    if (!ArgExpr->EvaluateAsConstantExpr(ArgResult1, Expr::EvaluateForCodeGen,
+                                         Context))
+      return Diag(ArgExpr->getExprLoc(), diag::err_expr_not_string_literal)
+             << ArgExpr->getType();
+  } break;
+  }
+  return false;
 }
 
 bool Sema::CheckSystemZBuiltinFunctionCall(unsigned BuiltinID,
@@ -3896,13 +4156,12 @@ void Sema::checkCall(NamedDecl *FDecl, const FunctionProtoType *Proto,
     auto *AA = FDecl->getAttr<AllocAlignAttr>();
     const Expr *Arg = Args[AA->getParamIndex().getASTIndex()];
     if (!Arg->isValueDependent()) {
-      llvm::APSInt I(64);
-      if (Arg->isIntegerConstantExpr(I, Context)) {
-        if (!I.isPowerOf2()) {
-          Diag(Arg->getExprLoc(), diag::err_alignment_not_power_of_two)
+      Expr::EvalResult Align;
+      if (Arg->EvaluateAsInt(Align, Context)) {
+        const llvm::APSInt &I = Align.Val.getInt();
+        if (!I.isPowerOf2())
+          Diag(Arg->getExprLoc(), diag::warn_alignment_not_power_of_two)
               << Arg->getSourceRange();
-          return;
-        }
 
         if (I > Sema::MaximumAlignment)
           Diag(Arg->getExprLoc(), diag::warn_assume_aligned_too_great)
@@ -9674,6 +9933,9 @@ struct IntRange {
                         false/*NonNegative*/);
     }
 
+    if (const auto *EIT = dyn_cast<ExtIntType>(T))
+      return IntRange(EIT->getNumBits(), EIT->isUnsigned());
+
     const BuiltinType *BT = cast<BuiltinType>(T);
     assert(BT->isInteger());
 
@@ -9696,6 +9958,9 @@ struct IntRange {
       T = AT->getValueType().getTypePtr();
     if (const EnumType *ET = dyn_cast<EnumType>(T))
       T = C.getCanonicalType(ET->getDecl()->getIntegerType()).getTypePtr();
+
+    if (const auto *EIT = dyn_cast<ExtIntType>(T))
+      return IntRange(EIT->getNumBits(), EIT->isUnsigned());
 
     const BuiltinType *BT = cast<BuiltinType>(T);
     assert(BT->isInteger());
@@ -11566,24 +11831,44 @@ static void CheckBoolLikeConversion(Sema &S, Expr *E, SourceLocation CC) {
   CheckImplicitConversion(S, E->IgnoreParenImpCasts(), S.Context.BoolTy, CC);
 }
 
-/// AnalyzeImplicitConversions - Find and report any interesting
-/// implicit conversions in the given expression.  There are a couple
-/// of competing diagnostics here, -Wconversion and -Wsign-compare.
-static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
-                                       bool IsListInit/*= false*/) {
+namespace {
+struct AnalyzeImplicitConversionsWorkItem {
+  Expr *E;
+  SourceLocation CC;
+  bool IsListInit;
+};
+}
+
+/// Data recursive variant of AnalyzeImplicitConversions. Subexpressions
+/// that should be visited are added to WorkList.
+static void AnalyzeImplicitConversions(
+    Sema &S, AnalyzeImplicitConversionsWorkItem Item,
+    llvm::SmallVectorImpl<AnalyzeImplicitConversionsWorkItem> &WorkList) {
+  Expr *OrigE = Item.E;
+  SourceLocation CC = Item.CC;
+
   QualType T = OrigE->getType();
   Expr *E = OrigE->IgnoreParenImpCasts();
 
   // Propagate whether we are in a C++ list initialization expression.
   // If so, we do not issue warnings for implicit int-float conversion
   // precision loss, because C++11 narrowing already handles it.
-  IsListInit =
-      IsListInit || (isa<InitListExpr>(OrigE) && S.getLangOpts().CPlusPlus);
+  bool IsListInit = Item.IsListInit ||
+                    (isa<InitListExpr>(OrigE) && S.getLangOpts().CPlusPlus);
 
   if (E->isTypeDependent() || E->isValueDependent())
     return;
 
-  if (const auto *UO = dyn_cast<UnaryOperator>(E))
+  Expr *SourceExpr = E;
+  // Examine, but don't traverse into the source expression of an
+  // OpaqueValueExpr, since it may have multiple parents and we don't want to
+  // emit duplicate diagnostics. Its fine to examine the form or attempt to
+  // evaluate it in the context of checking the specific conversion to T though.
+  if (auto *OVE = dyn_cast<OpaqueValueExpr>(E))
+    if (auto *Src = OVE->getSourceExpr())
+      SourceExpr = Src;
+
+  if (const auto *UO = dyn_cast<UnaryOperator>(SourceExpr))
     if (UO->getOpcode() == UO_Not &&
         UO->getSubExpr()->isKnownToHaveBooleanValue())
       S.Diag(UO->getBeginLoc(), diag::warn_bitwise_negation_bool)
@@ -11592,21 +11877,20 @@ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
 
   // For conditional operators, we analyze the arguments as if they
   // were being fed directly into the output.
-  if (isa<ConditionalOperator>(E)) {
-    ConditionalOperator *CO = cast<ConditionalOperator>(E);
+  if (auto *CO = dyn_cast<ConditionalOperator>(SourceExpr)) {
     CheckConditionalOperator(S, CO, CC, T);
     return;
   }
 
   // Check implicit argument conversions for function calls.
-  if (CallExpr *Call = dyn_cast<CallExpr>(E))
+  if (CallExpr *Call = dyn_cast<CallExpr>(SourceExpr))
     CheckImplicitArgumentConversions(S, Call, CC);
 
   // Go ahead and check any implicit conversions we might have skipped.
   // The non-canonical typecheck is just an optimization;
   // CheckImplicitConversion will filter out dead implicit conversions.
-  if (E->getType() != T)
-    CheckImplicitConversion(S, E, T, CC, nullptr, IsListInit);
+  if (SourceExpr->getType() != T)
+    CheckImplicitConversion(S, SourceExpr, T, CC, nullptr, IsListInit);
 
   // Now continue drilling into this expression.
 
@@ -11616,7 +11900,7 @@ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
     // FIXME: Use a more uniform representation for this.
     for (auto *SE : POE->semantics())
       if (auto *OVE = dyn_cast<OpaqueValueExpr>(SE))
-        AnalyzeImplicitConversions(S, OVE->getSourceExpr(), CC, IsListInit);
+        WorkList.push_back({OVE->getSourceExpr(), CC, IsListInit});
   }
 
   // Skip past explicit casts.
@@ -11624,7 +11908,8 @@ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
     E = CE->getSubExpr()->IgnoreParenImpCasts();
     if (!CE->getType()->isVoidType() && E->getType()->isAtomicType())
       S.Diag(E->getBeginLoc(), diag::warn_atomic_implicit_seq_cst);
-    return AnalyzeImplicitConversions(S, E, CC, IsListInit);
+    WorkList.push_back({E, CC, IsListInit});
+    return;
   }
 
   if (BinaryOperator *BO = dyn_cast<BinaryOperator>(E)) {
@@ -11663,7 +11948,7 @@ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
       // Ignore checking string literals that are in logical and operators.
       // This is a common pattern for asserts.
       continue;
-    AnalyzeImplicitConversions(S, ChildExpr, CC, IsListInit);
+    WorkList.push_back({ChildExpr, CC, IsListInit});
   }
 
   if (BO && BO->isLogicalOp()) {
@@ -11685,6 +11970,17 @@ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
                diag::warn_atomic_implicit_seq_cst);
     }
   }
+}
+
+/// AnalyzeImplicitConversions - Find and report any interesting
+/// implicit conversions in the given expression.  There are a couple
+/// of competing diagnostics here, -Wconversion and -Wsign-compare.
+static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
+                                       bool IsListInit/*= false*/) {
+  llvm::SmallVector<AnalyzeImplicitConversionsWorkItem, 16> WorkList;
+  WorkList.push_back({OrigE, CC, IsListInit});
+  while (!WorkList.empty())
+    AnalyzeImplicitConversions(S, WorkList.pop_back_val(), WorkList);
 }
 
 /// Diagnose integer type and any valid implicit conversion to it.
@@ -12769,11 +13065,12 @@ bool Sema::CheckParmsForFunctionDef(ArrayRef<ParmVarDecl *> Parameters,
 
     // C99 6.9.1p5: If the declarator includes a parameter type list, the
     // declaration of each parameter shall include an identifier.
-    if (CheckParameterNames &&
-        Param->getIdentifier() == nullptr &&
-        !Param->isImplicit() &&
-        !getLangOpts().CPlusPlus)
-      Diag(Param->getLocation(), diag::err_parameter_name_omitted);
+    if (CheckParameterNames && Param->getIdentifier() == nullptr &&
+        !Param->isImplicit() && !getLangOpts().CPlusPlus) {
+      // Diagnose this as an extension in C17 and earlier.
+      if (!getLangOpts().C2x)
+        Diag(Param->getLocation(), diag::ext_parameter_name_omitted_c2x);
+    }
 
     // C99 6.7.5.3p12:
     //   If the function declarator is not part of a definition of that
@@ -12826,17 +13123,226 @@ bool Sema::CheckParmsForFunctionDef(ArrayRef<ParmVarDecl *> Parameters,
   return HasInvalidParm;
 }
 
-/// A helper function to get the alignment of a Decl referred to by DeclRefExpr
-/// or MemberExpr.
-static CharUnits getDeclAlign(Expr *E, CharUnits TypeAlign,
-                              ASTContext &Context) {
-  if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
-    return Context.getDeclAlign(DRE->getDecl());
+Optional<std::pair<CharUnits, CharUnits>>
+static getBaseAlignmentAndOffsetFromPtr(const Expr *E, ASTContext &Ctx);
 
-  if (const auto *ME = dyn_cast<MemberExpr>(E))
-    return Context.getDeclAlign(ME->getMemberDecl());
+/// Compute the alignment and offset of the base class object given the
+/// derived-to-base cast expression and the alignment and offset of the derived
+/// class object.
+static std::pair<CharUnits, CharUnits>
+getDerivedToBaseAlignmentAndOffset(const CastExpr *CE, QualType DerivedType,
+                                   CharUnits BaseAlignment, CharUnits Offset,
+                                   ASTContext &Ctx) {
+  for (auto PathI = CE->path_begin(), PathE = CE->path_end(); PathI != PathE;
+       ++PathI) {
+    const CXXBaseSpecifier *Base = *PathI;
+    const CXXRecordDecl *BaseDecl = Base->getType()->getAsCXXRecordDecl();
+    if (Base->isVirtual()) {
+      // The complete object may have a lower alignment than the non-virtual
+      // alignment of the base, in which case the base may be misaligned. Choose
+      // the smaller of the non-virtual alignment and BaseAlignment, which is a
+      // conservative lower bound of the complete object alignment.
+      CharUnits NonVirtualAlignment =
+          Ctx.getASTRecordLayout(BaseDecl).getNonVirtualAlignment();
+      BaseAlignment = std::min(BaseAlignment, NonVirtualAlignment);
+      Offset = CharUnits::Zero();
+    } else {
+      const ASTRecordLayout &RL =
+          Ctx.getASTRecordLayout(DerivedType->getAsCXXRecordDecl());
+      Offset += RL.getBaseClassOffset(BaseDecl);
+    }
+    DerivedType = Base->getType();
+  }
 
-  return TypeAlign;
+  return std::make_pair(BaseAlignment, Offset);
+}
+
+/// Compute the alignment and offset of a binary additive operator.
+static Optional<std::pair<CharUnits, CharUnits>>
+getAlignmentAndOffsetFromBinAddOrSub(const Expr *PtrE, const Expr *IntE,
+                                     bool IsSub, ASTContext &Ctx) {
+  QualType PointeeType = PtrE->getType()->getPointeeType();
+
+  if (!PointeeType->isConstantSizeType())
+    return llvm::None;
+
+  auto P = getBaseAlignmentAndOffsetFromPtr(PtrE, Ctx);
+
+  if (!P)
+    return llvm::None;
+
+  llvm::APSInt IdxRes;
+  CharUnits EltSize = Ctx.getTypeSizeInChars(PointeeType);
+  if (IntE->isIntegerConstantExpr(IdxRes, Ctx)) {
+    CharUnits Offset = EltSize * IdxRes.getExtValue();
+    if (IsSub)
+      Offset = -Offset;
+    return std::make_pair(P->first, P->second + Offset);
+  }
+
+  // If the integer expression isn't a constant expression, compute the lower
+  // bound of the alignment using the alignment and offset of the pointer
+  // expression and the element size.
+  return std::make_pair(
+      P->first.alignmentAtOffset(P->second).alignmentAtOffset(EltSize),
+      CharUnits::Zero());
+}
+
+/// This helper function takes an lvalue expression and returns the alignment of
+/// a VarDecl and a constant offset from the VarDecl.
+Optional<std::pair<CharUnits, CharUnits>>
+static getBaseAlignmentAndOffsetFromLValue(const Expr *E, ASTContext &Ctx) {
+  E = E->IgnoreParens();
+  switch (E->getStmtClass()) {
+  default:
+    break;
+  case Stmt::CStyleCastExprClass:
+  case Stmt::CXXStaticCastExprClass:
+  case Stmt::ImplicitCastExprClass: {
+    auto *CE = cast<CastExpr>(E);
+    const Expr *From = CE->getSubExpr();
+    switch (CE->getCastKind()) {
+    default:
+      break;
+    case CK_NoOp:
+      return getBaseAlignmentAndOffsetFromLValue(From, Ctx);
+    case CK_UncheckedDerivedToBase:
+    case CK_DerivedToBase: {
+      auto P = getBaseAlignmentAndOffsetFromLValue(From, Ctx);
+      if (!P)
+        break;
+      return getDerivedToBaseAlignmentAndOffset(CE, From->getType(), P->first,
+                                                P->second, Ctx);
+    }
+    }
+    break;
+  }
+  case Stmt::ArraySubscriptExprClass: {
+    auto *ASE = cast<ArraySubscriptExpr>(E);
+    return getAlignmentAndOffsetFromBinAddOrSub(ASE->getBase(), ASE->getIdx(),
+                                                false, Ctx);
+  }
+  case Stmt::DeclRefExprClass: {
+    if (auto *VD = dyn_cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl())) {
+      // FIXME: If VD is captured by copy or is an escaping __block variable,
+      // use the alignment of VD's type.
+      if (!VD->getType()->isReferenceType())
+        return std::make_pair(Ctx.getDeclAlign(VD), CharUnits::Zero());
+      if (VD->hasInit())
+        return getBaseAlignmentAndOffsetFromLValue(VD->getInit(), Ctx);
+    }
+    break;
+  }
+  case Stmt::MemberExprClass: {
+    auto *ME = cast<MemberExpr>(E);
+    if (ME->isArrow())
+      break;
+    auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl());
+    if (!FD || FD->getType()->isReferenceType())
+      break;
+    auto P = getBaseAlignmentAndOffsetFromLValue(ME->getBase(), Ctx);
+    if (!P)
+      break;
+    const ASTRecordLayout &Layout = Ctx.getASTRecordLayout(FD->getParent());
+    uint64_t Offset = Layout.getFieldOffset(FD->getFieldIndex());
+    return std::make_pair(P->first,
+                          P->second + CharUnits::fromQuantity(Offset));
+  }
+  case Stmt::UnaryOperatorClass: {
+    auto *UO = cast<UnaryOperator>(E);
+    switch (UO->getOpcode()) {
+    default:
+      break;
+    case UO_Deref:
+      return getBaseAlignmentAndOffsetFromPtr(UO->getSubExpr(), Ctx);
+    }
+    break;
+  }
+  case Stmt::BinaryOperatorClass: {
+    auto *BO = cast<BinaryOperator>(E);
+    auto Opcode = BO->getOpcode();
+    switch (Opcode) {
+    default:
+      break;
+    case BO_Comma:
+      return getBaseAlignmentAndOffsetFromLValue(BO->getRHS(), Ctx);
+    }
+    break;
+  }
+  }
+  return llvm::None;
+}
+
+/// This helper function takes a pointer expression and returns the alignment of
+/// a VarDecl and a constant offset from the VarDecl.
+Optional<std::pair<CharUnits, CharUnits>>
+static getBaseAlignmentAndOffsetFromPtr(const Expr *E, ASTContext &Ctx) {
+  E = E->IgnoreParens();
+  switch (E->getStmtClass()) {
+  default:
+    break;
+  case Stmt::CStyleCastExprClass:
+  case Stmt::CXXStaticCastExprClass:
+  case Stmt::ImplicitCastExprClass: {
+    auto *CE = cast<CastExpr>(E);
+    const Expr *From = CE->getSubExpr();
+    switch (CE->getCastKind()) {
+    default:
+      break;
+    case CK_NoOp:
+      return getBaseAlignmentAndOffsetFromPtr(From, Ctx);
+    case CK_ArrayToPointerDecay:
+      return getBaseAlignmentAndOffsetFromLValue(From, Ctx);
+    case CK_UncheckedDerivedToBase:
+    case CK_DerivedToBase: {
+      auto P = getBaseAlignmentAndOffsetFromPtr(From, Ctx);
+      if (!P)
+        break;
+      return getDerivedToBaseAlignmentAndOffset(
+          CE, From->getType()->getPointeeType(), P->first, P->second, Ctx);
+    }
+    }
+    break;
+  }
+  case Stmt::UnaryOperatorClass: {
+    auto *UO = cast<UnaryOperator>(E);
+    if (UO->getOpcode() == UO_AddrOf)
+      return getBaseAlignmentAndOffsetFromLValue(UO->getSubExpr(), Ctx);
+    break;
+  }
+  case Stmt::BinaryOperatorClass: {
+    auto *BO = cast<BinaryOperator>(E);
+    auto Opcode = BO->getOpcode();
+    switch (Opcode) {
+    default:
+      break;
+    case BO_Add:
+    case BO_Sub: {
+      const Expr *LHS = BO->getLHS(), *RHS = BO->getRHS();
+      if (Opcode == BO_Add && !RHS->getType()->isIntegralOrEnumerationType())
+        std::swap(LHS, RHS);
+      return getAlignmentAndOffsetFromBinAddOrSub(LHS, RHS, Opcode == BO_Sub,
+                                                  Ctx);
+    }
+    case BO_Comma:
+      return getBaseAlignmentAndOffsetFromPtr(BO->getRHS(), Ctx);
+    }
+    break;
+  }
+  }
+  return llvm::None;
+}
+
+static CharUnits getPresumedAlignmentOfPointer(const Expr *E, Sema &S) {
+  // See if we can compute the alignment of a VarDecl and an offset from it.
+  Optional<std::pair<CharUnits, CharUnits>> P =
+      getBaseAlignmentAndOffsetFromPtr(E, S.Context);
+
+  if (P)
+    return P->first.alignmentAtOffset(P->second);
+
+  // If that failed, return the type's alignment.
+  return S.Context.getTypeAlignInChars(E->getType()->getPointeeType());
 }
 
 /// CheckCastAlign - Implements -Wcast-align, which warns when a
@@ -12872,15 +13378,7 @@ void Sema::CheckCastAlign(Expr *Op, QualType T, SourceRange TRange) {
   // includes 'void'.
   if (SrcPointee->isIncompleteType()) return;
 
-  CharUnits SrcAlign = Context.getTypeAlignInChars(SrcPointee);
-
-  if (auto *CE = dyn_cast<CastExpr>(Op)) {
-    if (CE->getCastKind() == CK_ArrayToPointerDecay)
-      SrcAlign = getDeclAlign(CE->getSubExpr(), SrcAlign, Context);
-  } else if (auto *UO = dyn_cast<UnaryOperator>(Op)) {
-    if (UO->getOpcode() == UO_AddrOf)
-      SrcAlign = getDeclAlign(UO->getSubExpr(), SrcAlign, Context);
-  }
+  CharUnits SrcAlign = getPresumedAlignmentOfPointer(Op, *this);
 
   if (SrcAlign >= DestAlign) return;
 
@@ -13688,12 +14186,12 @@ void Sema::checkUnsafeExprAssigns(SourceLocation Loc,
       return;
 
     unsigned Attributes = PD->getPropertyAttributes();
-    if (Attributes & ObjCPropertyDecl::OBJC_PR_assign) {
+    if (Attributes & ObjCPropertyAttribute::kind_assign) {
       // when 'assign' attribute was not explicitly specified
       // by user, ignore it and rely on property type itself
       // for lifetime info.
       unsigned AsWrittenAttr = PD->getPropertyAttributesAsWritten();
-      if (!(AsWrittenAttr & ObjCPropertyDecl::OBJC_PR_assign) &&
+      if (!(AsWrittenAttr & ObjCPropertyAttribute::kind_assign) &&
           LHSType->isObjCRetainableType())
         return;
 
@@ -13705,8 +14203,7 @@ void Sema::checkUnsafeExprAssigns(SourceLocation Loc,
         }
         RHS = cast->getSubExpr();
       }
-    }
-    else if (Attributes & ObjCPropertyDecl::OBJC_PR_weak) {
+    } else if (Attributes & ObjCPropertyAttribute::kind_weak) {
       if (checkUnsafeAssignObject(*this, Loc, Qualifiers::OCL_Weak, RHS, true))
         return;
     }

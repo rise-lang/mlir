@@ -150,6 +150,7 @@ StringRef llvm::getEnumName(MVT::SimpleValueType T) {
   case MVT::v2f64:    return "MVT::v2f64";
   case MVT::v4f64:    return "MVT::v4f64";
   case MVT::v8f64:    return "MVT::v8f64";
+  case MVT::v16f64:   return "MVT::v16f64";
   case MVT::nxv1i1:   return "MVT::nxv1i1";
   case MVT::nxv2i1:   return "MVT::nxv2i1";
   case MVT::nxv4i1:   return "MVT::nxv4i1";
@@ -607,6 +608,7 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   isCommutative = false;
   canThrow = false;
   isNoReturn = false;
+  isNoSync = false;
   isWillReturn = false;
   isCold = false;
   isNoDuplicate = false;
@@ -726,8 +728,7 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       // variants with iAny types; otherwise, if the intrinsic is not
       // overloaded, all the types can be specified directly.
       assert(((!TyEl->isSubClassOf("LLVMExtendedType") &&
-               !TyEl->isSubClassOf("LLVMTruncatedType") &&
-               !TyEl->isSubClassOf("LLVMScalarOrSameVectorWidth")) ||
+               !TyEl->isSubClassOf("LLVMTruncatedType")) ||
               VT == MVT::iAny || VT == MVT::vAny) &&
              "Expected iAny or vAny type");
     } else
@@ -772,6 +773,8 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       isConvergent = true;
     else if (Property->getName() == "IntrNoReturn")
       isNoReturn = true;
+    else if (Property->getName() == "IntrNoSync")
+      isNoSync = true;
     else if (Property->getName() == "IntrWillReturn")
       isWillReturn = true;
     else if (Property->getName() == "IntrCold")

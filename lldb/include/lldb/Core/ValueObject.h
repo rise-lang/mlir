@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ValueObject_h_
-#define liblldb_ValueObject_h_
+#ifndef LLDB_CORE_VALUEOBJECT_H
+#define LLDB_CORE_VALUEOBJECT_H
 
 #include "lldb/Core/Value.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -575,7 +575,7 @@ public:
 
   virtual lldb::ValueObjectSP GetNonSyntheticValue();
 
-  lldb::ValueObjectSP GetSyntheticValue(bool use_synthetic = true);
+  lldb::ValueObjectSP GetSyntheticValue();
 
   virtual bool HasSyntheticValue();
 
@@ -926,7 +926,7 @@ protected:
 
   virtual bool HasDynamicValueTypeInfo() { return false; }
 
-  virtual void CalculateSyntheticValue(bool use_synthetic = true);
+  virtual void CalculateSyntheticValue();
 
   // Should only be called by ValueObject::GetChildAtIndex() Returns a
   // ValueObject managed by this ValueObject's manager.
@@ -1020,4 +1020,4 @@ public:
 
 } // namespace lldb_private
 
-#endif // liblldb_ValueObject_h_
+#endif // LLDB_CORE_VALUEOBJECT_H

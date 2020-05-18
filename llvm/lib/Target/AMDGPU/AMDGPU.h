@@ -30,6 +30,8 @@ class Module;
 // GlobalISel passes
 void initializeAMDGPUPreLegalizerCombinerPass(PassRegistry &);
 FunctionPass *createAMDGPUPreLegalizeCombiner(bool IsOptNone);
+void initializeAMDGPUPostLegalizerCombinerPass(PassRegistry &);
+FunctionPass *createAMDGPUPostLegalizeCombiner(bool IsOptNone);
 
 // R600 Passes
 FunctionPass *createR600VectorRegMerger();
@@ -59,9 +61,9 @@ FunctionPass *createSIMemoryLegalizerPass();
 FunctionPass *createSIInsertWaitcntsPass();
 FunctionPass *createSIPreAllocateWWMRegsPass();
 FunctionPass *createSIFormMemoryClausesPass();
+
 FunctionPass *createSIPostRABundlerPass();
-FunctionPass *createAMDGPUSimplifyLibCallsPass(const TargetOptions &,
-                                               const TargetMachine *);
+FunctionPass *createAMDGPUSimplifyLibCallsPass(const TargetMachine *);
 FunctionPass *createAMDGPUUseNativeCallsPass();
 FunctionPass *createAMDGPUCodeGenPreparePass();
 FunctionPass *createAMDGPUMachineCFGStructurizerPass();
@@ -164,6 +166,9 @@ extern char &SILowerControlFlowID;
 void initializeSIRemoveShortExecBranchesPass(PassRegistry &);
 extern char &SIRemoveShortExecBranchesID;
 
+void initializeSIPreEmitPeepholePass(PassRegistry &);
+extern char &SIPreEmitPeepholeID;
+
 void initializeSIInsertSkipsPass(PassRegistry &);
 extern char &SIInsertSkipsPassID;
 
@@ -223,6 +228,9 @@ extern char &SIMemoryLegalizerID;
 
 void initializeSIModeRegisterPass(PassRegistry&);
 extern char &SIModeRegisterID;
+
+void initializeSIInsertHardClausesPass(PassRegistry &);
+extern char &SIInsertHardClausesID;
 
 void initializeSIInsertWaitcntsPass(PassRegistry&);
 extern char &SIInsertWaitcntsID;
