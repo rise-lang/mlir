@@ -12,7 +12,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
     %zippedArrays = rise.apply %zipFun, %array0, %array1
 
     //Multiply
-    %tupleMulFun = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+    %tupleMulFun = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
         %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
         %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
@@ -29,7 +29,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
     %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
     //Reduction
-    %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
+    %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %result = rise.embed(%summand0, %summand1) {
                %result = addf %summand0, %summand1 : f32
                rise.return %result : f32

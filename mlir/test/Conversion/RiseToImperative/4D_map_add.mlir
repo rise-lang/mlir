@@ -3,17 +3,17 @@
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4x4x4xf32>, %inArg:memref<4x4x4x4xf32>) {
     %array3D = rise.in %inArg : !rise.array<4, array<4, array<4, array<4, scalar<f32>>>>>
-    %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+    %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %addFun = rise.add #rise.scalar<f32>
         %doubled = rise.apply %addFun, %summand, %summand //: !rise.fun<data<scalar<f32>> -> fun<data<scalar<f32>> -> data<scalar<f32>>>>, %summand, %summand
         rise.return %doubled : !rise.scalar<f32>
     }
     %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, array<4, scalar<f32>>>> #rise.array<4, array<4, array<4, scalar<f32>>>>
-    %mapInnerLambda_1 = rise.lambda (%arraySlice_1) : !rise.fun<array<4, array<4, array<4, scalar<f32>>>> -> array<4, array<4, array<4, scalar<f32>>>>> {
+    %mapInnerLambda_1 = rise.lambda (%arraySlice_1 : !rise.array<4, array<4, array<4, scalar<f32>>>>) -> !rise.array<4, array<4, array<4, scalar<f32>>>> {
         %map2 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, scalar<f32>>> #rise.array<4, array<4, scalar<f32>>>
-        %mapInnerLambda_2 = rise.lambda (%arraySlice_2) : !rise.fun<array<4, array<4, scalar<f32>>> -> array<4, array<4, scalar<f32>>>> {
+        %mapInnerLambda_2 = rise.lambda (%arraySlice_2 : !rise.array<4, array<4, scalar<f32>>>) -> !rise.array<4, array<4, scalar<f32>>> {
             %map3 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
-                %mapInnerLambda_3 = rise.lambda (%arraySlice_3) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
+                %mapInnerLambda_3 = rise.lambda (%arraySlice_3 : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
                     %map4 = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
                     %res = rise.apply %map4, %doubleFun, %arraySlice_3
                     rise.return %res : !rise.array<4, scalar<f32>>

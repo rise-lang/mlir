@@ -3,7 +3,7 @@ func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<1xf32>, %inArg:memref<1024xf32>) {
     %array0 = rise.in %inArg : !rise.array<1024, scalar<f32>>
 
-    %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
+    %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %result = rise.embed(%summand0, %summand1) {
             %result = addf %summand0, %summand1 : f32
             rise.return %result : f32

@@ -209,7 +209,7 @@ LogicalResult parseRiseIdxOp(OpAsmParser &parser, OperationState &result) {
 // RiseContinuationTranslation
 //===----------------------------------------------------------------------===//
 LogicalResult parseRiseContinuationTranslation(OpAsmParser &parser,
-                                             OperationState &result) {
+                                               OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType contValue;
 
@@ -230,33 +230,38 @@ LogicalResult parseRiseContinuationTranslation(OpAsmParser &parser,
 //===----------------------------------------------------------------------===//
 LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType arg;
   SmallVector<OpAsmParser::OperandType, 4> arguments;
+  Type type;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
   FunType funType;
+  Type outType;
 
-  // arguments for the lambda
-  if (parser.parseRegionArgumentList(arguments, OpAsmParser::Delimiter::Paren))
-    failure();
-
-  // result type of this lambda
-  if (parser.parseColon() || parser.parseType(funType))
+  if (parser.parseLParen())
     return failure();
 
-  result.addTypes(funType);
+  int numArgs = 0;
+  if (!succeeded(parser.parseOptionalRParen())) {
+    do {
+      if (parser.parseRegionArgument(arg) || parser.parseColonType(type))
+        return failure();
 
-  // arguments have to fit the given lambda type
-  argumentTypes.push_back(funType.getInput());
-  for (int i = 1; i < arguments.size(); i++) {
-    if (funType.getOutput().isa<FunType>()) {
-      funType = funType.getOutput().dyn_cast<FunType>();
-      argumentTypes.push_back(funType.getInput());
-    } else {
-      parser.emitError(parser.getCurrentLocation())
-          << ": number of arguments: " << std::to_string(i)
-          << " is too high for specified funType";
-      return failure();
-    }
+      arguments.push_back(arg);
+      argumentTypes.push_back(type);
+      numArgs++;
+    } while (succeeded(parser.parseOptionalComma()));
   }
+
+  if (parser.parseRParen() || parser.parseArrow() || parser.parseType(outType))
+    return failure();
+
+  // build up type of this lambda:
+  funType =
+      FunType::get(builder.getContext(), argumentTypes[numArgs - 1], outType);
+  for (int i = arguments.size() - 2; i >= 0; i--) {
+    funType = FunType::get(builder.getContext(), argumentTypes[i], funType);
+  }
+  result.addTypes(funType);
 
   // Parse body of lambda
   Region *body = result.addRegion();
@@ -327,7 +332,7 @@ LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(funType.getOutput());
-//  result.setOperandListToResizable(true);
+  //  result.setOperandListToResizable(true);
   return success();
 }
 
@@ -363,7 +368,7 @@ LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
@@ -377,7 +382,8 @@ LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.getAttrs().front());
+              result.attributes.push_back(
+                  attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -427,7 +433,7 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
@@ -441,7 +447,8 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.getAttrs().front());
+              result.attributes.push_back(
+                  attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -495,7 +502,7 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // parsing the optional attribute specifying a lowering target
   SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
@@ -509,7 +516,8 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
           for (std::string target : loweringTargets) {
             if (target == loweringAttr.getValue().str()) {
               validLowering = true;
-              result.attributes.push_back(attributesFromDict.getAttrs().front());
+              result.attributes.push_back(
+                  attributesFromDict.getAttrs().front());
               break;
             }
           }
@@ -596,7 +604,7 @@ LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -618,7 +626,7 @@ LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -639,7 +647,7 @@ LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -696,7 +704,7 @@ LogicalResult parseMulOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType value;
   Type type;
-//  result.setOperandListToResizable();
+  //  result.setOperandListToResizable();
 
   // return value
   if (parser.parseOperand(value))

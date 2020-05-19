@@ -3,7 +3,7 @@
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4x4xf32>, %inArg:memref<4x4x4xf32>) {
     %array3D = rise.in %inArg : !rise.array<4, array<4, array<4, scalar<f32>>>>
-    %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+    %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %result = rise.embed(%summand) {
                %result = addf %summand, %summand : f32
                rise.return %result : f32
@@ -11,9 +11,9 @@ func @rise_fun(%outArg:memref<4x4x4xf32>, %inArg:memref<4x4x4xf32>) {
         rise.return %result : !rise.scalar<f32>
     }
     %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, scalar<f32>>> #rise.array<4, array<4, scalar<f32>>>
-    %mapInnerLambda_1 = rise.lambda (%arraySlice_1) : !rise.fun<array<4, array<4, scalar<f32>>> -> array<4, array<4, scalar<f32>>>> {
+    %mapInnerLambda_1 = rise.lambda (%arraySlice_1 : !rise.array<4, array<4, scalar<f32>>>) -> !rise.array<4, array<4, scalar<f32>>> {
         %map2 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
-        %mapInnerLambda_2 = rise.lambda (%arraySlice_2) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
+        %mapInnerLambda_2 = rise.lambda (%arraySlice_2 : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
             %map3 = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
             %res = rise.apply %map3, %doubleFun, %arraySlice_2
             rise.return %res : !rise.array<4, scalar<f32>>

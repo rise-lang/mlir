@@ -3,8 +3,8 @@
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4xf32>, %inArg:memref<4x4xf32>) {
         %array2D = rise.in %inArg : !rise.array<4, array<4, scalar<f32>>>
-        %mapInnerLambda = rise.lambda (%arraySlice) : !rise.fun<array<4, scalar<f32>> -> array<4, scalar<f32>>> {
-           %doubleFun = rise.lambda (%summand) : !rise.fun<scalar<f32> -> scalar<f32>> {
+        %mapInnerLambda = rise.lambda (%arraySlice : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
+           %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
                 %result = rise.embed(%summand) {
                        %result = addf %summand, %summand : f32
                        rise.return %result : f32

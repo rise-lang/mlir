@@ -8,7 +8,7 @@ func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
     %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
     %zipped = rise.apply %zipFun, %array0, %array1
 
-    %projectToFirst = rise.lambda (%floatTuple) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> scalar<f32>> {
+    %projectToFirst = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
         %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
         %fst = rise.apply %fstFun, %floatTuple
         rise.return %fst : !rise.scalar<f32>

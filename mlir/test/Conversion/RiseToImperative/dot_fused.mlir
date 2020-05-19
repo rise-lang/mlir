@@ -12,7 +12,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<1024xf32>, %inArg1:memref<1
     %zippedArrays = rise.apply %zipFun, %array0, %array1
 
     //Reduction
-    %reductionLambda = rise.lambda (%tuple, %acc) : !rise.fun<tuple<scalar<f32>, scalar<f32>> -> fun<scalar<f32> -> scalar<f32>>> {
+    %reductionLambda = rise.lambda (%tuple : !rise.tuple<scalar<f32>, scalar<f32>>, %acc : !rise.scalar<f32>) -> !rise.scalar<f32> {
 
         %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
         %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
