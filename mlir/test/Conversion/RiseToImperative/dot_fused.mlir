@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e fused_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e fused_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<1024xf32>, %inArg1:memref<1024xf32>)  {
@@ -20,15 +20,13 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<1024xf32>, %inArg1:memref<1
         %fst = rise.apply %fstFun, %tuple
         %snd = rise.apply %sndFun, %tuple
 
-        %fst_unwrapped = rise.unwrap %fst
-        %snd_unwrapped = rise.unwrap %snd
-        %acc_unwrapped = rise.unwrap %acc
+        %result = rise.embed(%fst, %snd, %acc) {
+               %product = mulf %fst, %snd :f32
+               %result = addf %product, %acc : f32
+               rise.return %result : f32
+        }
 
-        %product = mulf %fst_unwrapped, %snd_unwrapped :f32
-        %result = addf %product, %acc_unwrapped : f32
-        %result_wrapped = rise.wrap %result
-
-        rise.return %result_wrapped : !rise.scalar<f32>
+        rise.return %result : !rise.scalar<f32>
     }
 
     %initializer = rise.literal #rise.lit<0.0>

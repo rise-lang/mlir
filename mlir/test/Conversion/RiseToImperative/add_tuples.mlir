@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_add_tuples -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_ADD_TUPLES
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-linalg-to-std -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_add_tuples -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_ADD_TUPLES
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
@@ -14,13 +14,11 @@ func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 
         %fst = rise.apply %fstFun, %floatTuple
         %snd = rise.apply %sndFun, %floatTuple
-
-        %fst_unwrapped = rise.unwrap %fst
-        %snd_unwrapped = rise.unwrap %snd
-        %result = addf %fst_unwrapped, %snd_unwrapped : f32
-        %result_wrapped = rise.wrap %result
-
-        rise.return %result_wrapped : !rise.scalar<f32>
+        %result = rise.embed(%fst, %snd) {
+            %result = addf %fst, %snd : f32
+            rise.return %result : f32
+        }
+        rise.return %result : !rise.scalar<f32>
     }
 
     %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
@@ -48,4 +46,3 @@ func @simple_add_tuples() {
 // SIMPLE_ADD_TUPLES: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_ADD_TUPLES: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_ADD_TUPLES: [15, 15, 15, 15]
-

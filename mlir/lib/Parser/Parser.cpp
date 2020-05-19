@@ -2444,7 +2444,7 @@ Attribute Parser::parseSparseElementsAttr(Type attrType) {
 
 ArrayRef<int64_t> Parser::parseRiseArrayShape() {
   TensorLiteralParser arrayParser(*this);
-  if (arrayParser.parse())
+  if (arrayParser.parse(false))
     return {};
 
   return arrayParser.getShape();

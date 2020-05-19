@@ -3,9 +3,9 @@
 //
 
 #include "mlir/Conversion/RiseToImperative/ConvertRiseToImperative.h"
-#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 
@@ -30,7 +30,7 @@ using namespace mlir::rise;
 namespace {
 struct ConvertRiseToImperativePass
     : public RiseToImperativeBase<ConvertRiseToImperativePass> {
-  void runOnOperation() override;
+  void runOnFunction() override;
 };
 } // namespace
 
@@ -48,6 +48,8 @@ struct RiseToImperativePattern : public OpRewritePattern<FuncOp> {
 
 LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
   bool riseInside = false;
+  //  std::cout << "matching! \n" << std::flush;
+
   if (funcOp.isExternal())
     return failure();
   // I currently check whether a rise.in is inside the func.
@@ -59,6 +61,8 @@ LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
   });
 
   if (riseInside) {
+    //    std::cout << "matchSuccess! \n" << std::flush;
+
     return success();
   } else {
     return failure();
@@ -68,54 +72,7 @@ LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
 void RiseToImperativePattern::rewrite(FuncOp funcOp,
                                       PatternRewriter &rewriter) const {
   MLIRContext *context = rewriter.getContext();
-  //  Location loc = riseFunOp.getLoc();
-  //  Region &riseRegion = riseFunOp.region();
-  //
-  //  if (!riseRegion.getParentRegion()->getParentRegion()) {
-  //    emitError(loc) << "Rise IR cant be immediately nested into a module. It
-  //    "
-  //                      "has to be surrounded by e.g. a FuncOp.";
-  //    return matchFailure();
-  //  }
-  //
-  //  // create mlir function for the given chunk of rise and inline all rise
-  //  // operations
-  //  rewriter.setInsertionPointToStart(
-  //      &riseRegion.getParentRegion()->getParentRegion()->front());
-  //
-  //  // find declaration for the riseFun and delete
-  //  auto forwardDeclaration =
-  //      riseRegion.getParentOfType<ModuleOp>().lookupSymbol(riseFunOp.name());
-  //  rewriter.eraseOp(forwardDeclaration);
-  //
-  //  // create enclosing function
-  //  SmallVector<Type, 10> inputTypes = {};
-  //  for (auto blockArg : riseFunOp.region().front().getArguments()) {
-  //    inputTypes.push_back(blockArg.getType());
-  //  }
-  //  auto riseFun = rewriter.create<FuncOp>(
-  //      loc, riseFunOp.name(), FunctionType::get(inputTypes, {}, context),
-  //      ArrayRef<NamedAttribute>{});
-  //
-  //  rewriter.setInsertionPointToStart(&riseFunOp.getParentRegion()->front());
-  //  riseFun.addEntryBlock();
-
-  // TODO: There should be a check for there only to be one block in this
-  // region!
   Block &block = funcOp.getBody().front();
-
-  //  RiseInOp inOp;
-  //  for (auto op = block.begin(); op != block.end(); op++) {
-  //    if (isa<RiseInOp>(*op)) {
-  //      inOp = cast<RiseInOp>(*op);
-  //      break;
-  //    }
-  //  }
-  //  riseFunOp.walk([](Operation *op) {
-  //    if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
-  //      inOp.output().replaceAllUsesWith(inOp.input());
-  //    }
-  //  });
 
   rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   funcOp.walk([&](Operation *op) {
@@ -128,12 +85,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     }
   });
 
-  //  // replace output
-  //  for (int i = 0; i < riseFunOp.region().front().getNumArguments(); i++) {
-  //    riseFunOp.region().front().getArgument(i).replaceAllUsesWith(
-  //        riseFun.getBody().front().getArgument(i));
-  //  }
-
   // Start at the back and find the first apply.
   ApplyOp applyOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
@@ -142,14 +93,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       break;
     }
   }
-  //  // Finding the return from the chunk of rise IR
-  //  rise::ReturnOp returnOp;
-  //  for (auto op = block.rbegin(); op != block.rend(); op++) {
-  //    if (isa<rise::ReturnOp>(*op)) {
-  //      returnOp = cast<rise::ReturnOp>(*op);
-  //      break;
-  //    }
-  //  }
 
   // Translation to imperative
   AccT(applyOp, funcOp.getBody().front().getArgument(0), rewriter);
@@ -168,13 +111,14 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
 
   // Codegen:
   bool doCodegen = true;
-
   SmallVector<Operation *, 10> erasureList = {};
   if (doCodegen) {
     for (rise::RiseAssignOp assign : assignOps) {
       codeGen(assign, {}, rewriter);
     }
   }
+  emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
+
   //
   //  //   cleanup:
   //  //   erase intermediate operations.
@@ -190,57 +134,44 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   if (doCodegen) {
     funcOp.walk([&](Operation *inst) {
       if (inst->getDialect()->getNamespace().equals("rise")) {
-        erasureList.push_back(inst);
+        if (inst->getParentOfType<LambdaOp>()) {
+          //          std::cout << "not erasing: " <<
+          //          inst->getName().getStringRef().str()
+          //                    << "\n"
+          //                    << std::flush;
+        } else {
+          erasureList.push_back(inst);
+        }
       }
       return;
     });
   } else {
     funcOp.walk([&erasureList](Operation *inst) {
       if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseInOp>(inst) ||
-          isa<RiseWrapOp>(inst) || isa<MapSeqOp>(inst)) {
-        erasureList.push_back(inst);
+          isa<MapSeqOp>(inst)) {
+        if (inst->getParentOfType<LambdaOp>()) {
+          std::cout << "not erasing: " << inst->getName().getStringRef().str()
+                    << "\n"
+                    << std::flush;
+        } else {
+          erasureList.push_back(inst);
+        }
       }
       return;
     });
   }
 
+  // Operations which are inside a lambda are erased twice
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
+    //    std::cout << "erasing: " << op->getName().getStringRef().str() << "\n"
+    //              << std::flush;
     op->dropAllUses();
     op->dropAllReferences();
     rewriter.eraseOp(op);
   }
 
-  //  rewriter.setInsertionPointToEnd(&riseFun.getBody().back());
-  //  auto newReturn =
-  //      rewriter.create<mlir::ReturnOp>(returnOp.getLoc()); //,result);
-  //
-  //  riseFunOp.walk([&rewriter](Operation *inst) {
-  //    if (!inst->use_empty()) {
-  //      //      std::cout << "printing uses for " <<
-  //      //      inst->getName().getStringRef().str()
-  //      //                << "\n"
-  //      //                << std::flush;
-  //
-  //      //            inst->dropAllDefinedValueUses();
-  //      inst->getResult(0).dropAllUses();
-  //      //        printUses(inst->getResult(0));
-  //
-  //      //      rewriter.eraseOp(inst);
-  //    } else {
-  //      //        std::cout << "walking over: " <<
-  //      //        inst->getName().getStringRef().str()
-  //      //                  << "\n"
-  //      //                  << std::flush;
-  //    }
-  //    return;
-  //  });
-  //
-  //  riseFunOp.getOperation()->dropAllUses();
-  //  riseFunOp.getOperation()->dropAllReferences();
-  //  rewriter.eraseOp(riseFunOp);
-  //  funcOp.dump();
   return;
 }
 // std::cout << "\n" << "" << "\n" << std::flush;
@@ -269,50 +200,33 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
           dyn_cast<ApplyOp>(returnOp.getOperand(0).getDefiningOp())) {
     AccT(apply, out, rewriter);
     return;
-  } else if (RiseWrapOp wrapOp =
-                 dyn_cast<RiseWrapOp>(returnOp.getOperand(0).getDefiningOp())) {
-    // TODO: think about possible implications of this lowering approach to
-    // branching.
+  } else if (RiseEmbedOp embedOp = dyn_cast<RiseEmbedOp>(
+                 returnOp.getOperand(0).getDefiningOp())) {
     emitRemark(returnOp.getLoc())
-        << "AccT of RiseWrapOp. Copy operations from this block to result.";
+        << "AccT of RiseEmbedOp. Copy operations from this block to result.";
 
-    // This might not give the correct Block when there are multiple blocks
-    // here!
-    Block &currentBlock = returnOp.getParentRegion()->front();
+    // Translating all operands first
+    //    for (auto operand = embedOp.getOperands().begin(); operand !=
+    //    embedOp.getOperands().end(); operand++) {
+    for (int i = 0; i < embedOp.getOperands().size(); i++) {
+      auto operand = embedOp.getOperand(i);
+      auto operandCont = ConT(operand, rewriter.getInsertionPoint(), rewriter);
+      embedOp.region().front().getArgument(i).replaceAllUsesWith(operandCont);
+    }
+    rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
+        embedOp.getRegion().front().getOperations().back());
 
-    // First do ConT for all values, which are unwrapped and keep track of first
-    // op after the unwraps
-    Operation *lastSeenOp;
-    Operation *firstOpAfterUnwrap;
-    currentBlock.walk([&](Operation *op) {
-      if (RiseUnwrapOp unwrapOp = dyn_cast<RiseUnwrapOp>(*op)) {
-        //        unwraps.push_back(&unwrapOp);
-        auto unwrapCont = ConT(unwrapOp.scalarToUnwrap(),
-                               rewriter.getInsertionPoint(), rewriter);
-        unwrapOp.unwrapped().replaceAllUsesWith(unwrapCont);
-        lastSeenOp = unwrapOp;
-      } else {
-        if (isa<RiseUnwrapOp>(lastSeenOp))
-          firstOpAfterUnwrap = op;
-        lastSeenOp = op;
-      }
-    });
-
-    //    rewriter.getInsertionBlock()->getOperations().
-    // transfer operations between last unwrapOp until returnOp from lambda into
-    // result
     rewriter.getInsertionBlock()->getOperations().splice(
-        rewriter.getInsertionPoint(), currentBlock.getOperations(),
-        Block::iterator(firstOpAfterUnwrap), Block::iterator(returnOp));
-    auto assignment = rewriter.create<RiseAssignOp>(wrapOp.getLoc(),
-                                                    wrapOp.getOperand(), out);
+        rewriter.getInsertionPoint(),
+        embedOp.getRegion().front().getOperations(),
+        embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
 
-    //    currentBlock.getOperations().clear();
+    auto assignment = rewriter.create<RiseAssignOp>(
+        embedReturn.getLoc(), embedReturn.getOperand(0), out);
 
-    // wrapOp not needed anymore!
-    //        rewriter.eraseOp(wrapOp);
-
+    //    rewriter.eraseOp(embedOp);
     return;
+
   } else {
     std::cout << "something went wrong! \n" << std::flush;
     return;
@@ -425,9 +339,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     rewriter.setInsertionPointToStart(forLoopBody);
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
-//    if (!reductionLambda) {
-//      reductionLambda = expandToLambda(reductionFun, rewriter);
-//    }
+    //    if (!reductionLambda) {
+    //      reductionLambda = expandToLambda(reductionFun, rewriter);
+    //    }
 
     RiseIdxOp xi;
 
@@ -560,9 +474,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-//    if (!fLambda) {
-//      fLambda = expandToLambda(f, rewriter);
-//    }
+    //    if (!fLambda) {
+    //      fLambda = expandToLambda(f, rewriter);
+    //    }
 
     RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
@@ -665,9 +579,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-//    if (!fLambda) {
-//      fLambda = expandToLambda(f, rewriter);
-//    }
+    //    if (!fLambda) {
+    //      fLambda = expandToLambda(f, rewriter);
+    //    }
 
     RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
@@ -746,47 +660,45 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     }
     AccT(returnOp, out, rewriter);
     return;
-  }
-//  else if (isa<AddOp>(appliedFun)) {
-//    emitRemark(appliedFun->getLoc()) << "AccT of Add";
-//
-//    auto summand0 = applyOperands.pop_back_val();
-//    auto summand1 = applyOperands.pop_back_val();
-//
-//    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
-//    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
-//
-//    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
-//    //    contSummand0,
-//    //                                            contSummand1);
-//    auto newAddOp = rewriter.create<RiseBinaryOp>(
-//        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-//        StringAttr::get("add", rewriter.getContext()), contSummand0,
-//        contSummand1);
-//    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
-//                                                    newAddOp.getResult(), out);
-//
-//    return;
-//  } else if (isa<MulOp>(appliedFun)) {
-//    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
-//
-//    auto factor0 = applyOperands.pop_back_val();
-//    auto factor1 = applyOperands.pop_back_val();
-//
-//    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
-//    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
-//
-//    auto newMulOp = rewriter.create<RiseBinaryOp>(
-//        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-//        StringAttr::get("mul", rewriter.getContext()), contFactor0,
-//        contFactor1);
-//
-//    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
-//                                                    newMulOp.getResult(), out);
-//
-//    return;
-//  }
-  else if (isa<ApplyOp>(appliedFun)) {
+  } else if (isa<AddOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of Add";
+
+    auto summand0 = applyOperands.pop_back_val();
+    auto summand1 = applyOperands.pop_back_val();
+
+    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
+    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
+
+    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
+    //    contSummand0,
+    //                                            contSummand1);
+    auto newAddOp = rewriter.create<RiseBinaryOp>(
+        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
+        StringAttr::get("add", rewriter.getContext()), contSummand0,
+        contSummand1);
+    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+                                                    newAddOp.getResult(), out);
+
+    return;
+  } else if (isa<MulOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
+
+    auto factor0 = applyOperands.pop_back_val();
+    auto factor1 = applyOperands.pop_back_val();
+
+    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
+    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
+
+    auto newMulOp = rewriter.create<RiseBinaryOp>(
+        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
+        StringAttr::get("mul", rewriter.getContext()), contFactor0,
+        contFactor1);
+
+    auto assignment = rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+                                                    newMulOp.getResult(), out);
+
+    return;
+  } else if (isa<ApplyOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Apply";
 
     emitError(appliedFun->getLoc()) << "We should never get here";
@@ -1331,7 +1243,6 @@ void mlir::rise::Substitute(LambdaOp lambda,
   return;
 }
 
-
 /// gather all patterns
 void mlir::populateRiseToImpConversionPatterns(
     OwningRewritePatternList &patterns, MLIRContext *ctx) {
@@ -1342,7 +1253,7 @@ void mlir::populateRiseToImpConversionPatterns(
 //===----------------------------------------------------------------------===//
 
 /// The pass:
-void ConvertRiseToImperativePass::runOnOperation() {
+void ConvertRiseToImperativePass::runOnFunction() {
   auto module = getOperation();
   OwningRewritePatternList patterns;
 
@@ -1383,14 +1294,22 @@ void ConvertRiseToImperativePass::runOnOperation() {
     return !riseInside;
   });
 
-  if (failed(applyPartialConversion(module, target, patterns)))
-    //      if (!applyPatternsGreedily(this->getOperation(), patterns))
-    signalPassFailure();
+  //  if (failed(applyPartialConversion(module, target, patterns)))
+  //    signalPassFailure();
+
+  //        if (!applyPatternsGreedily(this->getOperation(), patterns))
+
+  //  std::cout << "here I am! \n" << std::flush;
+
+  bool erased;
+  applyOpPatternsAndFold(module, patterns, &erased);
+
+  //  std::cout << "here I am! erased:" << erased << "\n" << std::flush;
 
   return;
 }
 
-std::unique_ptr<OperationPass<ModuleOp>>
+std::unique_ptr<OperationPass<FuncOp>>
 mlir::rise::createConvertRiseToImperativePass() {
   return std::make_unique<ConvertRiseToImperativePass>();
 }

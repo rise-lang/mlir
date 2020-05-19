@@ -1,5 +1,5 @@
 // RUN: mlir-opt %s
-// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-scfs -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
+// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
@@ -22,15 +22,12 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
                 %fst = rise.apply %fstFun, %tuple
                 %snd = rise.apply %sndFun, %tuple
 
-                %fst_unwrapped = rise.unwrap %fst
-                %snd_unwrapped = rise.unwrap %snd
-                %acc_unwrapped = rise.unwrap %acc
-
-                %product = mulf %fst_unwrapped, %snd_unwrapped :f32
-                %result = addf %product, %acc_unwrapped : f32
-                %result_wrapped = rise.wrap %result
-
-                rise.return %result_wrapped : !rise.scalar<f32>
+                %result = rise.embed(%fst, %snd, %acc) {
+                       %product = mulf %fst, %snd :f32
+                       %result = addf %product, %acc : f32
+                       rise.return %result : f32
+                }
+                rise.return %result : !rise.scalar<f32>
             }
 
             %initializer = rise.literal #rise.lit<0.0>

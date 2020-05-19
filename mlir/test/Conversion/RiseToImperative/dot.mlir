@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-loop-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>)  {
@@ -18,13 +18,11 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 
         %fst = rise.apply %fstFun, %floatTuple
         %snd = rise.apply %sndFun, %floatTuple
-
-        %fst_unwrapped = rise.unwrap %fst
-        %snd_unwrapped = rise.unwrap %snd
-        %result = mulf %fst_unwrapped, %snd_unwrapped :f32
-        %result_wrapped = rise.wrap %result
-
-        rise.return %result_wrapped : !rise.scalar<f32>
+        %result = rise.embed(%fst, %snd) {
+            %result = mulf %fst, %snd : f32
+            rise.return %result : f32
+        }
+        rise.return %result : !rise.scalar<f32>
     }
 
     %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
@@ -32,11 +30,11 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 
     //Reduction
     %reductionAdd = rise.lambda (%summand0, %summand1) : !rise.fun<scalar<f32> -> fun<scalar<f32> -> scalar<f32>>> {
-        %summand0_unwrapped = rise.unwrap %summand0
-        %summand1_unwrapped = rise.unwrap %summand1
-        %result = addf %summand0_unwrapped, %summand1_unwrapped : f32
-        %result_wrapped = rise.wrap %result
-        rise.return %result_wrapped : !rise.scalar<f32>
+        %result = rise.embed(%summand0, %summand1) {
+               %result = addf %summand0, %summand1 : f32
+               rise.return %result : f32
+        }
+        rise.return %result : !rise.scalar<f32>
     }
     %initializer = rise.literal #rise.lit<0.0>
     %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>

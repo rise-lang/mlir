@@ -24,7 +24,7 @@ void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
 
 namespace rise {
 
-std::unique_ptr<OperationPass<ModuleOp>> createConvertRiseToImperativePass();
+std::unique_ptr<OperationPass<FuncOp>> createConvertRiseToImperativePass();
 
 } // namespace rise
 } // namespace mlir

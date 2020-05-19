@@ -12,7 +12,7 @@
 include "mlir/Pass/PassBase.td"
 
 def RiseToImperative
-    : Pass<"convert-rise-to-imperative", "ModuleOp"> {
+    : FunctionPass<"convert-rise-to-imperative"> {
   let summary = "Lower all functional primitives of the rise dialect to imperative";
   let constructor = "mlir::rise::createConvertRiseToImperativePass()";
 }

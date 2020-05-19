@@ -111,20 +111,6 @@ def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseWrapOp : Rise_Op<"wrap"> {
-let summary = "rise wrap";
-  let arguments = (ins AnyType : $typeToWrap);  // This is not really used. We have region arguments, not "normal" arguments.
-  let results = (outs AnyType : $wrapped);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseUnwrapOp : Rise_Op<"unwrap"> {
-  let summary = "rise unwrap";
-  let arguments = (ins AnyType : $scalarToUnwrap);  // This is not really used. We have region arguments, not "normal" arguments.
-  let results = (outs AnyType : $unwrapped);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
 def RiseIdxOp : Rise_Op<"codegen.idx"> {
   let summary = "rise idx";
   let arguments = (ins AnyMemRef : $arg0, AnyType : $arg1);
@@ -311,5 +297,32 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
     "OpBuilder &b, OperationState &result", [{ build(b, result, llvm::None); }]
   >];
 }
+
+//===----------------------------------------------------------------------===//
+// Arithmetic operations
+//===----------------------------------------------------------------------===//
+
+def AddOp : Rise_Op<"add"> {
+  let summary = "rise add operation";
+  let description =
+      "This operation returns a function which expects two arguments of type "
+      "t and returns their sum of type t. We will experiment with adopting "
+      "the standard arithmetics operations.";
+  let arguments = (ins DataTypeAttr : $t);
+  let results = (outs FunType : $addFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def MulOp : Rise_Op<"mul"> {
+  let summary = "rise mul operation";
+  let description =
+      "This operation returns a function which expects two arguments of type "
+      "t and returns their product of type t. We will experiment with adopting "
+      "the standard arithmetics operations.";
+  let arguments = (ins DataTypeAttr : $t);
+  let results = (outs FunType : $mulFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 
 #endif // RISE_OPS

@@ -130,49 +130,11 @@ LogicalResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
   // Parse body of embed
   Region *body = result.addRegion();
 
-  std::cout << "still here!" << argumentTypesUnpacked.size() << ", "
-            << argumentTypes.size() << ", " << operands.size() << " \n"
-            << std::flush;
   if (parser.parseRegion(*body, operands, argumentTypesUnpacked, true))
     return failure();
-  std::cout << "still here2!\n" << std::flush;
 
   result.addTypes(ScalarType::get(builder.getContext(),
                                   FloatType::getF32(builder.getContext())));
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
-// RiseWrapOp
-//===----------------------------------------------------------------------===//
-LogicalResult parseRiseWrapOp(OpAsmParser &parser, OperationState &result) {
-  auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType operand;
-
-  if (parser.parseOperand(operand))
-    return failure();
-  parser.resolveOperandUnsafe(operand, result.operands);
-
-  result.addTypes(
-      ScalarType::get(builder.getContext(), result.operands.front().getType()));
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
-// RiseUnwrapOp
-//===----------------------------------------------------------------------===//
-LogicalResult parseRiseUnwrapOp(OpAsmParser &parser, OperationState &result) {
-  auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType operand;
-
-  if (parser.parseOperand(operand))
-    return failure();
-  if (parser.resolveOperandUnsafe(operand, result.operands))
-    return failure();
-
-  Type outputType =
-      result.operands.front().getType().dyn_cast<ScalarType>().getWrappedType();
-  result.addTypes(outputType);
   return success();
 }
 
