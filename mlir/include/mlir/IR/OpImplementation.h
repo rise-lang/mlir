@@ -301,6 +301,9 @@ public:
   /// Parse a `,` token if present.
   virtual ParseResult parseOptionalComma() = 0;
 
+  /// Parse a '-' token.
+  virtual ParseResult parseMinus() = 0;
+
   /// Parse a `=` token.
   virtual ParseResult parseEqual() = 0;
 

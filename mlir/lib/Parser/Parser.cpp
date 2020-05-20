@@ -4210,6 +4210,11 @@ public:
     return success(parser.consumeIf(Token::ellipsis));
   }
 
+  /// Parse a `-` token.
+  ParseResult parseMinus() override {
+    return parser.parseToken(Token::minus, "expected '-'");
+  }
+
   /// Parse a `=` token.
   ParseResult parseEqual() override {
     return parser.parseToken(Token::equal, "expected '='");
