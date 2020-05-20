@@ -11,17 +11,13 @@
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Transforms/Passes.h"
 
 #include <iostream>
-#include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/EDSC/Builders.h>
 
 using namespace mlir;
@@ -41,28 +37,21 @@ struct RiseToImperativePattern : public OpRewritePattern<FuncOp> {
   using OpRewritePattern<FuncOp>::OpRewritePattern;
   LogicalResult match(FuncOp funcOp) const override;
   void rewrite(FuncOp funcOp, PatternRewriter &rewriter) const override;
-  //  PatternMatchResult matchAndRewrite(FuncOp riseFun,
-  //                                     PatternRewriter &rewriter) const
-  //                                     override;
 };
 
 LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
   bool riseInside = false;
-  //  std::cout << "matching! \n" << std::flush;
 
   if (funcOp.isExternal())
     return failure();
-  // I currently check whether a rise.in is inside the func.
+
+  // Only unlowered rise programs contain RiseInOps
   funcOp.walk([&](Operation *op) {
-    //    if (op->getDialect()->getNamespace().equals(
-    //        rise::RiseDialect::getDialectNamespace()))
     if (isa<RiseInOp>(op))
       riseInside = true;
   });
 
   if (riseInside) {
-    //    std::cout << "matchSuccess! \n" << std::flush;
-
     return success();
   } else {
     return failure();
@@ -71,21 +60,16 @@ LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
 
 void RiseToImperativePattern::rewrite(FuncOp funcOp,
                                       PatternRewriter &rewriter) const {
-  MLIRContext *context = rewriter.getContext();
   Block &block = funcOp.getBody().front();
-
-  rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   funcOp.walk([&](Operation *op) {
     if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
       inOp.output().replaceAllUsesWith(inOp.input());
-      // TODO: errors could come from this
-      //      inOp.erase();
-      //      rewriter.eraseOp(inOp);
       rewriter.setInsertionPointAfter(inOp);
+      rewriter.eraseOp(inOp);
     }
   });
 
-  // Start at the back and find the first the rise.out op
+  // Start at the back and find the rise.out op
   RiseOutOp outOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
     if (isa<RiseOutOp>(*op)) {
@@ -93,11 +77,11 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       break;
     }
   }
-  if (!outOp) {
-    emitError(funcOp.getLoc())
-        << "Result of rise.out has to be the result of a rise.apply op!";
-    return;
-  }
+
+  // not sure how to report an error in this pattern - with just emitError or
+  // assertions?
+  assert(outOp &&
+         "Result operand of rise.out has to be the result of a rise.apply op!");
 
   if (ApplyOp apply = dyn_cast<ApplyOp>(outOp.getOperand(1).getDefiningOp())) {
     AccT(apply, outOp.getOperand(0), rewriter);
@@ -108,7 +92,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
 
   // Translation to imperative
-
   emitRemark(funcOp.getLoc()) << "AccT finished. Starting CodeGen.";
 
   SmallVector<rise::RiseAssignOp, 10> assignOps;
@@ -131,26 +114,14 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
-  //
-  //  //   cleanup:
-  //  //   erase intermediate operations.
-  //  //   We remove them back to front right now,
-  //  //   this should be alright in terms of dependencies.
-  //  // TODO:
-  //  //  hack here: I also remove lambdas and applies and wraps which should
-  //  //  have been removed in the AccT. I could not remove them there
-  //  presumably
-  //  //  due to a bug with erasure notifications in MLIR. Later check whether
-  //  this
-  //  //  has been fixed already.
+  //   cleanup:
+  //   erase intermediate operations.
+  //   We remove them back to front right now,
+  //   this should be alright in terms of dependencies.
   if (doCodegen) {
     funcOp.walk([&](Operation *inst) {
       if (inst->getDialect()->getNamespace().equals("rise")) {
         if (inst->getParentOfType<LambdaOp>()) {
-          //          std::cout << "not erasing: " <<
-          //          inst->getName().getStringRef().str()
-          //                    << "\n"
-          //                    << std::flush;
         } else {
           erasureList.push_back(inst);
         }
@@ -161,11 +132,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     funcOp.walk([&erasureList](Operation *inst) {
       if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseInOp>(inst) ||
           isa<MapSeqOp>(inst)) {
-        if (inst->getParentOfType<LambdaOp>()) {
-          std::cout << "not erasing: " << inst->getName().getStringRef().str()
-                    << "\n"
-                    << std::flush;
-        } else {
+        if (!inst->getParentOfType<LambdaOp>()) {
           erasureList.push_back(inst);
         }
       }
@@ -173,12 +140,9 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     });
   }
 
-  // Operations which are inside a lambda are erased twice
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
-    //    std::cout << "erasing: " << op->getName().getStringRef().str() << "\n"
-    //              << std::flush;
     op->dropAllUses();
     op->dropAllReferences();
     rewriter.eraseOp(op);
@@ -186,21 +150,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
 
   return;
 }
-// std::cout << "\n" << "" << "\n" << std::flush;
 
 /// Acceptor Translation
-/// apply - The ApplyOp to start the translation.
-/// outsideArgs - any mlir::Value which are operands of rise.fun or a lambda
-
-// TODO: continue here!
-//       AccT should not take a Lambda anymore but prob. just an Operation.
-//       maybe always a rise.return? Then from there check whether we have an
-//       apply
-//    -> continue as before.
-//       or have a wrap operation
-//    -> stuff between the wraps and unwraps has to be copied into the
-//    translated stuff.
-
 void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
   if (!returnOp.getOperand(0).isa<OpResult>()) {
     emitRemark(returnOp.getLoc())
@@ -218,8 +169,6 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
         << "AccT of RiseEmbedOp. Copy operations from this block to result.";
 
     // Translating all operands first
-    //    for (auto operand = embedOp.getOperands().begin(); operand !=
-    //    embedOp.getOperands().end(); operand++) {
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
       auto operand = embedOp.getOperand(i);
       auto operandCont = ConT(operand, rewriter.getInsertionPoint(), rewriter);
@@ -236,45 +185,19 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
     auto assignment = rewriter.create<RiseAssignOp>(
         embedReturn.getLoc(), embedReturn.getOperand(0), out);
 
-    //    rewriter.eraseOp(embedOp);
     return;
-
   } else {
-    std::cout << "something went wrong! \n" << std::flush;
+    emitError(returnOp.getLoc()) << "AccT of a rise.return went wrong!";
     return;
   }
 }
 
 void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
-  // lower outsideArgs first
+  OpBuilder::InsertPoint savedInsertionPoint = rewriter.saveInsertionPoint();
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
-  OpBuilder::InsertPoint savedInsertionPoint = rewriter.saveInsertionPoint();
-  // If functions are applied partially i.e. appliedFun is an ApplyOp we
-  // iterate here until we reach a non ApplyOp We push the operands of the
-  // applies into a vector, as only the effectively applied Op knows what to
-  // do with them. We always leave out operand 0, as this is the applied
-  // function Operands in the Vector will be ordered such that the top most
-  // operand is the first needed to the applied function. As applies are
-  // processed bottom-up, in the case that an apply has more than 1 operand
-  // they have to be added right to left to keep order.
-  SmallVector<Value, 10> applyOperands = SmallVector<Value, 10>();
-  SmallVector<ApplyOp, 10> applyStack = SmallVector<ApplyOp, 10>();
-  applyStack.push_back(apply);
-  for (int i = apply.getNumOperands() - 1; i > 0; i--) {
-    applyOperands.push_back(apply.getOperand(i));
-  }
-  while (auto next_apply = dyn_cast<ApplyOp>(appliedFun)) {
-    apply = next_apply;
-    appliedFun = apply.getOperand(0).getDefiningOp();
-    applyStack.push_back(apply);
-
-    for (int i = apply.getNumOperands() - 1; i > 0; i--) {
-      applyOperands.push_back(apply.getOperand(i));
-    }
-  }
-
   Location loc = apply.getLoc();
+
   if (isa<ReduceSeqOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of ReduceSeq";
 
@@ -282,10 +205,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto reductionFun = applyOperands.pop_back_val();
-
-    auto initializer = applyOperands.pop_back_val();
-    auto array = applyOperands.pop_back_val();
+    auto reductionFun = apply.getOperand(1);
+    auto initializer = apply.getOperand(2);
+    auto array = apply.getOperand(3);
 
     // Add Continuation for array.
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
@@ -351,13 +273,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     rewriter.setInsertionPointToStart(forLoopBody);
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
-    //    if (!reductionLambda) {
-    //      reductionLambda = expandToLambda(reductionFun, rewriter);
-    //    }
-
-    RiseIdxOp xi;
 
     // index into input
+    RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
@@ -403,11 +321,11 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     AccT(fxi, accumIdx.getResult(), rewriter);
 
-    //        fxi.getResult().dropAllUses();
-    //        fxi.erase();
-    //    ////
-    //    lambdaCopy.getResult().dropAllUses();
-    //    rewriter.eraseOp(lambdaCopy);
+    // Copy of Lambda and corresponding Apply not needed anymore.
+    fxi.getResult().dropAllUses();
+    rewriter.eraseOp(fxi);
+    lambdaCopy.getResult().dropAllUses();
+    rewriter.eraseOp(lambdaCopy);
 
     // copy accumulator to output
     if (defineNewAccumulator) {
@@ -417,8 +335,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
           out.getType().dyn_cast<MemRefType>().getShape();
       MemRefType outIndexOpResult =
           MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-      // TODO: at this point we sometimes need the 0 to access a val and
-      // sometimes not.
+
       auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
                                              cst_zero.getResult());
 
@@ -438,14 +355,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else if (isa<MapSeqOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of MapSeq";
 
-    //     For now we treat all maps as mapSeqs
     auto n = appliedFun->getAttrOfType<NatAttr>("n");
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto f = applyOperands.pop_back_val();
-
-    auto array = applyOperands.pop_back_val();
+    auto f = apply.getOperand(1);
+    auto array = apply.getOperand(2);
 
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
@@ -486,9 +401,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
 
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-    //    if (!fLambda) {
-    //      fLambda = expandToLambda(f, rewriter);
-    //    }
 
     RiseIdxOp xi;
     if (contArray.getType().isa<MemRefType>()) {
@@ -517,14 +429,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
                                            loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
-    // tmp Apply not needed anymore.
 
-    //    //    std::cout << "deleting apply dependency for lambda" <<
-    //    std::flush; fxi.getResult().dropAllUses(); fxi.erase();
-    //    //    rewriter.eraseOp(fxi);
-    //
-    //    lambdaCopy.getResult().dropAllUses();
-    //    rewriter.eraseOp(lambdaCopy);
+    // Copy of Lambda and corresponding Apply not needed anymore.
+    fxi.getResult().dropAllUses();
+    rewriter.eraseOp(fxi);
+    lambdaCopy.getResult().dropAllUses();
+    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
@@ -536,9 +446,8 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
     auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
-    auto f = applyOperands.pop_back_val();
-
-    auto array = applyOperands.pop_back_val();
+    auto f = apply.getOperand(1);
+    auto array = apply.getOperand(2);
 
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
@@ -622,21 +531,19 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
                                            loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
-    // tmp Apply not needed anymore.
 
-    //    fxi.getResult().dropAllUses();
-    //    fxi.erase();
-    //    //    rewriter.eraseOp(fxi);
-    //
-    //    lambdaCopy.getResult().dropAllUses();
-    //    rewriter.eraseOp(lambdaCopy);
+    // Copy of Lambda and corresponding Apply not needed anymore.
+    fxi.getResult().dropAllUses();
+    rewriter.eraseOp(fxi);
+    lambdaCopy.getResult().dropAllUses();
+    rewriter.eraseOp(lambdaCopy);
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Fst";
 
-    auto tuple = applyOperands.pop_back_val();
+    auto tuple = apply.getOperand(1);
     auto contTuple = ConT(tuple, rewriter.getInsertionPoint(), rewriter);
 
     auto fstIntermOp = rewriter.create<RiseFstIntermediateOp>(
@@ -647,7 +554,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else if (SndOp sndOp = dyn_cast<SndOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Snd";
 
-    auto tuple = applyOperands.pop_back_val();
+    auto tuple = apply.getOperand(1);
     auto contTuple = ConT(tuple, rewriter.getInsertionPoint(), rewriter);
 
     auto sndIntermOp = rewriter.create<RiseSndIntermediateOp>(
@@ -659,7 +566,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     emitRemark(appliedFun->getLoc()) << "AccT of Lambda";
 
     LambdaOp lambda = cast<LambdaOp>(appliedFun);
-    Substitute(lambda, applyOperands);
+
+    SmallVector<Value, 10> args = SmallVector<Value, 10>();
+    for (int i = apply.getNumOperands() - 1; i > 0; i--) {
+      args.push_back(apply.getOperand(i));
+    }
+    Substitute(lambda, args);
 
     // Find return in Lambda Region to start new AccT
     rise::ReturnOp returnOp;
@@ -675,15 +587,12 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else if (isa<AddOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Add";
 
-    auto summand0 = applyOperands.pop_back_val();
-    auto summand1 = applyOperands.pop_back_val();
+    auto summand0 = apply.getOperand(1);
+    auto summand1 = apply.getOperand(2);
 
     auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
     auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
 
-    //    auto newAddOp = rewriter.create<AddFOp>(appliedFun->getLoc(),
-    //    contSummand0,
-    //                                            contSummand1);
     auto newAddOp = rewriter.create<RiseBinaryOp>(
         appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
         StringAttr::get("add", rewriter.getContext()), contSummand0,
@@ -695,8 +604,8 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else if (isa<MulOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Mul";
 
-    auto factor0 = applyOperands.pop_back_val();
-    auto factor1 = applyOperands.pop_back_val();
+    auto factor0 = apply.getOperand(1);
+    auto factor1 = apply.getOperand(2);
 
     auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
     auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
@@ -710,13 +619,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
                                                     newMulOp.getResult(), out);
 
     return;
-  } else if (isa<ApplyOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Apply";
-
-    emitError(appliedFun->getLoc()) << "We should never get here";
   } else {
     emitRemark(appliedFun->getLoc())
-        << "lowering op: " << appliedFun->getName() << " not yet supported.";
+        << "Can't lower the application of op: " << appliedFun->getName();
   }
 }
 
@@ -724,7 +629,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 mlir::Value mlir::rise::ConT(mlir::Value contValue,
                              Block::iterator contLocation,
                              PatternRewriter &rewriter) {
-
   Location loc = contValue.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
@@ -787,7 +691,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
           return array.getResult();
         } else {
           emitError(op.getLoc())
-              << "We can not lower literals of this type right now!";
+              << "Lowering literals of this type not supported right now!";
         }
       }
     } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
@@ -864,8 +768,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         AccT(apply, tmpArray.getResult(), rewriter);
 
         return tmpArray.getResult();
-        // What do we really want to return here?
-
       } else if (MapParOp mapOp =
                      dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied Map";
@@ -875,14 +777,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
             loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
                                  FloatType::getF32(rewriter.getContext())));
 
-        //      AccT(apply, tmpArray.getResult(), rewriter);
-        //
-        //      return tmpArray.getResult();
         AccT(apply, tmpArray.getResult(), rewriter);
-
         return tmpArray.getResult();
-        // What do we really want to return here?
-
       } else {
         emitError(apply.getLoc()) << "Can not perform ConT for this apply!";
       }
@@ -902,28 +798,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         << "can not perform continuation for BlockArg, leaving as is.";
     return contValue;
   }
-
-  //    std::cout << "\n 1\n" << op.literalAttr().getType().getKind() << " and
-  //    "
-  //    << RiseTypeKind::RISE_FLOAT;
-  //
-  //    if (op.literalAttr().getType().kindof(RiseTypeKind::RISE_ARRAY)) {
-  //      std::cout << "\n 2 \n";
-  //
-  //    } else if (op.literalAttr().getValue()) {
-  //      rewriter.create<RiseContinuationTranslation>(
-  //          contValue.getLoc(), FloatType::getF32(rewriter.getContext()),
-  //          contValue);
-  //      std::cout << "\n 3\n";
-  //
-  //    }
-  //  } else {
-  //    emitError(contValue.getLoc())
-  //        << "\nContinuation Translation of "
-  //        << contValue.getDefiningOp()->getName().getStringRef().str()
-  //        << " not "
-  //           "supported.";
-  //  }
 }
 
 Value mlir::rise::codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
@@ -966,13 +840,6 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
 
       path.push_back(idx.arg1());
 
-      //      std::cout <<
-      //      idx.arg0().getDefiningOp()->getName().getStringRef().str()
-      //                <<
-      //                idx.arg1().getDefiningOp()->getName().getStringRef().str()
-      //                <<
-      //                storeLocation.getDefiningOp()->getName().getStringRef().str()
-      //                << std::flush;
       return codeGenStore(idx.arg0(), val, path, rewriter);
     } else {
       emitRemark(val.getLoc())
@@ -983,23 +850,9 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
     }
   } else {
     // We have reached a BlockArgument
-    //    std::cout << "I have reached a BlockArg in codeGenStore\n";
-    //    std::flush; print(path);
     // call to reverse here.
-    //    auto index = path.pop_back_val();
-
     generateReadAccess(path, val, storeLocation, rewriter);
-    //    rewriter.create<StoreOp>(val.getLoc(), val, storeLocation,
-    //                             mpark::get<Value>(index));
   }
-  // This might need an extra argument passing what Value exactly I want to
-  // store.
-
-  // First right hand side, get Value to store,
-  // Then resolve lhs.
-
-  // Look at the LateX requirements and create an Overleaf
-  //
   return path;
 }
 
@@ -1012,14 +865,11 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       Value arg1 = idx.arg1();
       path.push_back(arg1);
-      //      rewriter.setInsertionPointAfter(idx);
       return codeGen(idx.arg0(), path, rewriter);
-
     } else if (RiseBinaryOp binOp =
                    dyn_cast<RiseBinaryOp>(val.getDefiningOp())) {
       emitRemark(binOp.getLoc()) << "Codegen for binOp";
 
-      //      std::cout << "\nCodeGen for binOp!" << std::flush;
       auto arg0 = codeGen(binOp.arg0(), {}, rewriter);
       auto arg1 = codeGen(binOp.arg1(), {}, rewriter);
       if (binOp.op().equals("add")) {
@@ -1038,24 +888,9 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       // call to reverse here.
       return generateWriteAccess(path, alloc.getResult(), rewriter);
-
     } else if (RiseZipIntermediateOp zipIntermOp =
                    dyn_cast<RiseZipIntermediateOp>(val.getDefiningOp())) {
       emitRemark(zipIntermOp.getLoc()) << "Codegen for zip";
-
-      //      std::cout << "\nCodeGen for zipInterm!" << std::flush;
-
-      // now there has to be an idx on the path.
-      //      printPath(path);
-      //      auto topPath = path.pop_back_val();
-
-      //      auto sndPath = path.pop_back_val();
-      //      OutputPathType topElement = path.pop_back_val();
-      //      Value *idx = mpark::get_if<Value>(&topElement);
-      //      std::cout << "arg in zip: " << idx->getType().isa<IndexType>()
-      //                << std::flush;
-
-      //      printPath(path);
       OutputPathType sndLastElem = path[path.size() - 2];
       int *fst = mpark::get_if<int>(&sndLastElem);
 
@@ -1108,17 +943,11 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
     emitRemark(val.getLoc()) << "reached a blockArg in Codegen, reversing";
     return generateWriteAccess(path, val, rewriter);
   }
-
-  emitError(val.getLoc())
-      << "Something went wrong in codegen, we should never get here!";
-  return val;
 }
 
 Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
                                       Value accessVal,
                                       PatternRewriter &rewriter) {
-  //  std::cout << "reversing Path for writing.\n" << std::flush;
-  //  printPath(path);
   int index;
   SmallVector<Value, 10> indexValues = {};
   for (OutputPathType element : path) {
@@ -1146,9 +975,6 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
 void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
                                     Value storeVal, Value storeLoc,
                                     PatternRewriter &rewriter) {
-  //  std::cout << "reversing Path for reading\n" << std::flush;
-  //  printPath(path);
-
   int index;
   SmallVector<Value, 10> indexValues = {};
   for (OutputPathType element : path) {
@@ -1208,18 +1034,6 @@ void mlir::rise::printPath(SmallVector<OutputPathType, 10> input) {
 }
 
 void mlir::rise::printUses(Value val) {
-
-  //  auto uses = val.getUses();
-  //  auto iter = uses.begin();
-  //  std::cout << "first use of"
-  //            << val.getDefiningOp()->getName().getStringRef().str() << "
-  //            is:
-  //            "
-  //            <<
-  //            val.getUses().begin().getUser()->getName().getStringRef().str()
-  //            << " with id "
-  //            << "\n"
-  //            << std::flush;
   std::cout << val.getDefiningOp()->getName().getStringRef().str()
             << " has uses: \n"
             << std::flush;
@@ -1243,15 +1057,9 @@ void mlir::rise::Substitute(LambdaOp lambda,
     emitError(lambda.getLoc())
         << "Too many arguments given for Lambda substitution";
   }
-  // TODO: right now we can not do Substitution more than once for a single
-  // lambda. We want to be able to do that to use a Lambda more than once for
-  // translation.
   for (int i = 0; i < args.size(); i++) {
     lambda.region().front().getArgument(i).replaceAllUsesWith(args[i]);
-    //    lambda.region().front().insertArgument(i, args[i].getType());
   }
-  // TODO: look at how the IR looks at this point to find out how we can do
-  // Substitution more than once.
   return;
 }
 
