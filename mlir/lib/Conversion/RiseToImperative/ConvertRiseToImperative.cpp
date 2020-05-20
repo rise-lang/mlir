@@ -85,17 +85,29 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     }
   });
 
-  // Start at the back and find the first apply.
-  ApplyOp applyOp;
+  // Start at the back and find the first the rise.out op
+  RiseOutOp outOp;
   for (auto op = block.rbegin(); op != block.rend(); op++) {
-    if (isa<ApplyOp>(*op)) {
-      applyOp = cast<ApplyOp>(*op);
+    if (isa<RiseOutOp>(*op)) {
+      outOp = cast<RiseOutOp>(*op);
       break;
     }
   }
+  if (!outOp) {
+    emitError(funcOp.getLoc())
+        << "Result of rise.out has to be the result of a rise.apply op!";
+    return;
+  }
+
+  if (ApplyOp apply = dyn_cast<ApplyOp>(outOp.getOperand(1).getDefiningOp())) {
+    AccT(apply, outOp.getOperand(0), rewriter);
+  } else {
+    emitError(outOp.getLoc())
+        << "Result of rise.out has to be the result of a rise.apply op!";
+    return;
+  }
 
   // Translation to imperative
-  AccT(applyOp, funcOp.getBody().front().getArgument(0), rewriter);
 
   emitRemark(funcOp.getLoc()) << "AccT finished. Starting CodeGen.";
 

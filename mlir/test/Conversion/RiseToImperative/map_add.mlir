@@ -27,7 +27,7 @@ func @rise_fun(%outArg: memref<4xf32>, %in: memref<4xf32>) {
     }
     %map4IntsToInts = rise.mapSeq {to = "loop"} #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
     %doubledArray = rise.apply %map4IntsToInts, %doubleFun, %array
-
+    rise.out %outArg <- %doubledArray
     return
 }
 

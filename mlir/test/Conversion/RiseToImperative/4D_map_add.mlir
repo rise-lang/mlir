@@ -25,6 +25,7 @@ func @rise_fun(%outArg:memref<4x4x4x4xf32>, %inArg:memref<4x4x4x4xf32>) {
        rise.return %res : !rise.array<4, array<4, array<4, scalar<f32>>>>
     }
     %res = rise.apply %map1, %mapInnerLambda_1, %array3D
+    rise.out %outArg <- %res
     return
 }
 func @mapMapId() {

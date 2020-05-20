@@ -13,7 +13,7 @@ func @rise_fun(%outArg:memref<4xf32>, %in:memref<4xf32>) {
     }
     %mapFun = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
     %multipliedArray = rise.apply %mapFun, %times5, %array
-
+    rise.out %outArg <- %multipliedArray
     return
 }
 func @array_times_5() {

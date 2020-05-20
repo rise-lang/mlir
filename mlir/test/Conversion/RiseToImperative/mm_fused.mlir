@@ -42,6 +42,7 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
     }
     %m1 = rise.mapSeq {to = "loop"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
     %result = rise.apply %m1, %m1fun, %A
+    rise.out %outArg <- %result
     return
 }
 func @rtclock() -> (f64)

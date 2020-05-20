@@ -16,7 +16,7 @@ func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 
     %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
     %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
-
+    rise.out %outArg <- %fstArray
     return
 }
 

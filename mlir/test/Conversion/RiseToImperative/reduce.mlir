@@ -13,7 +13,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg:memref<1024xf32>) {
     %initializer = rise.literal #rise.lit<0.0>
     %reduce4Ints = rise.reduceSeq #rise.nat<1024> #rise.scalar<f32> #rise.scalar<f32>
     %result = rise.apply %reduce4Ints, %reductionAdd, %initializer, %array0
-
+    rise.out %outArg <- %result
     return
 }
 

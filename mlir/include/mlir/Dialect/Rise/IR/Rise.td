@@ -151,12 +151,11 @@ def RiseAssignOp : Rise_Op<"codegen.assign"> {
   // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-// def RiseOutOp : Rise_Op<"out"> {
-//  let summary = "rise out";
-//  let arguments = (ins AnyType:$input);
-//  let results = (outs DataType:$output);
-//  let parser = [{ return parse$cppClass(parser, result); }];
-//}
+def RiseOutOp : Rise_Op<"out"> {
+  let summary = "rise out";
+  let arguments = (ins AnyType:$input, AnyType:$output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
 
 def RiseInOp : Rise_Op<"in"> {
   let summary = "rise in";

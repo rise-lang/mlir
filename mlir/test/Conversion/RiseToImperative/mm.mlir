@@ -49,6 +49,7 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
     }
     %m1 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
     %result = rise.apply %m1, %f1, %A
+    rise.out %outArg <- %result
     return
 }
 func @mm() {

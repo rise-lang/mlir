@@ -149,25 +149,41 @@ LogicalResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
     return failure();
 
   parser.resolveOperandUnsafe(operand, result.operands);
-  // parse Memref and create one of our types for it.
+  // alternatively parse Memref and create one of our types for it.
 
   Type riseType;
   if (parser.parseColonType(riseType))
     return failure();
 
-  //  DataTypeWrapper riseType = DataTypeWrapper::get(
-  //      builder.getContext(),
-  //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
-  //      4),
-  //                     Float::get(builder.getContext())));
-  //  DataType riseType = ArrayType::get(
-  //      builder.getContext(), Nat::get(builder.getContext(), 4),
-  //      ArrayType::get(builder.getContext(), Nat::get(builder.getContext(),
-  //      4),
-  //                     Float::get(builder.getContext())));
   result.addTypes(riseType);
   return success();
 }
+
+//===----------------------------------------------------------------------===//
+// RiseOutOp
+//===----------------------------------------------------------------------===//
+LogicalResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  OpAsmParser::OperandType outputOperand;
+  OpAsmParser::OperandType resultOperand;
+
+
+  if (parser.parseOperand(outputOperand))
+    return failure();
+
+  parser.resolveOperandUnsafe(outputOperand, result.operands);
+
+  if (parser.parseLess() || parser.parseMinus())
+    return failure();
+
+  if (parser.parseOperand(resultOperand))
+    return failure();
+
+  parser.resolveOperandUnsafe(resultOperand, result.operands);
+
+  return success();
+}
+
 
 //===----------------------------------------------------------------------===//
 // RiseIdxOp

@@ -32,7 +32,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<1024xf32>, %inArg1:memref<1
     %initializer = rise.literal #rise.lit<0.0>
     %reduceFun = rise.reduceSeq #rise.nat<1024> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
     %result = rise.apply %reduceFun, %reductionLambda, %initializer, %zippedArrays
-
+    rise.out %outArg <- %result
     return
 }
 
