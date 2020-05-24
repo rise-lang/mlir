@@ -251,6 +251,23 @@ AST Matchers
 clang-format
 ------------
 
+- Option ``IndentExternBlock`` has been added to optionally apply indenting inside ``extern "C"`` and ``extern "C++"`` blocks.
+
+- ``IndentExternBlock`` option accepts ``AfterExternBlock`` to use the old behavior, as well as Indent and NoIndent options, which map to true and false, respectively.
+
+  .. code-block:: c++
+
+    Indent:                       NoIndent:
+     #ifdef __cplusplus          #ifdef __cplusplus
+     extern "C" {                extern "C++" {
+     #endif                      #endif
+
+          void f(void);          void f(void);
+
+     #ifdef __cplusplus          #ifdef __cplusplus
+     }                           }
+     #endif                      #endif
+
 - Option ``IndentCaseBlocks`` has been added to support treating the block
   following a switch case label as a scope block which gets indented itself.
   It helps avoid having the closing bracket align with the switch statement's
@@ -296,6 +313,41 @@ clang-format
           foo();
           bar();
         });
+
+- Option ``AlignConsecutiveBitFields`` has been added to align bit field
+  declarations across multiple adjacent lines
+
+  .. code-block:: c++
+
+      true:
+        bool aaa  : 1;
+        bool a    : 1;
+        bool bb   : 1;
+
+      false:
+        bool aaa : 1;
+        bool a : 1;
+        bool bb : 1;
+
+- Option ``BraceWrapping.BeforeWhile`` has been added to allow wrapping
+  before the ```while`` in a do..while loop. By default the value is (``false``)
+
+  In previous releases ``IndentBraces`` implied ``BraceWrapping.BeforeWhile``.
+  If using a Custom BraceWrapping style you may need to now set
+  ``BraceWrapping.BeforeWhile`` to (``true``) to be explicit.
+
+  .. code-block:: c++
+
+      true:
+      do {
+        foo();
+      }
+      while(1);
+
+      false:
+      do {
+        foo();
+      } while(1);
 
 libclang
 --------
