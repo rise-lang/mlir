@@ -1,7 +1,7 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
 
 func @print_memref_f32(memref<*xf32>)
-func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>)  {
+func @rise_fun(%outArg:memref<f32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>)  {
 
     //Arrays
     %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
@@ -25,7 +25,7 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
         rise.return %result : !rise.scalar<f32>
     }
 
-    %map10TuplesToInts = rise.mapPar #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+    %map10TuplesToInts = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
     %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
 
     //Reduction
@@ -45,9 +45,9 @@ func @rise_fun(%outArg:memref<1xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 
 func @simple_dot() {
     //prepare output Array
-    %outputArray = alloc() : memref<1xf32>
+    %outputArray = alloc() : memref<f32>
     %cst_0 = constant 0.0 : f32
-    linalg.fill(%outputArray, %cst_0) : memref<1xf32>, f32
+    linalg.fill(%outputArray, %cst_0) : memref<f32>, f32
 
     %inArg0 = alloc() : memref<4xf32>
     %cst_5 = constant 5.0 : f32
@@ -57,13 +57,13 @@ func @simple_dot() {
     %cst_10 = constant 5.0 : f32
     linalg.fill(%inArg1, %cst_10) : memref<4xf32>, f32
 
-    call @rise_fun(%outputArray, %inArg0, %inArg1) : (memref<1xf32>, memref<4xf32>, memref<4xf32>) -> ()
+    call @rise_fun(%outputArray, %inArg0, %inArg1) : (memref<f32>, memref<4xf32>, memref<4xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<1xf32> to memref<*xf32>
+    %print_me = memref_cast %outputArray : memref<f32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_DOT: Unranked Memref rank = 1 descriptor@ = {{.*}}
-// SIMPLE_DOT: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [1] strides = [1] data =
+// SIMPLE_DOT: Unranked Memref rank = 0 descriptor@ = {{.*}}
+// SIMPLE_DOT: Memref base@ = {{.*}} rank = 0 offset = 0 data =
 // SIMPLE_DOT: [100]
 

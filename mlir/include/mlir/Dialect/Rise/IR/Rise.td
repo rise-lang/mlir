@@ -55,7 +55,7 @@ def ArrayType : Type<CPred<"$_self.isa<ArrayType>()">, "array type">;
 def ScalarType : Type<CPred<"$_self.isa<ScalarType>()">, "scalar type">;
 def DataType : Type<Or<[
   IntType.predicate, FloatType.predicate, TupleType.predicate,
-  ArrayType.predicate
+  ArrayType.predicate, ScalarType.predicate
 ]>>;
 def NatOrDataType : Type<Or<[NatType.predicate, DataType.predicate]>>;
 
@@ -116,6 +116,12 @@ def RiseIdxOp : Rise_Op<"codegen.idx"> {
   let arguments = (ins AnyMemRef : $arg0, AnyType : $arg1);
   let results = (outs AnyType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseCastOp : Rise_Op<"codegen.cast"> {
+  let summary = "rise codegen.cast op";
+  let arguments = (ins AnyType);
+  let results = (outs DataType);
 }
 
 def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {

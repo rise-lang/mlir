@@ -63,9 +63,9 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   Block &block = funcOp.getBody().front();
   funcOp.walk([&](Operation *op) {
     if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
-      inOp.output().replaceAllUsesWith(inOp.input());
+      //      inOp.output().replaceAllUsesWith(inOp.input());
       rewriter.setInsertionPointAfter(inOp);
-      rewriter.eraseOp(inOp);
+      //      rewriter.eraseOp(inOp);
     }
   });
 
@@ -83,16 +83,46 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   assert(outOp &&
          "Result operand of rise.out has to be the result of a rise.apply op!");
 
+  // insert cast of out to fit our type system
+  Value out =
+      rewriter
+          .create<RiseCastOp>(outOp.getLoc(), outOp.getOperand(1).getType(),
+                              outOp.getOperand(0))
+          .getResult();
+
   if (ApplyOp apply = dyn_cast<ApplyOp>(outOp.getOperand(1).getDefiningOp())) {
-    AccT(apply, outOp.getOperand(0), rewriter);
+    AccT(apply, out, rewriter);
   } else {
     emitError(outOp.getLoc())
         << "Result of rise.out has to be the result of a rise.apply op!";
     return;
   }
 
+  // Cleanup of leftover ops from AccT
+  SmallVector<Operation *, 10> leftoverOps = {};
+  funcOp.walk([&leftoverOps](Operation *inst) {
+    if (!inst)
+      return;
+    if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
+        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<RiseOutOp>(inst)) {
+      if (inst->getParentOfType<LambdaOp>()) {
+      } else {
+        leftoverOps.push_back(inst);
+      }
+    }
+    return;
+  });
+  size_t unneededLeftoverOps = leftoverOps.size();
+  for (size_t i = 0; i < unneededLeftoverOps; i++) {
+    auto op = leftoverOps.pop_back_val();
+    op->dropAllUses();
+    op->dropAllReferences();
+    rewriter.eraseOp(op);
+  }
+
   // Translation to imperative
   emitRemark(funcOp.getLoc()) << "AccT finished. Starting CodeGen.";
+
 
   SmallVector<rise::RiseAssignOp, 10> assignOps;
   funcOp.walk([&assignOps](Operation *inst) {
@@ -114,6 +144,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
+
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -121,8 +152,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   if (doCodegen) {
     funcOp.walk([&](Operation *inst) {
       if (inst->getDialect()->getNamespace().equals("rise")) {
-        if (inst->getParentOfType<LambdaOp>()) {
-        } else {
+        if (!(inst->getParentOfType<LambdaOp>() ||
+              inst->getParentOfType<RiseEmbedOp>())) {
           erasureList.push_back(inst);
         }
       }
@@ -130,16 +161,18 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     });
   } else {
     funcOp.walk([&erasureList](Operation *inst) {
+      if (!inst)
+        return;
       if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseInOp>(inst) ||
           isa<MapSeqOp>(inst)) {
-        if (!inst->getParentOfType<LambdaOp>()) {
+        if (!(inst->getParentOfType<LambdaOp>() ||
+              inst->getParentOfType<RiseEmbedOp>())) {
           erasureList.push_back(inst);
         }
       }
       return;
     });
   }
-
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
@@ -172,18 +205,14 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
       auto operand = embedOp.getOperand(i);
       auto operandCont = ConT(operand, rewriter.getInsertionPoint(), rewriter);
-      embedOp.region().front().getArgument(i).replaceAllUsesWith(operandCont);
+      embedOp.setOperand(i, operandCont);
     }
-    rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
-        embedOp.getRegion().front().getOperations().back());
 
-    rewriter.getInsertionBlock()->getOperations().splice(
-        rewriter.getInsertionPoint(),
-        embedOp.getRegion().front().getOperations(),
-        embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
+    auto newEmbed = rewriter.clone(*embedOp.getOperation());
 
     auto assignment = rewriter.create<RiseAssignOp>(
-        embedReturn.getLoc(), embedReturn.getOperand(0), out);
+        newEmbed->getLoc(), newEmbed->getResult(0), out);
+    //    rewriter.eraseOp(embedOp);
 
     return;
   } else {
@@ -192,7 +221,56 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
   }
 }
 
+// Old translation of embed which we prob need in codegen
+///// Acceptor Translation
+// void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter
+// &rewriter) {
+//  if (!returnOp.getOperand(0).isa<OpResult>()) {
+//    emitRemark(returnOp.getLoc())
+//        << "Directly returning an argument is not supported in lowering to "
+//           "imperative currently";
+//    return;
+//  }
+//  if (ApplyOp apply =
+//          dyn_cast<ApplyOp>(returnOp.getOperand(0).getDefiningOp())) {
+//    AccT(apply, out, rewriter);
+//    return;
+//  } else if (RiseEmbedOp embedOp = dyn_cast<RiseEmbedOp>(
+//                 returnOp.getOperand(0).getDefiningOp())) {
+//    emitRemark(returnOp.getLoc())
+//        << "AccT of RiseEmbedOp. Copy operations from this block to result.";
+//
+//    // Translating all operands first
+//    for (int i = 0; i < embedOp.getOperands().size(); i++) {
+//      auto operand = embedOp.getOperand(i);
+//      auto operandCont = ConT(operand, rewriter.getInsertionPoint(),
+//      rewriter);
+//      embedOp.region().front().getArgument(i).replaceAllUsesWith(operandCont);
+//    }
+//    rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
+//        embedOp.getRegion().front().getOperations().back());
+//
+//    rewriter.getInsertionBlock()->getOperations().splice(
+//        rewriter.getInsertionPoint(),
+//        embedOp.getRegion().front().getOperations(),
+//        embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
+//
+//    auto assignment = rewriter.create<RiseAssignOp>(
+//        embedReturn.getLoc(), embedReturn.getOperand(0), out);
+//
+//    return;
+//  } else {
+//    emitError(returnOp.getLoc()) << "AccT of a rise.return went wrong!";
+//    return;
+//  }
+//}
+
 void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
+  if (out.getType().getDialect().getNamespace() != RiseDialect::getDialectNamespace()) {
+    emitError(apply.getLoc()) << "type of out is wrong! Dumping it";
+    out.getType().dump();
+  }
+
   OpBuilder::InsertPoint savedInsertionPoint = rewriter.saveInsertionPoint();
 
   Operation *appliedFun = apply.getOperand(0).getDefiningOp();
@@ -219,24 +297,58 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     // TODO: do this properly! This can be way better structured
     Value accum;
     if (defineNewAccumulator) {
+
+      RiseEmbedOp embedOp = rewriter.create<RiseEmbedOp>(
+          appliedFun->getLoc(),
+          ArrayRef<Type>{ScalarType::get(
+              rewriter.getContext(), FloatType::getF32(rewriter.getContext()))},
+          ValueRange());
+      Block *embedBlock = new Block();
+      embedOp.region().push_front(embedBlock);
+      rewriter.setInsertionPointToStart(&embedOp.region().front());
+
       auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
-      accum = rewriter
-                  .create<AllocOp>(
-                      appliedFun->getLoc(),
-                      MemRefType::get(ArrayRef<int64_t>{1},
-                                      FloatType::getF32(rewriter.getContext())))
-                  .getResult();
+      AllocOp alloc = rewriter.create<AllocOp>(
+          appliedFun->getLoc(),
+          MemRefType::get(ArrayRef<int64_t>{1},
+                          FloatType::getF32(rewriter.getContext())));
 
-      rewriter.create<linalg::FillOp>(initializer.getLoc(), accum, contInit);
+      rewriter.create<linalg::FillOp>(initializer.getLoc(), alloc.getResult(),
+                                      contInit);
+      rewriter.create<rise::ReturnOp>(initializer.getLoc(), alloc.getResult());
+
+      rewriter.setInsertionPointAfter(embedOp);
+      accum = embedOp.getResult();
     } else {
-      auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
+      // TODO: not sure about this one
+
       accum = out;
-      auto accumIdx = rewriter.create<RiseIdxOp>(
-          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
-          cst_zero.getResult());
+      Value indexedAccum;
+      if (out.getType().isa<ArrayType>()) {
+        indexedAccum = rewriter.create<RiseIdxOp>(
+            accum.getLoc(), accum.getType().cast<ArrayType>().getElementType(),
+            accum, cst_zero.getResult());
+      } else {
+        indexedAccum = accum;
+      }
+
+      RiseEmbedOp embedOp = rewriter.create<RiseEmbedOp>(
+          appliedFun->getLoc(),
+          ArrayRef<Type>{ScalarType::get(
+              rewriter.getContext(), FloatType::getF32(rewriter.getContext()))},
+          ValueRange());
+      Block *embedBlock = new Block();
+      embedOp.region().push_front(embedBlock);
+      rewriter.setInsertionPointToStart(&embedOp.region().front());
+
+      auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
+
+      rewriter.create<rise::ReturnOp>(initializer.getLoc(), contInit);
+
+      rewriter.setInsertionPointAfter(embedOp);
       auto initAccum = rewriter.create<RiseAssignOp>(
-          appliedFun->getLoc(), contInit, accumIdx.getResult());
+          appliedFun->getLoc(), embedOp.getResult(), indexedAccum);
     }
     // zero constant for indexing
 
@@ -274,53 +386,64 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointToStart(forLoopBody);
     LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
 
-    // index into input
+    // TODO: not needed anymore
+    //    // index into input
     RiseIdxOp xi;
-    if (contArray.getType().isa<MemRefType>()) {
-      ArrayRef<int64_t> inShape =
-          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-      Type inIndexOpResult;
-      if (inShape.size() > 0) {
-        inIndexOpResult =
-            MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-      } else {
-        inIndexOpResult = FloatType::getF32(rewriter.getContext());
-      }
-      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                      loopInductionVar);
-      //      std::cout << "contArray is of MemrefType";
-    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-      //      std::cout << "contArray is not of MemrefType";
+    //    if (contArray.getType().isa<MemRefType>()) {
+    //      ArrayRef<int64_t> inShape =
+    //          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+    //      Type inIndexOpResult;
+    //      if (inShape.size() > 0) {
+    //        inIndexOpResult =
+    //            MemRefType::get(inShape,
+    //            FloatType::getF32(rewriter.getContext()));
+    //      } else {
+    //        inIndexOpResult = FloatType::getF32(rewriter.getContext());
+    //      }
+    //      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+    //                                      loopInductionVar);
+    //      //      std::cout << "contArray is of MemrefType";
+    //    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+    //      //      std::cout << "contArray is not of MemrefType";
+    //    }
+
+    if (contArray.getType().isa<ArrayType>()) {
+      xi = rewriter.create<RiseIdxOp>(
+          loc, contArray.getType().cast<ArrayType>().getElementType(),
+          contArray, loopInductionVar);
     }
 
-    RiseIdxOp accumIdx;
-    if (defineNewAccumulator) {
-      // index into acc
-      accumIdx = rewriter.create<RiseIdxOp>(
-          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
-          cst_zero.getResult());
-    } else {
-      accumIdx = rewriter.create<RiseIdxOp>(
-          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
-          cst_zero.getResult());
-      //      ArrayRef<int64_t> outShape =
-      //          out.getType().dyn_cast<MemRefType>().getShape();
-      //      MemRefType outIndexOpResult =
-      //          MemRefType::get(outShape,
-      //          FloatType::getF32(rewriter.getContext()));
-      //      // TODO: at this point we sometimes need the 0 to access a val and
-      //      // sometimes not.
-      //      accumIdx = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-      //                                            cst_zero.getResult());
-    }
+    // I think we don't need these anymore. Just pass the result of rise.embed
+    // here
+    //    RiseIdxOp accumIdx;
+    //    if (defineNewAccumulator) {
+    //      // index into acc
+    //      accumIdx = rewriter.create<RiseIdxOp>(
+    //          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
+    //          cst_zero.getResult());
+    //    } else {
+    //      accumIdx = rewriter.create<RiseIdxOp>(
+    //          accum.getLoc(), FloatType::getF32(rewriter.getContext()), accum,
+    //          cst_zero.getResult());
+    //      //      ArrayRef<int64_t> outShape =
+    //      //          out.getType().dyn_cast<MemRefType>().getShape();
+    //      //      MemRefType outIndexOpResult =
+    //      //          MemRefType::get(outShape,
+    //      //          FloatType::getF32(rewriter.getContext()));
+    //      //      // TODO: at this point we sometimes need the 0 to access a
+    //      val and
+    //      //      // sometimes not.
+    //      //      accumIdx = rewriter.create<RiseIdxOp>(loc, outIndexOpResult,
+    //      out,
+    //      //                                            cst_zero.getResult());
+    //    }
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
-    auto fxi = rewriter.create<ApplyOp>(
-        loc, lambdaCopy.getType(), lambdaCopy.getResult(),
-        ValueRange{accumIdx.getResult(), xi.getResult()});
+    auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
+                                        lambdaCopy.getResult(),
+                                        ValueRange{accum, xi.getResult()});
 
-    AccT(fxi, accumIdx.getResult(), rewriter);
-
+    AccT(fxi, accum, rewriter);
     // Copy of Lambda and corresponding Apply not needed anymore.
     fxi.getResult().dropAllUses();
     rewriter.eraseOp(fxi);
@@ -331,6 +454,13 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     if (defineNewAccumulator) {
       rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
 
+      // index into accumulator
+      RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
+          accum.getLoc(),
+          accum.getType().dyn_cast<ArrayType>().getElementType(), accum,
+          cst_zero.getResult());
+
+      // index into output
       ArrayRef<int64_t> outShape =
           out.getType().dyn_cast<MemRefType>().getShape();
       MemRefType outIndexOpResult =
@@ -339,13 +469,8 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
       auto out0 = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
                                              cst_zero.getResult());
 
-      RiseIdxOp storeAccIdx = rewriter.create<RiseIdxOp>(
-          accum.getLoc(),
-          MemRefType::get({1}, FloatType::getF32(rewriter.getContext())), accum,
-          cst_zero.getResult());
-
-      auto storing = rewriter.create<RiseAssignOp>(
-          appliedFun->getLoc(), storeAccIdx.getResult(), out0.getResult());
+      rewriter.create<RiseAssignOp>(appliedFun->getLoc(),
+                                    storeAccIdx.getResult(), out0.getResult());
 
       rewriter.restoreInsertionPoint(savedInsertionPoint);
     }
@@ -361,7 +486,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     auto f = apply.getOperand(1);
     auto array = apply.getOperand(2);
-
     auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
     // zero constant for indexing
@@ -403,6 +527,8 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
 
     RiseIdxOp xi;
+
+    // TODO: not needed anymore
     if (contArray.getType().isa<MemRefType>()) {
       ArrayRef<int64_t> inShape =
           contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
@@ -415,18 +541,26 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
       //      std::cout << "got an idx and not a memref! \n" << std::flush;
     }
+    if (contArray.getType().isa<ArrayType>()) {
+      xi = rewriter.create<RiseIdxOp>(
+          loc, contArray.getType().cast<ArrayType>().getElementType(),
+          contArray, loopInductionVar);
+    }
 
     // operate on a copy of the lambda to avoid generating dependencies.
     LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
     auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
                                         lambdaCopy.getResult(), xi.getResult());
 
-    ArrayRef<int64_t> outShape =
-        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-    MemRefType outIndexOpResult =
-        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           loopInductionVar);
+    //    ArrayRef<int64_t> outShape =
+    //        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+    //    MemRefType outIndexOpResult =
+    //        MemRefType::get(outShape,
+    //        FloatType::getF32(rewriter.getContext()));
+
+    auto outi = rewriter.create<RiseIdxOp>(
+        loc, out.getType().dyn_cast<ArrayType>().getElementType(), out,
+        loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
 
@@ -505,17 +639,23 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     //    }
 
     RiseIdxOp xi;
-    if (contArray.getType().isa<MemRefType>()) {
-      ArrayRef<int64_t> inShape =
-          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-
-      MemRefType inIndexOpResult =
-          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-
-      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-                                      loopInductionVar);
-    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-      //      std::cout << "got an idx and not a memref! \n" << std::flush;
+    // TODO: not needed anymore
+//    if (contArray.getType().isa<MemRefType>()) {
+//      ArrayRef<int64_t> inShape =
+//          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+//
+//      MemRefType inIndexOpResult =
+//          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
+//
+//      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+//                                      loopInductionVar);
+//    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+//      //      std::cout << "got an idx and not a memref! \n" << std::flush;
+//    }
+    if (contArray.getType().isa<ArrayType>()) {
+      xi = rewriter.create<RiseIdxOp>(
+          loc, contArray.getType().cast<ArrayType>().getElementType(),
+          contArray, loopInductionVar);
     }
 
     // operate on a copy of the lambda to avoid generating dependencies.
@@ -523,12 +663,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
                                         lambdaCopy.getResult(), xi.getResult());
 
-    ArrayRef<int64_t> outShape =
-        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-    MemRefType outIndexOpResult =
-        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-    auto outi = rewriter.create<RiseIdxOp>(loc, outIndexOpResult, out,
-                                           loopInductionVar);
+    auto outi = rewriter.create<RiseIdxOp>(
+        loc, out.getType().dyn_cast<ArrayType>().getElementType(), out,
+        loopInductionVar);
 
     AccT(fxi, outi.getResult(), rewriter);
 
@@ -727,10 +864,17 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         // usually this is an Array of tuples. But at the end it always has to
         // be projected to fst or snd. For now I will keep the type as
         // memref<...xf32>
-        MemRefType outputType =
-            MemRefType::get({4}, FloatType::getF32(rewriter.getContext()));
+
+        ArrayType lhType = lhs.getType().dyn_cast<ArrayType>();
+        ArrayType rhType = rhs.getType().dyn_cast<ArrayType>();
+        assert(lhType && rhType && "Inputs to zip have to be Arrays!");
+
+        ArrayType zipType = ArrayType::get(
+            rewriter.getContext(), lhType.getSize(),
+            rise::Tuple::get(rewriter.getContext(), lhType.getElementType(),
+                             rhType.getElementType()));
         auto zipped = rewriter.create<RiseZipIntermediateOp>(
-            zipOp.getLoc(), outputType, contLhs, contRhs);
+            zipOp.getLoc(), zipType, contLhs, contRhs);
 
         return zipped;
       } else if (FstOp fst = dyn_cast<FstOp>(apply.fun().getDefiningOp())) {
@@ -755,37 +899,84 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         return sndInterm;
       } else if (MapSeqOp mapOp =
                      dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
-        emitRemark(contValue.getLoc()) << "ConT of Applied Map";
+        emitRemark(contValue.getLoc()) << "ConT of Applied MapSeq";
 
         // introduce tmp Array of length n:
+        RiseEmbedOp embedOp = rewriter.create<RiseEmbedOp>(
+            mapOp.getLoc(),
+            ArrayRef<Type>{ArrayType::get(
+                rewriter.getContext(), mapOp.n(),
+                ScalarType::get(rewriter.getContext(),
+                                FloatType::getF32(rewriter.getContext())))},
+            ValueRange());
+
+        Block *embedBlock = new Block();
+        embedOp.region().push_front(embedBlock);
+        rewriter.setInsertionPointToStart(&embedOp.region().front());
         auto tmpArray = rewriter.create<AllocOp>(
             loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
                                  FloatType::getF32(rewriter.getContext())));
+        rewriter.create<rise::ReturnOp>(tmpArray.getLoc(),
+                                        tmpArray.getResult());
 
-        //      AccT(apply, tmpArray.getResult(), rewriter);
-        //
-        //      return tmpArray.getResult();
-        AccT(apply, tmpArray.getResult(), rewriter);
+        rewriter.setInsertionPointAfter(embedOp);
 
-        return tmpArray.getResult();
+        AccT(apply, embedOp.getResult(), rewriter);
+
+        return embedOp.getResult();
       } else if (MapParOp mapOp =
                      dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
-        emitRemark(contValue.getLoc()) << "ConT of Applied Map";
+        emitRemark(contValue.getLoc()) << "ConT of Applied MapPar";
 
         // introduce tmp Array of length n:
+        RiseEmbedOp embedOp = rewriter.create<RiseEmbedOp>(
+            mapOp.getLoc(),
+            ArrayRef<Type>{ArrayType::get(
+                rewriter.getContext(), mapOp.n(),
+                ScalarType::get(rewriter.getContext(),
+                                FloatType::getF32(rewriter.getContext())))},
+            ValueRange());
+
+        Block *embedBlock = new Block();
+        embedOp.region().push_front(embedBlock);
+        rewriter.setInsertionPointToStart(&embedOp.region().front());
         auto tmpArray = rewriter.create<AllocOp>(
             loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
                                  FloatType::getF32(rewriter.getContext())));
+        rewriter.create<rise::ReturnOp>(tmpArray.getLoc(),
+                                        tmpArray.getResult());
 
-        AccT(apply, tmpArray.getResult(), rewriter);
-        return tmpArray.getResult();
+        rewriter.setInsertionPointAfter(embedOp);
+
+        AccT(apply, embedOp.getResult(), rewriter);
+
+        return embedOp.getResult();
       } else {
-        emitError(apply.getLoc()) << "Can not perform ConT for this apply!";
+        emitError(apply.getLoc()) << "Cannot perform ConT for this apply!";
+      }
+    } else if (RiseEmbedOp embedOp =
+                   dyn_cast<RiseEmbedOp>(contValue.getDefiningOp())) {
+      emitRemark(contValue.getLoc()) << "ConT of Embed";
+
+      // Translating all operands
+      for (int i = 0; i < embedOp.getOperands().size(); i++) {
+        auto operand = embedOp.getOperand(i);
+        auto operandCont =
+            ConT(operand, rewriter.getInsertionPoint(), rewriter);
+        embedOp.setOperand(i, operandCont);
       }
 
+      // This will be inlined later
+      return embedOp.getResult();
+    } else if (RiseInOp inOp = dyn_cast<RiseInOp>(contValue.getDefiningOp())) {
+      emitRemark(contValue.getLoc()) << "ConT of In";
+
+      // we dont return the ConT of this to stay in our type system. This will
+      // be resolved in the codeGen stage of the translation.
+      return contValue;
     } else {
       emitRemark(contValue.getLoc())
-          << "can not perform continuation "
+          << "cannot perform continuation "
              "translation for "
           << contValue.getDefiningOp()->getName().getStringRef().str()
           << " leaving Value as is.";
@@ -795,7 +986,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
     }
   } else {
     emitRemark(contValue.getLoc())
-        << "can not perform continuation for BlockArg, leaving as is.";
+        << "cannot perform continuation for BlockArg, leaving as is.";
     return contValue;
   }
 }
@@ -841,7 +1032,36 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       path.push_back(idx.arg1());
 
       return codeGenStore(idx.arg0(), val, path, rewriter);
+    } else if (RiseCastOp castOp =
+                   dyn_cast<RiseCastOp>(storeLocation.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "CodegenStore for cast";
+      return codeGenStore(castOp.getOperand(), val, path, rewriter);
+    } else if (RiseEmbedOp embedOp =
+                   dyn_cast<RiseEmbedOp>(storeLocation.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "CodegenStore for embed";
+      assert(embedOp.getNumOperands() == 0 &&
+             "codegenstore for embed with operands not handled yet.");
+
+      auto oldInsertPoint = rewriter.saveInsertionPoint();
+      rewriter.setInsertionPointAfter(embedOp);
+
+      // replace uses of embed value with returned value
+      rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
+          embedOp.getRegion().front().getOperations().back());
+      assert(embedReturn &&
+                 "Region of EmbedOp has to be terminated using rise.return!");
+      embedOp.getResult().replaceAllUsesWith(embedReturn.getOperand(0));
+
+      // inline all operations of the embedOp region except for return
+      rewriter.getInsertionBlock()->getOperations().splice(
+          rewriter.getInsertionPoint(),
+          embedOp.getRegion().front().getOperations(),
+          embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+      generateReadAccess(path, val, embedReturn.getOperand(0), rewriter);
     } else {
+
       emitRemark(val.getLoc())
           << "CodegenStore for "
           << val.getDefiningOp()->getName().getStringRef().str();
@@ -860,7 +1080,49 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
                           PatternRewriter &rewriter) {
 
   if (val.isa<OpResult>()) {
-    if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
+    if (RiseEmbedOp embedOp = dyn_cast<RiseEmbedOp>(val.getDefiningOp())) {
+      emitRemark(embedOp.getLoc()) << "Codegen for Embed";
+
+      auto oldInsertPoint = rewriter.saveInsertionPoint();
+
+      rewriter.setInsertionPointAfter(embedOp);
+
+      // Do codegen for all operands of embed first
+      int i = 0;
+      for (auto operand : (val.getDefiningOp()->getOperands())) {
+        embedOp.setOperand(i, codeGen(operand, path, rewriter));
+        i++;
+      }
+      // replace blockArgs in the region with results of the codegen for the
+      // operands
+      for (int i = 0; i < embedOp.getOperands().size(); i++) {
+        embedOp.region().front().getArgument(i).replaceAllUsesWith(
+            embedOp.getOperand(i));
+      }
+      // replace uses of embed value with returned value
+      rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
+          embedOp.getRegion().front().getOperations().back());
+      assert(embedReturn &&
+             "Region of EmbedOp has to be terminated using rise.return!");
+      embedOp.getResult().replaceAllUsesWith(embedReturn.getOperand(0));
+
+      // inline all operations of the embedOp region except for return
+      rewriter.getInsertionBlock()->getOperations().splice(
+          rewriter.getInsertionPoint(),
+          embedOp.getRegion().front().getOperations(),
+          embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
+
+      rewriter.restoreInsertionPoint(oldInsertPoint);
+
+      return embedReturn.getOperand(0);
+
+      // TODO: find out if we can erase the embedOp herre somehow
+      std::cout << "vor erase!" << std::flush;
+      //      rewriter.eraseOp(embedOp);
+
+      std::cout << "nach erase!" << std::flush;
+
+    } else if (RiseIdxOp idx = dyn_cast<RiseIdxOp>(val.getDefiningOp())) {
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
       Value arg1 = idx.arg1();
@@ -923,6 +1185,12 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
                isa<AffineLoadOp>(val.getDefiningOp())) {
       emitRemark(val.getLoc()) << "Codegen for Load";
       return val;
+    } else if (RiseInOp inOp = dyn_cast<RiseInOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Load";
+      return codeGen(inOp.input(), path, rewriter);
+    } else if (RiseCastOp castOp = dyn_cast<RiseCastOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Cast";
+      return codeGen(castOp.getOperand(), path, rewriter);
     } else {
       emitRemark(val.getLoc())
           << "I don't know how to do codegen for: "

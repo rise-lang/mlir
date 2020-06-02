@@ -359,6 +359,7 @@ void RiseDialect::printType(mlir::Type type, DialectAsmPrinter &printer) const {
 ///         rise.literal #rise.array<2.3, !rise.int, [[1,2,3],[4,5,6]]>
 mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
                                             Type type) const {
+  // TODO: implement parsing of different literals
 
   if (succeeded(parser.parseOptionalKeyword("lit"))) {
     if (parser.parseLess())
@@ -399,7 +400,7 @@ mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
   //    return parseNatAttribute(attrString, loc);
   //  }
   //  emitError(loc, "Invalid Rise attribute '" + attrString + "'");
-  //  return nullptr;
+  return nullptr;
 }
 
 DataTypeAttr RiseDialect::parseDataTypeAttribute(StringRef attrString,
