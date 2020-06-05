@@ -113,8 +113,8 @@ def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
 
 def RiseIdxOp : Rise_Op<"codegen.idx"> {
   let summary = "rise idx";
-  let arguments = (ins AnyMemRef : $arg0, AnyType : $arg1);
-  let results = (outs AnyType : $output);
+  let arguments = (ins DataType : $arg0, AnyType : $arg1);
+  let results = (outs DataType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

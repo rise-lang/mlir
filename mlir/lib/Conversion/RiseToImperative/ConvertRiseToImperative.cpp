@@ -104,7 +104,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     if (!inst)
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
-        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<RiseOutOp>(inst)) {
+        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<RiseOutOp>(inst) || isa<LiteralOp>(inst)) {
       if (inst->getParentOfType<LambdaOp>()) {
       } else {
         leftoverOps.push_back(inst);
@@ -135,7 +135,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   });
 
   // Codegen:
-  bool doCodegen = true;
+  bool doCodegen = false;
   SmallVector<Operation *, 10> erasureList = {};
   if (doCodegen) {
     for (rise::RiseAssignOp assign : assignOps) {
@@ -144,7 +144,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
-
+  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -159,20 +159,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       }
       return;
     });
-  } else {
-    funcOp.walk([&erasureList](Operation *inst) {
-      if (!inst)
-        return;
-      if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<RiseInOp>(inst) ||
-          isa<MapSeqOp>(inst)) {
-        if (!(inst->getParentOfType<LambdaOp>() ||
-              inst->getParentOfType<RiseEmbedOp>())) {
-          erasureList.push_back(inst);
-        }
-      }
-      return;
-    });
   }
+
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
