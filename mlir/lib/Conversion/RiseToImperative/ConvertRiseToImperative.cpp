@@ -135,7 +135,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   });
 
   // Codegen:
-  bool doCodegen = false;
+  bool doCodegen = true;
   SmallVector<Operation *, 10> erasureList = {};
   if (doCodegen) {
     for (rise::RiseAssignOp assign : assignOps) {
