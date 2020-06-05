@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Clang.h"
+#include "AMDGPU.h"
 #include "Arch/AArch64.h"
 #include "Arch/ARM.h"
 #include "Arch/Mips.h"
@@ -15,11 +16,10 @@
 #include "Arch/Sparc.h"
 #include "Arch/SystemZ.h"
 #include "Arch/X86.h"
-#include "AMDGPU.h"
 #include "CommonArgs.h"
 #include "Hexagon.h"
-#include "MSP430.h"
 #include "InputInfo.h"
+#include "MSP430.h"
 #include "PS4CPU.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/CodeGenOptions.h"
@@ -35,6 +35,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -557,6 +558,13 @@ static bool useFramePointerForTargetByDefault(const ArgList &Args,
       Triple.isOSHurd()) {
     switch (Triple.getArch()) {
     // Don't use a frame pointer on linux if optimizing for certain targets.
+    case llvm::Triple::arm:
+    case llvm::Triple::armeb:
+    case llvm::Triple::thumb:
+    case llvm::Triple::thumbeb:
+      if (Triple.isAndroid())
+        return true;
+      LLVM_FALLTHROUGH;
     case llvm::Triple::mips64:
     case llvm::Triple::mips64el:
     case llvm::Triple::mips:
@@ -2045,57 +2053,10 @@ void Clang::AddSystemZTargetArgs(const ArgList &Args,
   }
 }
 
-static void addX86AlignBranchArgs(const Driver &D, const ArgList &Args,
-                                  ArgStringList &CmdArgs) {
-  if (Args.hasArg(options::OPT_mbranches_within_32B_boundaries)) {
-    CmdArgs.push_back("-mllvm");
-    CmdArgs.push_back("-x86-branches-within-32B-boundaries");
-  }
-  if (const Arg *A = Args.getLastArg(options::OPT_malign_branch_boundary_EQ)) {
-    StringRef Value = A->getValue();
-    unsigned Boundary;
-    if (Value.getAsInteger(10, Boundary) || Boundary < 16 ||
-        !llvm::isPowerOf2_64(Boundary)) {
-      D.Diag(diag::err_drv_invalid_argument_to_option)
-          << Value << A->getOption().getName();
-    } else {
-      CmdArgs.push_back("-mllvm");
-      CmdArgs.push_back(
-          Args.MakeArgString("-x86-align-branch-boundary=" + Twine(Boundary)));
-    }
-  }
-  if (const Arg *A = Args.getLastArg(options::OPT_malign_branch_EQ)) {
-    std::string AlignBranch;
-    for (StringRef T : A->getValues()) {
-      if (T != "fused" && T != "jcc" && T != "jmp" && T != "call" &&
-          T != "ret" && T != "indirect")
-        D.Diag(diag::err_drv_invalid_malign_branch_EQ)
-            << T << "fused, jcc, jmp, call, ret, indirect";
-      if (!AlignBranch.empty())
-        AlignBranch += '+';
-      AlignBranch += T;
-    }
-    CmdArgs.push_back("-mllvm");
-    CmdArgs.push_back(Args.MakeArgString("-x86-align-branch=" + AlignBranch));
-  }
-  if (const Arg *A = Args.getLastArg(options::OPT_mpad_max_prefix_size_EQ)) {
-    StringRef Value = A->getValue();
-    unsigned PrefixSize;
-    if (Value.getAsInteger(10, PrefixSize)) {
-      D.Diag(diag::err_drv_invalid_argument_to_option)
-          << Value << A->getOption().getName();
-    } else {
-      CmdArgs.push_back("-mllvm");
-      CmdArgs.push_back(
-          Args.MakeArgString("-x86-pad-max-prefix-size=" + Twine(PrefixSize)));
-    }
-  }
-}
-
 void Clang::AddX86TargetArgs(const ArgList &Args,
                              ArgStringList &CmdArgs) const {
   const Driver &D = getToolChain().getDriver();
-  addX86AlignBranchArgs(D, Args, CmdArgs);
+  addX86AlignBranchArgs(D, Args, CmdArgs, /*IsLTO=*/false);
 
   if (!Args.hasFlag(options::OPT_mred_zone, options::OPT_mno_red_zone, true) ||
       Args.hasArg(options::OPT_mkernel) ||
@@ -4252,10 +4213,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         options::OPT_fno_function_sections,
         options::OPT_fdata_sections,
         options::OPT_fno_data_sections,
+        options::OPT_fbasic_block_sections_EQ,
         options::OPT_funique_internal_linkage_names,
         options::OPT_fno_unique_internal_linkage_names,
         options::OPT_funique_section_names,
         options::OPT_fno_unique_section_names,
+        options::OPT_funique_basic_block_section_names,
+        options::OPT_fno_unique_basic_block_section_names,
         options::OPT_mrestrict_it,
         options::OPT_mno_restrict_it,
         options::OPT_mstackrealign,
@@ -4471,10 +4435,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(A->getValue());
   }
 
-  if (Args.hasFlag(options::OPT_fsemantic_interposition,
-                   options::OPT_fno_semantic_interposition, false) &&
-      RelocationModel != llvm::Reloc::Static && !IsPIE)
-    CmdArgs.push_back("-fsemantic-interposition");
+  // The default is -fno-semantic-interposition. We render it just because we
+  // require explicit -fno-semantic-interposition to infer dso_local.
+  if (Arg *A = Args.getLastArg(options::OPT_fsemantic_interposition,
+                               options::OPT_fno_semantic_interposition))
+    if (RelocationModel != llvm::Reloc::Static && !IsPIE)
+      A->render(Args, CmdArgs);
 
   CmdArgs.push_back("-mthread-model");
   if (Arg *A = Args.getLastArg(options::OPT_mthread_model)) {
@@ -4871,6 +4837,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-ffunction-sections");
   }
 
+  if (Arg *A = Args.getLastArg(options::OPT_fbasic_block_sections_EQ)) {
+    StringRef Val = A->getValue();
+    if (Val != "all" && Val != "labels" && Val != "none" &&
+        !(Val.startswith("list=") && llvm::sys::fs::exists(Val.substr(5))))
+      D.Diag(diag::err_drv_invalid_value)
+          << A->getAsString(Args) << A->getValue();
+    else
+      A->render(Args, CmdArgs);
+  }
+
   if (Args.hasFlag(options::OPT_fdata_sections, options::OPT_fno_data_sections,
                    UseSeparateSections)) {
     CmdArgs.push_back("-fdata-sections");
@@ -4883,6 +4859,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_funique_internal_linkage_names,
                    options::OPT_fno_unique_internal_linkage_names, false))
     CmdArgs.push_back("-funique-internal-linkage-names");
+
+  if (Args.hasFlag(options::OPT_funique_basic_block_section_names,
+                   options::OPT_fno_unique_basic_block_section_names, false))
+    CmdArgs.push_back("-funique-basic-block-section-names");
 
   Args.AddLastArg(CmdArgs, options::OPT_finstrument_functions,
                   options::OPT_finstrument_functions_after_inlining,
@@ -5195,7 +5175,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fno_operator_names);
   Args.AddLastArg(CmdArgs, options::OPT_femulated_tls,
                   options::OPT_fno_emulated_tls);
-  Args.AddLastArg(CmdArgs, options::OPT_fkeep_static_consts);
 
   // AltiVec-like language extensions aren't relevant for assembling.
   if (!isa<PreprocessJobAction>(JA) || Output.getType() != types::TY_PP_Asm)
@@ -6138,6 +6117,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-fforce-enable-int128");
   }
 
+  if (Args.hasFlag(options::OPT_fkeep_static_consts,
+                   options::OPT_fno_keep_static_consts, false))
+    CmdArgs.push_back("-fkeep-static-consts");
+
   if (Args.hasFlag(options::OPT_fcomplete_member_pointers,
                    options::OPT_fno_complete_member_pointers, false))
     CmdArgs.push_back("-fcomplete-member-pointers");
@@ -6743,7 +6726,8 @@ void ClangAs::AddMIPSTargetArgs(const ArgList &Args,
 
 void ClangAs::AddX86TargetArgs(const ArgList &Args,
                                ArgStringList &CmdArgs) const {
-  addX86AlignBranchArgs(getToolChain().getDriver(), Args, CmdArgs);
+  addX86AlignBranchArgs(getToolChain().getDriver(), Args, CmdArgs,
+                        /*IsLTO=*/false);
 
   if (Arg *A = Args.getLastArg(options::OPT_masm_EQ)) {
     StringRef Value = A->getValue();

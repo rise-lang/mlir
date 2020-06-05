@@ -1381,10 +1381,11 @@ WebKit is an open-source web browser engine available for macOS, iOS and Linux.
 This section describes checkers that can find issues in WebKit codebase.
 
 Most of the checkers focus on memory management for which WebKit uses custom implementation of reference counted smartpointers.
-Checker are formulated in terms related to ref-counting:
-* *Ref-counted type* is either ``Ref<T>`` or ``RefPtr<T>``.
-* *Ref-countable type* is any type that implements ``ref()`` and ``deref()`` methods as ``RefPtr<>`` is a template (i. e. relies on duck typing).
-* *Uncounted type* is ref-countable but not ref-counted type.
+
+Checkers are formulated in terms related to ref-counting:
+ - *Ref-counted type* is either ``Ref<T>`` or ``RefPtr<T>``.
+ - *Ref-countable type* is any type that implements ``ref()`` and ``deref()`` methods as ``RefPtr<>`` is a template (i. e. relies on duck typing).
+ - *Uncounted type* is ref-countable but not ref-counted type.
 
 .. _webkit-RefCntblBaseVirtualDtor:
 
@@ -1402,6 +1403,25 @@ Ref-counted types hold their ref-countable data by a raw pointer and allow impli
  };
 
  struct Derived : RefCntblBase { }; // warn
+
+.. _webkit-WebKitNoUncountedMemberChecker:
+
+webkit.WebKitNoUncountedMemberChecker
+""""""""""""""""""""""""""""""""""""
+Raw pointers and references to uncounted types can't be used as class members. Only ref-counted types are allowed.
+
+.. code-block:: cpp
+
+ struct RefCntbl {
+   void ref() {}
+   void deref() {}
+ };
+
+ struct Foo {
+   RefCntbl * ptr; // warn
+   RefCntbl & ptr; // warn
+   // ...
+ };
 
 .. _alpha-checkers:
 

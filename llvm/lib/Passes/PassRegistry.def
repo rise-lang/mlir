@@ -96,7 +96,6 @@ MODULE_PASS("tsan-module", ThreadSanitizerPass())
 MODULE_PASS("kasan-module", ModuleAddressSanitizerPass(/*CompileKernel=*/true, false, true, false))
 MODULE_PASS("sancov-module", ModuleSanitizerCoveragePass())
 MODULE_PASS("poison-checking", PoisonCheckingPass())
-MODULE_PASS("stack-safety-annotator", StackSafetyGlobalAnnotatorPass())
 #undef MODULE_PASS
 
 #ifndef CGSCC_ANALYSIS
@@ -134,6 +133,7 @@ FUNCTION_ANALYSIS("domfrontier", DominanceFrontierAnalysis())
 FUNCTION_ANALYSIS("loops", LoopAnalysis())
 FUNCTION_ANALYSIS("lazy-value-info", LazyValueAnalysis())
 FUNCTION_ANALYSIS("da", DependenceAnalysis())
+FUNCTION_ANALYSIS("inliner-features", InlineFeaturesAnalysis())
 FUNCTION_ANALYSIS("memdep", MemoryDependenceAnalysis())
 FUNCTION_ANALYSIS("memoryssa", MemorySSAAnalysis())
 FUNCTION_ANALYSIS("phi-values", PhiValuesAnalysis())

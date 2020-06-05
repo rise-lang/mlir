@@ -311,7 +311,7 @@ static bool hasIrregularType(Type *Ty, const DataLayout &DL, unsigned VF) {
   // Determine if an array of VF elements of type Ty is "bitcast compatible"
   // with a <VF x Ty> vector.
   if (VF > 1) {
-    auto *VectorTy = VectorType::get(Ty, VF);
+    auto *VectorTy = FixedVectorType::get(Ty, VF);
     return VF * DL.getTypeAllocSize(Ty) != DL.getTypeStoreSize(VectorTy);
   }
 
@@ -415,7 +415,8 @@ public:
                             VPTransformState &State);
 
   /// Widen a single select instruction within the innermost loop.
-  void widenSelectInstruction(SelectInst &I, bool InvariantCond);
+  void widenSelectInstruction(SelectInst &I, VPUser &Operands,
+                              bool InvariantCond, VPTransformState &State);
 
   /// Fix the vectorized code, taking care of header phi's, live-outs, and more.
   void fixVectorizedLoop();
@@ -1322,8 +1323,9 @@ public:
 private:
   unsigned NumPredStores = 0;
 
-  /// \return An upper bound for the vectorization factor, larger than zero.
-  /// One is returned if vectorization should best be avoided due to cost.
+  /// \return An upper bound for the vectorization factor, a power-of-2 larger
+  /// than zero. One is returned if vectorization should best be avoided due
+  /// to cost.
   unsigned computeFeasibleMaxVF(unsigned ConstTripCount);
 
   /// The vectorization cost is a combination of the cost itself and a boolean
@@ -2073,7 +2075,7 @@ Value *InnerLoopVectorizer::getOrCreateVectorValue(Value *V, unsigned Part) {
       VectorLoopValueMap.setVectorValue(V, Part, VectorValue);
     } else {
       // Initialize packing with insertelements to start from undef.
-      Value *Undef = UndefValue::get(VectorType::get(V->getType(), VF));
+      Value *Undef = UndefValue::get(FixedVectorType::get(V->getType(), VF));
       VectorLoopValueMap.setVectorValue(V, Part, Undef);
       for (unsigned Lane = 0; Lane < VF; ++Lane)
         packScalarIntoVectorValue(V, {Part, Lane});
@@ -2195,7 +2197,7 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(
   // Prepare for the vector type of the interleaved load/store.
   Type *ScalarTy = getMemInstValueType(Instr);
   unsigned InterleaveFactor = Group->getFactor();
-  Type *VecTy = VectorType::get(ScalarTy, InterleaveFactor * VF);
+  auto *VecTy = FixedVectorType::get(ScalarTy, InterleaveFactor * VF);
 
   // Prepare for the new pointers.
   SmallVector<Value *, 2> AddrParts;
@@ -2299,7 +2301,7 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(
 
         // If this member has different type, cast the result type.
         if (Member->getType() != ScalarTy) {
-          VectorType *OtherVTy = VectorType::get(Member->getType(), VF);
+          VectorType *OtherVTy = FixedVectorType::get(Member->getType(), VF);
           StridedVec = createBitOrPointerCast(StridedVec, OtherVTy, DL);
         }
 
@@ -2313,7 +2315,7 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(
   }
 
   // The sub vector type for current instruction.
-  VectorType *SubVT = VectorType::get(ScalarTy, VF);
+  auto *SubVT = FixedVectorType::get(ScalarTy, VF);
 
   // Vectorize the interleaved store group.
   for (unsigned Part = 0; Part < UF; Part++) {
@@ -2384,7 +2386,7 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
          "CM decision is not to widen the memory instruction");
 
   Type *ScalarDataTy = getMemInstValueType(Instr);
-  Type *DataTy = VectorType::get(ScalarDataTy, VF);
+  auto *DataTy = FixedVectorType::get(ScalarDataTy, VF);
   const Align Alignment = getLoadStoreAlignment(Instr);
 
   // Determine if the pointer operand of the access is either consecutive or
@@ -2687,7 +2689,7 @@ Value *InnerLoopVectorizer::createBitOrPointerCast(Value *V, VectorType *DstVTy,
          "Only one type should be a floating point type");
   Type *IntTy =
       IntegerType::getIntNTy(V->getContext(), DL.getTypeSizeInBits(SrcElemTy));
-  VectorType *VecIntTy = VectorType::get(IntTy, VF);
+  auto *VecIntTy = FixedVectorType::get(IntTy, VF);
   Value *CastVal = Builder.CreateBitOrPointerCast(V, VecIntTy);
   return Builder.CreateBitOrPointerCast(CastVal, DstVTy);
 }
@@ -2794,8 +2796,8 @@ void InnerLoopVectorizer::emitMemRuntimeChecks(Loop *L, BasicBlock *Bypass) {
   std::tie(FirstCheckInst, MemRuntimeCheck) =
       addRuntimeChecks(MemCheckBlock->getTerminator(), OrigLoop,
                        RtPtrChecking.getChecks(), RtPtrChecking.getSE());
-  if (!MemRuntimeCheck)
-    return;
+  assert(MemRuntimeCheck && "no RT checks generated although RtPtrChecking "
+                            "claimed checks are required");
 
   if (MemCheckBlock->getParent()->hasOptSize()) {
     assert(Cost->Hints->getForce() == LoopVectorizeHints::FK_Enabled &&
@@ -3358,7 +3360,7 @@ void InnerLoopVectorizer::truncateToMinimalBitwidths() {
       Type *OriginalTy = I->getType();
       Type *ScalarTruncatedTy =
           IntegerType::get(OriginalTy->getContext(), KV.second);
-      Type *TruncatedTy = VectorType::get(
+      auto *TruncatedTy = FixedVectorType::get(
           ScalarTruncatedTy, cast<VectorType>(OriginalTy)->getNumElements());
       if (TruncatedTy == OriginalTy)
         continue;
@@ -3412,11 +3414,13 @@ void InnerLoopVectorizer::truncateToMinimalBitwidths() {
         auto Elements0 =
             cast<VectorType>(SI->getOperand(0)->getType())->getNumElements();
         auto *O0 = B.CreateZExtOrTrunc(
-            SI->getOperand(0), VectorType::get(ScalarTruncatedTy, Elements0));
+            SI->getOperand(0),
+            FixedVectorType::get(ScalarTruncatedTy, Elements0));
         auto Elements1 =
             cast<VectorType>(SI->getOperand(1)->getType())->getNumElements();
         auto *O1 = B.CreateZExtOrTrunc(
-            SI->getOperand(1), VectorType::get(ScalarTruncatedTy, Elements1));
+            SI->getOperand(1),
+            FixedVectorType::get(ScalarTruncatedTy, Elements1));
 
         NewI = B.CreateShuffleVector(O0, O1, SI->getShuffleMask());
       } else if (isa<LoadInst>(I) || isa<PHINode>(I)) {
@@ -3426,14 +3430,16 @@ void InnerLoopVectorizer::truncateToMinimalBitwidths() {
         auto Elements =
             cast<VectorType>(IE->getOperand(0)->getType())->getNumElements();
         auto *O0 = B.CreateZExtOrTrunc(
-            IE->getOperand(0), VectorType::get(ScalarTruncatedTy, Elements));
+            IE->getOperand(0),
+            FixedVectorType::get(ScalarTruncatedTy, Elements));
         auto *O1 = B.CreateZExtOrTrunc(IE->getOperand(1), ScalarTruncatedTy);
         NewI = B.CreateInsertElement(O0, O1, IE->getOperand(2));
       } else if (auto *EE = dyn_cast<ExtractElementInst>(I)) {
         auto Elements =
             cast<VectorType>(EE->getOperand(0)->getType())->getNumElements();
         auto *O0 = B.CreateZExtOrTrunc(
-            EE->getOperand(0), VectorType::get(ScalarTruncatedTy, Elements));
+            EE->getOperand(0),
+            FixedVectorType::get(ScalarTruncatedTy, Elements));
         NewI = B.CreateExtractElement(O0, EE->getOperand(2));
       } else {
         // If we don't know what to do, be conservative and don't do anything.
@@ -3597,8 +3603,8 @@ void InnerLoopVectorizer::fixFirstOrderRecurrence(PHINode *Phi) {
   if (VF > 1) {
     Builder.SetInsertPoint(LoopVectorPreHeader->getTerminator());
     VectorInit = Builder.CreateInsertElement(
-        UndefValue::get(VectorType::get(VectorInit->getType(), VF)), VectorInit,
-        Builder.getInt32(VF - 1), "vector.recur.init");
+        UndefValue::get(FixedVectorType::get(VectorInit->getType(), VF)),
+        VectorInit, Builder.getInt32(VF - 1), "vector.recur.init");
   }
 
   // We constructed a temporary phi node in the first phase of vectorization.
@@ -3820,7 +3826,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   // then extend the loop exit value to enable InstCombine to evaluate the
   // entire expression in the smaller type.
   if (VF > 1 && Phi->getType() != RdxDesc.getRecurrenceType()) {
-    Type *RdxVecTy = VectorType::get(RdxDesc.getRecurrenceType(), VF);
+    Type *RdxVecTy = FixedVectorType::get(RdxDesc.getRecurrenceType(), VF);
     Builder.SetInsertPoint(
         LI->getLoopFor(LoopVectorBody)->getLoopLatch()->getTerminator());
     VectorParts RdxParts(UF);
@@ -4147,7 +4153,7 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
     // Create a vector phi with no operands - the vector phi operands will be
     // set at the end of vector code generation.
     Type *VecTy =
-        (VF == 1) ? PN->getType() : VectorType::get(PN->getType(), VF);
+        (VF == 1) ? PN->getType() : FixedVectorType::get(PN->getType(), VF);
     Value *VecPhi = Builder.CreatePHI(VecTy, PN->getNumOperands(), "vec.phi");
     VectorLoopValueMap.setVectorValue(P, 0, VecPhi);
     OrigPHIsToFix.push_back(P);
@@ -4166,7 +4172,7 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
     for (unsigned Part = 0; Part < UF; ++Part) {
       // This is phase one of vectorizing PHIs.
       Type *VecTy =
-          (VF == 1) ? PN->getType() : VectorType::get(PN->getType(), VF);
+          (VF == 1) ? PN->getType() : FixedVectorType::get(PN->getType(), VF);
       Value *EntryPart = PHINode::Create(
           VecTy, 2, "vec.phi", &*LoopVectorBody->getFirstInsertionPt());
       VectorLoopValueMap.setVectorValue(P, Part, EntryPart);
@@ -4326,7 +4332,7 @@ void InnerLoopVectorizer::widenInstruction(Instruction &I, VPUser &User,
 
     /// Vectorize casts.
     Type *DestTy =
-        (VF == 1) ? CI->getType() : VectorType::get(CI->getType(), VF);
+        (VF == 1) ? CI->getType() : FixedVectorType::get(CI->getType(), VF);
 
     for (unsigned Part = 0; Part < UF; ++Part) {
       Value *A = State.get(User.getOperand(0), Part);
@@ -4386,7 +4392,8 @@ void InnerLoopVectorizer::widenCallInstruction(CallInst &I, VPUser &ArgOperands,
       // Use vector version of the intrinsic.
       Type *TysForDecl[] = {CI->getType()};
       if (VF > 1)
-        TysForDecl[0] = VectorType::get(CI->getType()->getScalarType(), VF);
+        TysForDecl[0] =
+            FixedVectorType::get(CI->getType()->getScalarType(), VF);
       VectorF = Intrinsic::getDeclaration(M, ID, TysForDecl);
       assert(VectorF && "Can't retrieve vector intrinsic.");
     } else {
@@ -4412,22 +4419,24 @@ void InnerLoopVectorizer::widenCallInstruction(CallInst &I, VPUser &ArgOperands,
 }
 
 void InnerLoopVectorizer::widenSelectInstruction(SelectInst &I,
-                                                 bool InvariantCond) {
+                                                 VPUser &Operands,
+                                                 bool InvariantCond,
+                                                 VPTransformState &State) {
   setDebugLocFromInst(Builder, &I);
 
   // The condition can be loop invariant  but still defined inside the
   // loop. This means that we can't just use the original 'cond' value.
   // We have to take the 'vectorized' value and pick the first lane.
   // Instcombine will make this a no-op.
-
-  auto *ScalarCond = getOrCreateScalarValue(I.getOperand(0), {0, 0});
+  auto *InvarCond =
+      InvariantCond ? State.get(Operands.getOperand(0), {0, 0}) : nullptr;
 
   for (unsigned Part = 0; Part < UF; ++Part) {
-    Value *Cond = getOrCreateVectorValue(I.getOperand(0), Part);
-    Value *Op0 = getOrCreateVectorValue(I.getOperand(1), Part);
-    Value *Op1 = getOrCreateVectorValue(I.getOperand(2), Part);
-    Value *Sel =
-        Builder.CreateSelect(InvariantCond ? ScalarCond : Cond, Op0, Op1);
+    Value *Cond =
+        InvarCond ? InvarCond : State.get(Operands.getOperand(0), Part);
+    Value *Op0 = State.get(Operands.getOperand(1), Part);
+    Value *Op1 = State.get(Operands.getOperand(2), Part);
+    Value *Sel = Builder.CreateSelect(Cond, Op0, Op1);
     VectorLoopValueMap.setVectorValue(&I, Part, Sel);
     addMetadata(Sel, &I);
   }
@@ -5000,6 +5009,7 @@ Optional<unsigned> LoopVectorizationCostModel::computeMaxVF(unsigned UserVF,
   }
 
   unsigned MaxVF = UserVF ? UserVF : computeFeasibleMaxVF(TC);
+  assert((UserVF || isPowerOf2_32(MaxVF)) && "MaxVF must be a power of 2");
   unsigned MaxVFtimesIC = UserIC ? MaxVF * UserIC : MaxVF;
   if (TC > 0 && TC % MaxVFtimesIC == 0) {
     // Accept MaxVF if we do not have a tail.
@@ -5048,7 +5058,9 @@ LoopVectorizationCostModel::computeFeasibleMaxVF(unsigned ConstTripCount) {
 
   WidestRegister = std::min(WidestRegister, MaxSafeRegisterWidth);
 
-  unsigned MaxVectorSize = WidestRegister / WidestType;
+  // Ensure MaxVF is a power of 2; the dependence distance bound may not be.
+  // Note that both WidestRegister and WidestType may not be a powers of 2.
+  unsigned MaxVectorSize = PowerOf2Floor(WidestRegister / WidestType);
 
   LLVM_DEBUG(dbgs() << "LV: The Smallest and Widest types: " << SmallestType
                     << " / " << WidestType << " bits.\n");
@@ -5940,7 +5952,7 @@ unsigned LoopVectorizationCostModel::getInterleaveGroupCost(Instruction *I,
   assert(Group && "Fail to get an interleaved access group.");
 
   unsigned InterleaveFactor = Group->getFactor();
-  VectorType *WideVecTy = VectorType::get(ValTy, VF * InterleaveFactor);
+  auto *WideVecTy = FixedVectorType::get(ValTy, VF * InterleaveFactor);
 
   // Holds the indices of existing members in an interleaved load group.
   // An interleaved store group doesn't need this as it doesn't allow gaps.
@@ -6342,7 +6354,7 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
     bool ScalarCond = (SE->isLoopInvariant(CondSCEV, TheLoop));
     Type *CondTy = SI->getCondition()->getType();
     if (!ScalarCond)
-      CondTy = VectorType::get(CondTy, VF);
+      CondTy = FixedVectorType::get(CondTy, VF);
 
     return TTI.getCmpSelInstrCost(I->getOpcode(), VectorTy, CondTy,
                                   CostKind, I);
@@ -7134,7 +7146,8 @@ VPRecipeBase *VPRecipeBuilder::tryToCreateWidenRecipe(Instruction *Instr,
   if (auto *SI = dyn_cast<SelectInst>(Instr)) {
     bool InvariantCond =
         PSE.getSE()->isLoopInvariant(PSE.getSCEV(SI->getOperand(0)), OrigLoop);
-    return new VPWidenSelectRecipe(*SI, InvariantCond);
+    return new VPWidenSelectRecipe(*SI, Plan->mapToVPValues(SI->operands()),
+                                   InvariantCond);
   }
 
   return tryToWiden(Instr, *Plan);
@@ -7429,7 +7442,7 @@ void VPWidenCallRecipe::execute(VPTransformState &State) {
 }
 
 void VPWidenSelectRecipe::execute(VPTransformState &State) {
-  State.ILV->widenSelectInstruction(Ingredient, InvariantCond);
+  State.ILV->widenSelectInstruction(Ingredient, User, InvariantCond, State);
 }
 
 void VPWidenRecipe::execute(VPTransformState &State) {
@@ -7502,8 +7515,8 @@ void VPReplicateRecipe::execute(VPTransformState &State) {
     if (AlsoPack && State.VF > 1) {
       // If we're constructing lane 0, initialize to start from undef.
       if (State.Instance->Lane == 0) {
-        Value *Undef =
-            UndefValue::get(VectorType::get(Ingredient->getType(), State.VF));
+        Value *Undef = UndefValue::get(
+            FixedVectorType::get(Ingredient->getType(), State.VF));
         State.ValueMap.setVectorValue(Ingredient, State.Instance->Part, Undef);
       }
       State.ILV->packScalarIntoVectorValue(Ingredient, *State.Instance);

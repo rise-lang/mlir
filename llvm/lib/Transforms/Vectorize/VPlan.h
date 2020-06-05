@@ -270,10 +270,20 @@ struct VPTransformState {
     return Callback.getOrCreateVectorValues(VPValue2Value[Def], Part);
   }
 
-  /// Get the generated Value for a given VPValue and given Part and Lane. Note
-  /// that as per-lane Defs are still created by ILV and managed in its ValueMap
-  /// this method currently just delegates the call to ILV.
+  /// Get the generated Value for a given VPValue and given Part and Lane.
   Value *get(VPValue *Def, const VPIteration &Instance) {
+    // If the Def is managed directly by VPTransformState, extract the lane from
+    // the relevant part. Note that currently only VPInstructions and external
+    // defs are managed by VPTransformState. Other Defs are still created by ILV
+    // and managed in its ValueMap. For those this method currently just
+    // delegates the call to ILV below.
+    if (Data.PerPartOutput.count(Def)) {
+      auto *VecPart = Data.PerPartOutput[Def][Instance.Part];
+      // TODO: Cache created scalar values.
+      return Builder.CreateExtractElement(VecPart,
+                                          Builder.getInt32(Instance.Lane));
+    }
+
     return Callback.getOrCreateScalarValue(VPValue2Value[Def], Instance);
   }
 
@@ -823,15 +833,17 @@ private:
   /// Hold the select to be widened.
   SelectInst &Ingredient;
 
-  /// Is the condition of the select loop invariant?
-  bool InvariantCond;
-
   /// Hold VPValues for the operands of the select.
   VPUser User;
 
+  /// Is the condition of the select loop invariant?
+  bool InvariantCond;
+
 public:
-  VPWidenSelectRecipe(SelectInst &I, bool InvariantCond)
-      : VPRecipeBase(VPWidenSelectSC), Ingredient(I),
+  template <typename IterT>
+  VPWidenSelectRecipe(SelectInst &I, iterator_range<IterT> Operands,
+                      bool InvariantCond)
+      : VPRecipeBase(VPWidenSelectSC), Ingredient(I), User(Operands),
         InvariantCond(InvariantCond) {}
 
   ~VPWidenSelectRecipe() override = default;

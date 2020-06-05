@@ -136,6 +136,7 @@ const OMPClauseWithPreInit *OMPClauseWithPreInit::get(const OMPClause *C) {
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_use_device_addr:
   case OMPC_is_device_ptr:
   case OMPC_unified_address:
   case OMPC_unified_shared_memory:
@@ -227,6 +228,7 @@ const OMPClauseWithPostUpdate *OMPClauseWithPostUpdate::get(const OMPClause *C) 
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_use_device_addr:
   case OMPC_is_device_ptr:
   case OMPC_unified_address:
   case OMPC_unified_shared_memory:
@@ -1198,6 +1200,53 @@ OMPUseDevicePtrClause::CreateEmpty(const ASTContext &C,
   return new (Mem) OMPUseDevicePtrClause(Sizes);
 }
 
+OMPUseDeviceAddrClause *
+OMPUseDeviceAddrClause::Create(const ASTContext &C, const OMPVarListLocTy &Locs,
+                               ArrayRef<Expr *> Vars,
+                               ArrayRef<ValueDecl *> Declarations,
+                               MappableExprComponentListsRef ComponentLists) {
+  OMPMappableExprListSizeTy Sizes;
+  Sizes.NumVars = Vars.size();
+  Sizes.NumUniqueDeclarations = getUniqueDeclarationsTotalNumber(Declarations);
+  Sizes.NumComponentLists = ComponentLists.size();
+  Sizes.NumComponents = getComponentsTotalNumber(ComponentLists);
+
+  // We need to allocate:
+  // 3 x NumVars x Expr* - we have an original list expression for each clause
+  // list entry and an equal number of private copies and inits.
+  // NumUniqueDeclarations x ValueDecl* - unique base declarations associated
+  // with each component list.
+  // (NumUniqueDeclarations + NumComponentLists) x unsigned - we specify the
+  // number of lists for each unique declaration and the size of each component
+  // list.
+  // NumComponents x MappableComponent - the total of all the components in all
+  // the lists.
+  void *Mem = C.Allocate(
+      totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
+                       OMPClauseMappableExprCommon::MappableComponent>(
+          Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
+
+  auto *Clause = new (Mem) OMPUseDeviceAddrClause(Locs, Sizes);
+
+  Clause->setVarRefs(Vars);
+  Clause->setClauseInfo(Declarations, ComponentLists);
+  return Clause;
+}
+
+OMPUseDeviceAddrClause *
+OMPUseDeviceAddrClause::CreateEmpty(const ASTContext &C,
+                                    const OMPMappableExprListSizeTy &Sizes) {
+  void *Mem = C.Allocate(
+      totalSizeToAlloc<Expr *, ValueDecl *, unsigned,
+                       OMPClauseMappableExprCommon::MappableComponent>(
+          Sizes.NumVars, Sizes.NumUniqueDeclarations,
+          Sizes.NumUniqueDeclarations + Sizes.NumComponentLists,
+          Sizes.NumComponents));
+  return new (Mem) OMPUseDeviceAddrClause(Sizes);
+}
+
 OMPIsDevicePtrClause *
 OMPIsDevicePtrClause::Create(const ASTContext &C, const OMPVarListLocTy &Locs,
                              ArrayRef<Expr *> Vars,
@@ -1934,6 +1983,15 @@ void OMPClausePrinter::VisitOMPUseDevicePtrClause(OMPUseDevicePtrClause *Node) {
   }
 }
 
+void OMPClausePrinter::VisitOMPUseDeviceAddrClause(
+    OMPUseDeviceAddrClause *Node) {
+  if (!Node->varlist_empty()) {
+    OS << "use_device_addr";
+    VisitOMPClauseList(Node, '(');
+    OS << ")";
+  }
+}
+
 void OMPClausePrinter::VisitOMPIsDevicePtrClause(OMPIsDevicePtrClause *Node) {
   if (!Node->varlist_empty()) {
     OS << "is_device_ptr";
@@ -2109,22 +2167,21 @@ std::string OMPTraitInfo::getMangledName() const {
   std::string MangledName;
   llvm::raw_string_ostream OS(MangledName);
   for (const OMPTraitSet &Set : Sets) {
-    OS << '.' << 'S' << unsigned(Set.Kind);
+    OS << '$' << 'S' << unsigned(Set.Kind);
     for (const OMPTraitSelector &Selector : Set.Selectors) {
 
       bool AllowsTraitScore = false;
       bool RequiresProperty = false;
       isValidTraitSelectorForTraitSet(
           Selector.Kind, Set.Kind, AllowsTraitScore, RequiresProperty);
-      OS << '.' << 's' << unsigned(Selector.Kind);
+      OS << '$' << 's' << unsigned(Selector.Kind);
 
       if (!RequiresProperty ||
           Selector.Kind == TraitSelector::user_condition)
         continue;
 
       for (const OMPTraitProperty &Property : Selector.Properties)
-        OS << '.' << 'P'
-           << getOpenMPContextTraitPropertyName(Property.Kind);
+        OS << '$' << 'P' << getOpenMPContextTraitPropertyName(Property.Kind);
     }
   }
   return OS.str();
@@ -2133,7 +2190,7 @@ std::string OMPTraitInfo::getMangledName() const {
 OMPTraitInfo::OMPTraitInfo(StringRef MangledName) {
   unsigned long U;
   do {
-    if (!MangledName.consume_front(".S"))
+    if (!MangledName.consume_front("$S"))
       break;
     if (MangledName.consumeInteger(10, U))
       break;
@@ -2141,7 +2198,7 @@ OMPTraitInfo::OMPTraitInfo(StringRef MangledName) {
     OMPTraitSet &Set = Sets.back();
     Set.Kind = TraitSet(U);
     do {
-      if (!MangledName.consume_front(".s"))
+      if (!MangledName.consume_front("$s"))
         break;
       if (MangledName.consumeInteger(10, U))
         break;
@@ -2149,11 +2206,11 @@ OMPTraitInfo::OMPTraitInfo(StringRef MangledName) {
       OMPTraitSelector &Selector = Set.Selectors.back();
       Selector.Kind = TraitSelector(U);
       do {
-        if (!MangledName.consume_front(".P"))
+        if (!MangledName.consume_front("$P"))
           break;
         Selector.Properties.push_back(OMPTraitProperty());
         OMPTraitProperty &Property = Selector.Properties.back();
-        std::pair<StringRef, StringRef> PropRestPair = MangledName.split('.');
+        std::pair<StringRef, StringRef> PropRestPair = MangledName.split('$');
         Property.Kind =
             getOpenMPContextTraitPropertyKind(Set.Kind, PropRestPair.first);
         MangledName = PropRestPair.second;

@@ -33,6 +33,13 @@ private:
   bool isWave32;
   BitVector RegPressureIgnoredUnits;
 
+  /// Sub reg indexes for getRegSplitParts.
+  /// First index represents subreg size from 1 to 16 DWORDs.
+  /// The inner vector is sorted by bit offset.
+  /// Provided a register can be fully split with given subregs,
+  /// all elements of the inner vector combined give a full lane mask.
+  static std::array<std::vector<int16_t>, 16> RegSplitParts;
+
   void reserveRegisterTuples(BitVector &, MCRegister Reg) const;
 
 public:
@@ -95,6 +102,11 @@ public:
 
   const TargetRegisterClass *getPointerRegClass(
     const MachineFunction &MF, unsigned Kind = 0) const override;
+
+  void buildSGPRSpillLoadStore(MachineBasicBlock::iterator MI, int Index,
+                               int Offset, unsigned EltSize, Register VGPR,
+                               int64_t VGPRLanes, RegScavenger *RS,
+                               bool IsLoad) const;
 
   /// If \p OnlyToVGPR is true, this will only succeed if this
   bool spillSGPR(MachineBasicBlock::iterator MI,

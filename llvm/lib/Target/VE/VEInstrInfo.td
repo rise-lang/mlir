@@ -264,20 +264,6 @@ def fcond2ccSwap : SDNodeXForm<cond, [{
 }]>;
 
 // Addressing modes.
-def ADDRri : ComplexPattern<iPTR, 2, "selectADDRri", [frameindex], []>;
-
-def MEMri : Operand<iPTR> {
-  let PrintMethod = "printMemASOperandASX";
-  let MIOperandInfo = (ops ptr_rc, i64imm);
-}
-
-// AS format of memory address
-def MEMASri : Operand<iPTR> {
-  let PrintMethod = "printMemASOperand";
-  let MIOperandInfo = (ops ptr_rc, i64imm);
-}
-
-// Addressing modes.
 // SX-Aurora has following fields.
 //    sz: register or 0
 //    sy: register or immediate (-64 to 63)
@@ -307,8 +293,10 @@ def ADDRrri : ComplexPattern<iPTR, 3, "selectADDRrri", [frameindex], []>;
 def ADDRrii : ComplexPattern<iPTR, 3, "selectADDRrii", [frameindex], []>;
 def ADDRzri : ComplexPattern<iPTR, 3, "selectADDRzri", [], []>;
 def ADDRzii : ComplexPattern<iPTR, 3, "selectADDRzii", [], []>;
+// AS format:
+def ADDRri : ComplexPattern<iPTR, 2, "selectADDRri", [frameindex], []>;
 //
-// ASX assembly instrcution format:
+// ASX assembly instruction format:
 def VEMEMrriAsmOperand : AsmOperandClass {
   let Name = "MEMrri";
   let ParserMethod = "parseMEMOperand";
@@ -345,14 +333,12 @@ def MEMzii : Operand<iPTR> {
   let MIOperandInfo = (ops i32imm /* = 0 */, i32imm, i32imm);
   let ParserMatchClass = VEMEMziiAsmOperand;
 }
-// AS assembly instrcution format:
+// AS assembly instruction format:
 def VEMEMriAsmOperand : AsmOperandClass {
   let Name = "MEMri";
-  let ParserMethod = "parseMEMAsOperand";
 }
 def VEMEMziAsmOperand : AsmOperandClass {
   let Name = "MEMzi";
-  let ParserMethod = "parseMEMAsOperand";
 }
 // AS generic assembly instruction format:
 def MEMriASX : Operand<iPTR> {
@@ -364,6 +350,11 @@ def MEMziASX : Operand<iPTR> {
   let PrintMethod = "printMemASOperandASX";
   let MIOperandInfo = (ops i32imm /* = 0 */, i32imm);
   let ParserMatchClass = VEMEMziAsmOperand;
+}
+def MEMASri : Operand<iPTR> {
+  let PrintMethod = "printMemASOperand";
+  let MIOperandInfo = (ops ptr_rc, i32imm);
+  let ParserMatchClass = VEMEMriAsmOperand;
 }
 
 // Branch targets have OtherVT type.
@@ -414,6 +405,9 @@ def GetTLSAddr : SDNode<"VEISD::GETTLSADDR", SDT_SPCall,
                         [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                          SDNPVariadic]>;
 
+// GETSTACKTOP
+def GetStackTop : SDNode<"VEISD::GETSTACKTOP", SDTNone,
+                        [SDNPHasChain, SDNPSideEffect]>;
 
 
 //===----------------------------------------------------------------------===//
@@ -667,14 +661,13 @@ multiclass BCtgm<string opcStr, string cmpStr, bits<8> opc, dag cond> {
 }
 multiclass BCm<string opcStr, string opcStrAt, string opcStrAf, bits<8> opc,
                RegisterClass RC, Operand immOp> {
-  let DecoderMethod = "DecodeBranchCondition" in
   defm r : BCtgm<opcStr, "$comp, ", opc, (ins CCOp:$cond, RC:$comp)>;
-  let DecoderMethod = "DecodeBranchCondition", cy = 0 in
+  let cy = 0 in
   defm i : BCtgm<opcStr, "$comp, ", opc, (ins CCOp:$cond, immOp:$comp)>;
-  let DecoderMethod = "DecodeBranchConditionAlways", cy = 0, sy = 0,
+  let cy = 0, sy = 0,
       cf = 15 /* AT */, isBarrier = 1 in
   defm a : BCtgm<opcStrAt, "", opc, (ins)>;
-  let DecoderMethod = "DecodeBranchConditionAlways", cy = 0, sy = 0,
+  let cy = 0, sy = 0,
       cf = 0 /* AF */ in
   defm na : BCtgm<opcStrAf, "", opc, (ins)>;
 }
@@ -799,15 +792,15 @@ let cx = 1, DecoderMethod = "DecodeLoadI32" in
 defm LDLZX : LOADm<"ldl.zx", 0x03, I32, i32, load>;
 
 // Section 8.2.5 - LD2B
-let DecoderMethod = "DecodeLoadI16" in
+let DecoderMethod = "DecodeLoadI32" in
 defm LD2BSX : LOADm<"ld2b.sx", 0x04, I32, i32, sextloadi16>;
-let cx = 1, DecoderMethod = "DecodeLoadI16" in
+let cx = 1, DecoderMethod = "DecodeLoadI32" in
 defm LD2BZX : LOADm<"ld2b.zx", 0x04, I32, i32, zextloadi16>;
 
 // Section 8.2.6 - LD1B
-let DecoderMethod = "DecodeLoadI8" in
+let DecoderMethod = "DecodeLoadI32" in
 defm LD1BSX : LOADm<"ld1b.sx", 0x05, I32, i32, sextloadi8>;
-let cx = 1, DecoderMethod = "DecodeLoadI8" in
+let cx = 1, DecoderMethod = "DecodeLoadI32" in
 defm LD1BZX : LOADm<"ld1b.zx", 0x05, I32, i32, zextloadi8>;
 
 // Multiclass for store instructions.
@@ -848,11 +841,11 @@ let DecoderMethod = "DecodeStoreI32" in
 defm STL : STOREm<"stl", 0x13, I32, i32, store>;
 
 // Section 8.2.10 - ST2B
-let DecoderMethod = "DecodeStoreI16" in
+let DecoderMethod = "DecodeStoreI32" in
 defm ST2B : STOREm<"st2b", 0x14, I32, i32, truncstorei16>;
 
 // Section 8.2.11 - ST1B
-let DecoderMethod = "DecodeStoreI8" in
+let DecoderMethod = "DecodeStoreI32" in
 defm ST1B : STOREm<"st1b", 0x15, I32, i32, truncstorei8>;
 
 // Section 8.2.12 - DLDS
@@ -1116,7 +1109,7 @@ let cx = 1, cx2 = 1 in
 defm BRCFS : BCRm<"br${cf}.s", "br.s", "braf.s", 0x18, F32, simm7fp>;
 
 // Section 8.8.5 - BSIC (Branch and Save IC)
-let isCall = 1, hasSideEffects = 0, DecoderMethod = "DecodeCall" in
+let isCall = 1, hasSideEffects = 0 in
 defm BSIC : RMm<"bsic", 0x08, I64>;
 
 // Call instruction is a special case of BSIC.
@@ -1398,6 +1391,14 @@ def EXTEND_STACK_GUARD : Pseudo<(outs), (ins),
                                 "# EXTEND STACK GUARD",
                                 []>;
 
+// Dynamic stack allocation yields a __llvm_grow_stack for VE targets.
+// These calls are needed to probe the stack when allocating more over
+// %s8 (%sl - stack limit).
+
+let Uses = [SX11], hasSideEffects = 1 in
+def GETSTACKTOP : Pseudo<(outs I64:$dst), (ins),
+                         "# GET STACK TOP",
+                         [(set iPTR:$dst, (GetStackTop))]>;
 // SETCC pattern matches
 //
 //   CMP  %tmp, lhs, rhs     ; compare lhs and rhs

@@ -438,7 +438,10 @@ static SDValue getCopyFromPartsVector(SelectionDAG &DAG, const SDLoc &DL,
     // vector widening case (e.g. <2 x float> -> <4 x float>).  Extract the
     // elements we want.
     if (PartEVT.getVectorElementType() == ValueVT.getVectorElementType()) {
-      assert(PartEVT.getVectorNumElements() > ValueVT.getVectorNumElements() &&
+      assert((PartEVT.getVectorElementCount().Min >
+              ValueVT.getVectorElementCount().Min) &&
+             (PartEVT.getVectorElementCount().Scalable ==
+              ValueVT.getVectorElementCount().Scalable) &&
              "Cannot narrow, it would be a lossy transformation");
       return DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, ValueVT, Val,
                          DAG.getVectorIdxConstant(0, DL));
@@ -448,7 +451,7 @@ static SDValue getCopyFromPartsVector(SelectionDAG &DAG, const SDLoc &DL,
     if (ValueVT.getSizeInBits() == PartEVT.getSizeInBits())
       return DAG.getNode(ISD::BITCAST, DL, ValueVT, Val);
 
-    assert(PartEVT.getVectorNumElements() == ValueVT.getVectorNumElements() &&
+    assert(PartEVT.getVectorElementCount() == ValueVT.getVectorElementCount() &&
       "Cannot handle this kind of promotion");
     // Promoted vector extract
     return DAG.getAnyExtOrTrunc(Val, DL, ValueVT);
@@ -1134,7 +1137,7 @@ void SelectionDAGBuilder::visit(const Instruction &I) {
   }
 
   if (!I.isTerminator() && !HasTailCall &&
-      !isStatepoint(&I)) // statepoints handle their exports internally
+      !isa<GCStatepointInst>(I)) // statepoints handle their exports internally
     CopyToExportRegsIfNeeded(&I);
 
   CurInst = nullptr;
@@ -2775,6 +2778,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // Deopt bundles are lowered in LowerCallSiteWithDeoptBundle, and we don't
   // have to do anything here to lower funclet bundles.
   assert(!I.hasOperandBundlesOtherThan({LLVMContext::OB_deopt,
+                                        LLVMContext::OB_gc_transition,
                                         LLVMContext::OB_funclet,
                                         LLVMContext::OB_cfguardtarget}) &&
          "Cannot lower invokes with arbitrary operand bundles yet!");
@@ -2795,7 +2799,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
       visitPatchpoint(I, EHPadBB);
       break;
     case Intrinsic::experimental_gc_statepoint:
-      LowerStatepoint(ImmutableStatepoint(&I), EHPadBB);
+      LowerStatepoint(cast<GCStatepointInst>(I), EHPadBB);
       break;
     case Intrinsic::wasm_rethrow_in_catch: {
       // This is usually done in visitTargetIntrinsic, but this intrinsic is
@@ -2826,7 +2830,7 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   // available as a virtual register.
   // We already took care of the exported value for the statepoint instruction
   // during call to the LowerStatepoint.
-  if (!isStatepoint(I)) {
+  if (!isa<GCStatepointInst>(I)) {
     CopyToExportRegsIfNeeded(&I);
   }
 
@@ -3457,7 +3461,6 @@ void SelectionDAGBuilder::visitShuffleVector(const User &I) {
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   EVT VT = TLI.getValueType(DAG.getDataLayout(), I.getType());
   EVT SrcVT = Src1.getValueType();
-  unsigned SrcNumElts = SrcVT.getVectorNumElements();
 
   if (all_of(Mask, [](int Elem) { return Elem == 0; }) &&
       VT.isScalableVector()) {
@@ -3474,6 +3477,7 @@ void SelectionDAGBuilder::visitShuffleVector(const User &I) {
   // for targets that support a SPLAT_VECTOR for non-scalable vector types.
   assert(!VT.isScalableVector() && "Unsupported scalable vector shuffle");
 
+  unsigned SrcNumElts = SrcVT.getVectorNumElements();
   unsigned MaskNumElts = Mask.size();
 
   if (SrcNumElts == MaskNumElts) {
@@ -6072,6 +6076,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
   case Intrinsic::rint:
   case Intrinsic::nearbyint:
   case Intrinsic::round:
+  case Intrinsic::roundeven:
   case Intrinsic::canonicalize: {
     unsigned Opcode;
     switch (Intrinsic) {
@@ -6086,6 +6091,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     case Intrinsic::rint:      Opcode = ISD::FRINT;      break;
     case Intrinsic::nearbyint: Opcode = ISD::FNEARBYINT; break;
     case Intrinsic::round:     Opcode = ISD::FROUND;     break;
+    case Intrinsic::roundeven: Opcode = ISD::FROUNDEVEN; break;
     case Intrinsic::canonicalize: Opcode = ISD::FCANONICALIZE; break;
     }
 
@@ -6634,7 +6640,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     visitPatchpoint(I);
     return;
   case Intrinsic::experimental_gc_statepoint:
-    LowerStatepoint(ImmutableStatepoint(&I));
+    LowerStatepoint(cast<GCStatepointInst>(I));
     return;
   case Intrinsic::experimental_gc_result:
     visitGCResult(cast<GCResultInst>(I));

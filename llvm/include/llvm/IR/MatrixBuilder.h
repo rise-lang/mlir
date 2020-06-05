@@ -49,7 +49,7 @@ public:
     PointerType *PtrTy = cast<PointerType>(DataPtr->getType());
     Type *EltTy = PtrTy->getElementType();
 
-    Type *RetType = VectorType::get(EltTy, Rows * Columns);
+    auto *RetType = FixedVectorType::get(EltTy, Rows * Columns);
 
     Value *Ops[] = {DataPtr, Stride, B.getInt32(Rows), B.getInt32(Columns)};
     Type *OverloadedTypes[] = {RetType, PtrTy};
@@ -82,8 +82,8 @@ public:
   CallInst *CreateMatrixTranspose(Value *Matrix, unsigned Rows,
                                   unsigned Columns, const Twine &Name = "") {
     auto *OpType = cast<VectorType>(Matrix->getType());
-    Type *ReturnType =
-        VectorType::get(OpType->getElementType(), Rows * Columns);
+    auto *ReturnType =
+        FixedVectorType::get(OpType->getElementType(), Rows * Columns);
 
     Type *OverloadedTypes[] = {ReturnType};
     Value *Ops[] = {Matrix, B.getInt32(Rows), B.getInt32(Columns)};
@@ -101,8 +101,8 @@ public:
     auto *LHSType = cast<VectorType>(LHS->getType());
     auto *RHSType = cast<VectorType>(RHS->getType());
 
-    Type *ReturnType =
-        VectorType::get(LHSType->getElementType(), LHSRows * RHSColumns);
+    auto *ReturnType =
+        FixedVectorType::get(LHSType->getElementType(), LHSRows * RHSColumns);
 
     Value *Ops[] = {LHS, RHS, B.getInt32(LHSRows), B.getInt32(LHSColumns),
                     B.getInt32(RHSColumns)};
@@ -127,6 +127,16 @@ public:
   /// Add matrixes \p LHS and \p RHS. Support both integer and floating point
   /// matrixes.
   Value *CreateAdd(Value *LHS, Value *RHS) {
+    assert(LHS->getType()->isVectorTy() || RHS->getType()->isVectorTy());
+    if (LHS->getType()->isVectorTy() && !RHS->getType()->isVectorTy())
+      RHS = B.CreateVectorSplat(
+          cast<VectorType>(LHS->getType())->getNumElements(), RHS,
+          "scalar.splat");
+    else if (!LHS->getType()->isVectorTy() && RHS->getType()->isVectorTy())
+      LHS = B.CreateVectorSplat(
+          cast<VectorType>(RHS->getType())->getNumElements(), LHS,
+          "scalar.splat");
+
     return cast<VectorType>(LHS->getType())
                    ->getElementType()
                    ->isFloatingPointTy()
@@ -137,6 +147,16 @@ public:
   /// Subtract matrixes \p LHS and \p RHS. Support both integer and floating
   /// point matrixes.
   Value *CreateSub(Value *LHS, Value *RHS) {
+    assert(LHS->getType()->isVectorTy() || RHS->getType()->isVectorTy());
+    if (LHS->getType()->isVectorTy() && !RHS->getType()->isVectorTy())
+      RHS = B.CreateVectorSplat(
+          cast<VectorType>(LHS->getType())->getNumElements(), RHS,
+          "scalar.splat");
+    else if (!LHS->getType()->isVectorTy() && RHS->getType()->isVectorTy())
+      LHS = B.CreateVectorSplat(
+          cast<VectorType>(RHS->getType())->getNumElements(), LHS,
+          "scalar.splat");
+
     return cast<VectorType>(LHS->getType())
                    ->getElementType()
                    ->isFloatingPointTy()
@@ -155,15 +175,19 @@ public:
     return B.CreateMul(LHS, ScalarVector);
   }
 
-  /// Extracts the element at (\p Row, \p Column) from \p Matrix.
-  Value *CreateExtractMatrix(Value *Matrix, Value *Row, Value *Column,
-                             unsigned NumRows, Twine const &Name = "") {
+  /// Extracts the element at (\p RowIdx, \p ColumnIdx) from \p Matrix.
+  Value *CreateExtractElement(Value *Matrix, Value *RowIdx, Value *ColumnIdx,
+                              unsigned NumRows, Twine const &Name = "") {
 
+    unsigned MaxWidth = std::max(RowIdx->getType()->getScalarSizeInBits(),
+                                 ColumnIdx->getType()->getScalarSizeInBits());
+    Type *IntTy = IntegerType::get(RowIdx->getType()->getContext(), MaxWidth);
+    RowIdx = B.CreateZExt(RowIdx, IntTy);
+    ColumnIdx = B.CreateZExt(ColumnIdx, IntTy);
+    Value *NumRowsV = B.getIntN(MaxWidth, NumRows);
     return B.CreateExtractElement(
-        Matrix,
-        B.CreateAdd(
-            B.CreateMul(Column, ConstantInt::get(Column->getType(), NumRows)),
-            Row));
+        Matrix, B.CreateAdd(B.CreateMul(ColumnIdx, NumRowsV), RowIdx),
+        "matext");
   }
 };
 

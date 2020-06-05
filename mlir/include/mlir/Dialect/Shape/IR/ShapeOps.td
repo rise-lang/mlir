@@ -64,8 +64,7 @@ def Shape_AddOp : Shape_Op<"add", [SameOperandsAndResultType]> {
   let results = (outs Shape_SizeType:$result);
 }
 
-def Shape_BroadcastOp : Shape_Op<"broadcast",
-    [DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+def Shape_BroadcastOp : Shape_Op<"broadcast", []> {
   let summary = "Returns the broadcasted output shape of two inputs";
   let description = [{
     Computes the broadcasted output shape following:
@@ -91,11 +90,8 @@ def Shape_BroadcastOp : Shape_Op<"broadcast",
   let hasFolder = 1;
 }
 
-def Shape_ConstShapeOp : Shape_Op<"const_shape",
-    [ConstantLike,
-     NoSideEffect,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
-  let summary = "Creates a constant of !shape.shape type.";
+def Shape_ConstShapeOp : Shape_Op<"const_shape", [ConstantLike, NoSideEffect]> {
+  let summary = "Creates a constant of !shape.shape type";
   let description = [{
     Creates a !shape.shape with rank given by the length of `shape` and with
     dimension sizes given by the values of `shape`.
@@ -105,7 +101,7 @@ def Shape_ConstShapeOp : Shape_Op<"const_shape",
     %1 = shape.const_shape [1, 2, 3]
     ```
   }];
-  let arguments = (ins I64ElementsAttr:$shape);
+  let arguments = (ins IndexElementsAttr:$shape);
   let results = (outs Shape_ShapeType:$result);
 
   // TODO: Move this to main so that all shape ops implement these.
@@ -114,13 +110,10 @@ def Shape_ConstShapeOp : Shape_Op<"const_shape",
   let hasFolder = 1;
 }
 
-def Shape_ConstSizeOp : Shape_Op<"const_size",
-    [ConstantLike,
-     NoSideEffect,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
-  let summary = "Creates a constant of !shape.size type.";
+def Shape_ConstSizeOp : Shape_Op<"const_size", [ConstantLike, NoSideEffect]> {
+  let summary = "Creates a constant of type `shape.size`";
   let description = [{
-    Creates a !shape.size type representing the constant size given by `value`.
+    Creates a `shape.size` type representing the constant size given by `value`.
 
     ```mlir
     %x = shape.const_size 10
@@ -131,12 +124,10 @@ def Shape_ConstSizeOp : Shape_Op<"const_size",
   let results = (outs Shape_SizeType:$result);
 
   let assemblyFormat = "attr-dict $value";
+  let hasFolder = 1;
 }
 
-def Shape_FromExtentsOp : Shape_Op<"from_extents", [
-    NoSideEffect,
-    DeclareOpInterfaceMethods<InferTypeOpInterface>
-    ]> {
+def Shape_FromExtentsOp : Shape_Op<"from_extents", [NoSideEffect]> {
   let summary = "Creates a shape from extents";
   let description = [{
     Creates a shape from multiple SSA values representing the extents of
@@ -165,7 +156,7 @@ def Shape_FromExtentTensorOp : Shape_Op<"from_extent_tensor", []> {
     extents match the values of the elements.
   }];
 
-  let arguments = (ins I32Tensor:$input);
+  let arguments = (ins IndexTensor:$input);
   let results = (outs Shape_ShapeType:$result);
 }
 
@@ -190,13 +181,56 @@ def Shape_ToExtentTensorOp : Shape_Op<"to_extent_tensor", []> {
   let hasFolder = 1;
 }
 
+def Shape_GetExtentOp : Shape_Op<"get_extent", [NoSideEffect]> {
+  let summary = "Gets the specified extent from a shape";
+  let description = [{
+    Gets the extent indexed by `dim` from `shape`.
+
+    If the shape is an error, it returns an error size.
+  }];
+  let arguments = (ins
+    Shape_ShapeType:$shape,
+    Confined<I64Attr, [IntNonNegative]>:$dim
+  );
+  let results = (outs Shape_SizeType:$extent);
+  let assemblyFormat = "$shape `,` $dim attr-dict";
+
+  let builders = [
+    // Builder that allows passing a simple integer instead of an IntegerAttr.
+    OpBuilder<
+      [{OpBuilder &builder, OperationState &result, Value shape, int64_t dim}],
+      [{build(builder, result, shape, builder.getI64IntegerAttr(dim));}]
+    >
+  ];
+
+  let hasFolder = 1;
+}
+
+def Shape_IndexToSizeOp : Shape_Op<"index_to_size", [NoSideEffect]> {
+  let summary = "Converts a standard index to a shape size";
+  let description = [{
+    Converts a standard index to a `shape.size`. This operation and its
+    inverse, `size_to_index`, facilitate index conversion between the standard
+    and the shape dialect.
+
+    The behavior is undefined for negative indices.
+  }];
+
+  let arguments = (ins Index:$arg);
+  let results = (outs Shape_SizeType:$result);
+
+  let assemblyFormat = "attr-dict $arg";
+
+  let hasFolder = 1;
+}
+
 def Shape_JoinOp : Shape_Op<"join", []> {
   let summary = "Returns the least general shape.size of its operands";
   let description = [{
-    An operation that computes the least general shape of input operands. This
-    effectively asserts that corresponding static dimensions are equal. The
-    behavior is to match each element of the `shape.type` and propagate the most
-    restrictive information, returning an invalid shape if there are
+    An operation that computes the least general shape of input operands.
+    This effectively asserts that corresponding static dimensions are equal.
+    The behavior is to match each element of the `shape.shape` and propagate the
+    most restrictive information, returning an invalid shape if there are
     contradictory requirements. E.g., using pseudo code
 
     ```
@@ -214,7 +248,7 @@ def Shape_JoinOp : Shape_Op<"join", []> {
     used to return an error to the user upon mismatch of dimensions.
 
     ```mlir
-    %c = shape.join %a, %b, error="<reason>" : !shape.type
+    %c = shape.join %a, %b, error="<reason>" : !shape.shape
     ```
   }];
 
@@ -233,6 +267,21 @@ def Shape_MulOp : Shape_Op<"mul", [SameOperandsAndResultType]> {
 
   let arguments = (ins Shape_SizeType:$lhs, Shape_SizeType:$rhs);
   let results = (outs Shape_SizeType:$result);
+}
+
+def Shape_NumElementsOp : Shape_Op<"num_elements", [NoSideEffect]> {
+  let summary = "Returns the number of elements for a given shape";
+  let description = [{
+    Returns the number of elements for a given shape which is the product of its
+    dimensions.
+  }];
+
+  let arguments = (ins Shape_ShapeType:$shape);
+  let results = (outs Shape_SizeType:$result);
+
+  let assemblyFormat = "attr-dict $shape";
+
+  let hasFolder = 1;
 }
 
 def Shape_ReduceOp : Shape_Op<"reduce", []> {
@@ -255,14 +304,14 @@ def Shape_ReduceOp : Shape_Op<"reduce", []> {
     number of elements
 
     ```mlir
-    func @shape_num_elements(%shape : !shape.type) -> !shape.size {
+    func @shape_num_elements(%shape : !shape.shape) -> !shape.size {
       %0 = "shape.constant_dim"() {value = 1 : i32} : () -> !shape.size
       %1 = "shape.reduce"(%shape, %0) ( {
         ^bb0(%index: i32, %dim: !shape.size, %lci: !shape.size):
           %acc = "shape.mul"(%lci, %dim) :
             (!shape.size, !shape.size) -> !shape.size
           shape.yield %acc : !shape.size
-        }) : (!shape.type, !shape.size) -> (!shape.size)
+        }) : (!shape.shape, !shape.size) -> (!shape.size)
       return %1 : !shape.size
     }
     ```
@@ -276,14 +325,30 @@ def Shape_ReduceOp : Shape_Op<"reduce", []> {
   let regions = (region SizedRegion<1>:$body);
 }
 
-def Shape_ShapeOfOp : Shape_Op<"shape_of",
-    [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+def Shape_ShapeOfOp : Shape_Op<"shape_of", [NoSideEffect]> {
   let summary = "Returns shape of a value or shaped type operand";
 
   let arguments = (ins AnyTypeOf<[AnyShaped, Shape_ValueShapeType]>:$arg);
   let results = (outs Shape_ShapeType:$result);
 
   let assemblyFormat = "attr-dict $arg `:` type($arg)";
+
+  let hasFolder = 1;
+}
+
+def Shape_SizeToIndexOp : Shape_Op<"size_to_index", [NoSideEffect]> {
+  let summary = "Casts between index types of the shape and standard dialect";
+  let description = [{
+    Converts a `shape.size` to a standard index.
+    This operation and its inverse, `index_to_size`, facilitate index conversion
+    between the standard and the shape dialect.
+    The behavior is undefined for unknown and invalid arguments.
+  }];
+
+  let arguments = (ins Shape_SizeType:$arg);
+  let results = (outs Index:$result);
+
+  let assemblyFormat = "attr-dict $arg";
 
   let hasFolder = 1;
 }
@@ -315,9 +380,8 @@ def Shape_DebugPrintOp : Shape_Op<"debug_print", []> {
   let results =  (outs Shape_ShapeOrSizeType:$output);
 }
 
-def Shape_SplitAtOp : Shape_Op<"split_at",
-    [DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
-  let summary = "Splits a shape at a given index.";
+def Shape_SplitAtOp : Shape_Op<"split_at", []> {
+  let summary = "Splits a shape at a given index";
   let description = [{
     Splits a shape at a given dimension `index`, returning two shapes.
     If `index` is negative, it is treated as indexing from the back of the
@@ -345,9 +409,8 @@ def Shape_SplitAtOp : Shape_Op<"split_at",
   let hasFolder = 1;
 }
 
-def Shape_ConcatOp : Shape_Op<"concat",
-    [DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
-  let summary = "Concatenates two shapes.";
+def Shape_ConcatOp : Shape_Op<"concat", []> {
+  let summary = "Concatenates two shapes";
   let description = [{
     Creates a shape whose dimensions consist of first the dimensions from `lhs`
     followed by the dimensions of `rhs`.
@@ -369,9 +432,8 @@ def Shape_ConcatOp : Shape_Op<"concat",
 //===----------------------------------------------------------------------===//
 
 //TODO(tpopp): Move the code below and witnesses to a different file.
-def Shape_AnyOp : Shape_Op<"any",
-    [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
-  let summary = "Return any combination of the input shapes.";
+def Shape_AnyOp : Shape_Op<"any", [NoSideEffect]> {
+  let summary = "Return any combination of the input shapes";
   let description = [{
     This operation takes multiple input shapes and returns some combination of
     their dimensions. This can be best seen with examples below.
@@ -393,7 +455,7 @@ def Shape_AnyOp : Shape_Op<"any",
 }
 
 def Shape_AssumingAllOp : Shape_Op<"assuming_all", [NoSideEffect]> {
-  let summary = "Return a logical AND of all witnesses.";
+  let summary = "Return a logical AND of all witnesses";
   let description = [{
     Used to simplify constraints as any single failing precondition is enough
     to prevent execution.
@@ -422,7 +484,7 @@ def Shape_AssumingAllOp : Shape_Op<"assuming_all", [NoSideEffect]> {
 def Shape_AssumingOp : Shape_Op<"assuming",
                            [SingleBlockImplicitTerminator<"AssumingYieldOp">,
                             RecursiveSideEffects]> {
-  let summary = "Execute the region.";
+  let summary = "Execute the region";
   let description = [{
     Executes the region assuming all witnesses are true.
 
@@ -460,7 +522,7 @@ def Shape_AssumingYieldOp : Shape_Op<"assuming_yield",
 }
 
 def Shape_CstrBroadcastableOp : Shape_Op<"cstr_broadcastable", []> {
-  let summary = "Determines if 2 shapes can be successfully broadcasted.";
+  let summary = "Determines if 2 shapes can be successfully broadcasted";
   let description = [{
     Given 2 input shapes, return a witness specifying if they are broadcastable.
     This broadcastable follows the same logic as what shape.broadcast documents.
@@ -481,7 +543,7 @@ def Shape_CstrBroadcastableOp : Shape_Op<"cstr_broadcastable", []> {
 }
 
 def Shape_CstrEqOp : Shape_Op<"cstr_eq", []> {
-  let summary = "Determines if all input shapes are equal.";
+  let summary = "Determines if all input shapes are equal";
   let description = [{
     Given 1 or more input shapes, determine if all shapes are the exact same.
 
@@ -498,7 +560,6 @@ def Shape_CstrEqOp : Shape_Op<"cstr_eq", []> {
 
   let assemblyFormat = "$inputs attr-dict";
 }
-
 
 // Canonicalization patterns.
 

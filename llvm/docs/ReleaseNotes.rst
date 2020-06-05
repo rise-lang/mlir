@@ -70,6 +70,10 @@ Changes to the LLVM IR
   behavior was undocumented. To preserve optimizations, frontends may need to
   be updated to generate appropriate `align` attributes and metadata.
 
+* The DIModule metadata is extended to contain file and line number
+  information. This information is used to represent Fortran modules debug
+  info at IR level.
+
 Changes to building LLVM
 ------------------------
 
@@ -86,6 +90,12 @@ During this release ...
   for Arm M-profile targets.
 
 * Implemented C-language intrinsics ``<arm_cde.h>`` for the CDE instruction set.
+
+* Clang now defaults to ``-fomit-frame-pointer`` when targeting non-Android
+  Linux for arm and thumb when optimizations are enabled. Users that were
+  previously not specifying a value and relying on the implicit compiler
+  default may wish to specify ``-fno-omit-frame-pointer`` to get the old
+  behavior. This improves compatibility with GCC.
 
 Changes to the MIPS Target
 --------------------------

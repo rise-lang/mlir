@@ -31,12 +31,13 @@ def AArch64ldff1s : SDNode<"AArch64ISD::LDFF1S", SDT_AArch64_LD1, [SDNPHasChain,
 // Contiguous load and replicate - node definitions
 //
 
-def SDT_AArch64_LD1RQ : SDTypeProfile<1, 2, [
+def SDT_AArch64_LD1Replicate : SDTypeProfile<1, 2, [
   SDTCisVec<0>, SDTCisVec<1>, SDTCisPtrTy<2>,
   SDTCVecEltisVT<1,i1>, SDTCisSameNumEltsAs<0,1>
 ]>;
 
-def AArch64ld1rq  : SDNode<"AArch64ISD::LD1RQ",  SDT_AArch64_LD1RQ, [SDNPHasChain, SDNPMayLoad]>;
+def AArch64ld1rq : SDNode<"AArch64ISD::LD1RQ",  SDT_AArch64_LD1Replicate, [SDNPHasChain, SDNPMayLoad]>;
+def AArch64ld1ro : SDNode<"AArch64ISD::LD1RO",  SDT_AArch64_LD1Replicate, [SDNPHasChain, SDNPMayLoad]>;
 
 // Gather loads - node definitions
 //
@@ -1334,6 +1335,20 @@ multiclass sve_prefetch<SDPatternOperator prefetch, ValueType PredTy, Instructio
   def : InstAlias<"fcmlt $Zd, $Pg/z, $Zm, $Zn",
                   (FCMGT_PPzZZ_D PPR64:$Zd, PPR3bAny:$Pg, ZPR64:$Zn, ZPR64:$Zm), 0>;
 
+  // Pseudo instructions representing unpredicated LDR and STR for ZPR2,3,4.
+  // These get expanded to individual LDR_ZXI/STR_ZXI instructions in
+  // AArch64ExpandPseudoInsts.
+  let mayLoad = 1, hasSideEffects = 0 in {
+    def LDR_ZZXI   : Pseudo<(outs   ZZ_b:$Zd), (ins GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+    def LDR_ZZZXI  : Pseudo<(outs  ZZZ_b:$Zd), (ins GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+    def LDR_ZZZZXI : Pseudo<(outs ZZZZ_b:$Zd), (ins GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+  }
+  let mayStore = 1, hasSideEffects = 0 in {
+    def STR_ZZXI   : Pseudo<(outs), (ins   ZZ_b:$Zs, GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+    def STR_ZZZXI  : Pseudo<(outs), (ins  ZZZ_b:$Zs, GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+    def STR_ZZZZXI : Pseudo<(outs), (ins ZZZZ_b:$Zs, GPR64sp:$sp, simm4s1:$offset),[]>, Sched<[]>;
+  }
+
   def : Pat<(AArch64ptest (nxv16i1 PPR:$pg), (nxv16i1 PPR:$src)),
             (PTEST_PP PPR:$pg, PPR:$src)>;
   def : Pat<(AArch64ptest (nxv8i1 PPR:$pg), (nxv8i1 PPR:$src)),
@@ -1420,6 +1435,7 @@ multiclass sve_prefetch<SDPatternOperator prefetch, ValueType PredTy, Instructio
 
     def : Pat<(nxv8f16 (bitconvert (nxv16i8 ZPR:$src))), (nxv8f16 ZPR:$src)>;
     def : Pat<(nxv8f16 (bitconvert (nxv8i16 ZPR:$src))), (nxv8f16 ZPR:$src)>;
+    def : Pat<(nxv8bf16 (bitconvert (nxv8i16 ZPR:$src))), (nxv8bf16 ZPR:$src)>;
     def : Pat<(nxv8f16 (bitconvert (nxv4i32 ZPR:$src))), (nxv8f16 ZPR:$src)>;
     def : Pat<(nxv8f16 (bitconvert (nxv2i64 ZPR:$src))), (nxv8f16 ZPR:$src)>;
     def : Pat<(nxv8f16 (bitconvert (nxv4f32 ZPR:$src))), (nxv8f16 ZPR:$src)>;
@@ -1883,6 +1899,46 @@ multiclass sve_prefetch<SDPatternOperator prefetch, ValueType PredTy, Instructio
                                        (INDEX_II_D 0, 1),
                                        (DUP_ZR_D $index)),
                         $src)>;
+
+  // Extract element from vector with immediate index
+  def : Pat<(i32 (vector_extract (nxv16i8 ZPR:$vec), sve_elm_idx_extdup_b:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_B ZPR:$vec, sve_elm_idx_extdup_b:$index), ssub)>;
+  def : Pat<(i32 (vector_extract (nxv8i16 ZPR:$vec), sve_elm_idx_extdup_h:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_H ZPR:$vec, sve_elm_idx_extdup_h:$index), ssub)>;
+  def : Pat<(i32 (vector_extract (nxv4i32 ZPR:$vec), sve_elm_idx_extdup_s:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_S ZPR:$vec, sve_elm_idx_extdup_s:$index), ssub)>;
+  def : Pat<(i64 (vector_extract (nxv2i64 ZPR:$vec), sve_elm_idx_extdup_d:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_D ZPR:$vec, sve_elm_idx_extdup_d:$index), dsub)>;
+  def : Pat<(f16 (vector_extract (nxv8f16 ZPR:$vec), sve_elm_idx_extdup_h:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_H ZPR:$vec, sve_elm_idx_extdup_h:$index), hsub)>;
+  def : Pat<(f32 (vector_extract (nxv4f32 ZPR:$vec), sve_elm_idx_extdup_s:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_S ZPR:$vec, sve_elm_idx_extdup_s:$index), ssub)>;
+  def : Pat<(f64 (vector_extract (nxv2f64 ZPR:$vec), sve_elm_idx_extdup_d:$index)),
+            (EXTRACT_SUBREG (DUP_ZZI_D ZPR:$vec, sve_elm_idx_extdup_d:$index), dsub)>;
+
+  // Extract element from vector with scalar index
+  def : Pat<(i32 (vector_extract (nxv16i8 ZPR:$vec), GPR64:$index)),
+            (LASTB_RPZ_B (WHILELS_PXX_B XZR, GPR64:$index),
+                         ZPR:$vec)>;
+  def : Pat<(i32 (vector_extract (nxv8i16 ZPR:$vec), GPR64:$index)),
+            (LASTB_RPZ_H (WHILELS_PXX_H XZR, GPR64:$index),
+                         ZPR:$vec)>;
+  def : Pat<(i32 (vector_extract (nxv4i32 ZPR:$vec), GPR64:$index)),
+            (LASTB_RPZ_S (WHILELS_PXX_S XZR, GPR64:$index),
+                         ZPR:$vec)>;
+  def : Pat<(i64 (vector_extract (nxv2i64 ZPR:$vec), GPR64:$index)),
+            (LASTB_RPZ_D (WHILELS_PXX_D XZR, GPR64:$index),
+                         ZPR:$vec)>;
+
+  def : Pat<(f16 (vector_extract (nxv8f16 ZPR:$vec), GPR64:$index)),
+            (LASTB_VPZ_H (WHILELS_PXX_H XZR, GPR64:$index),
+                         ZPR:$vec)>;
+  def : Pat<(f32 (vector_extract (nxv4f32 ZPR:$vec), GPR64:$index)),
+            (LASTB_VPZ_S (WHILELS_PXX_S XZR, GPR64:$index),
+                         ZPR:$vec)>;
+  def : Pat<(f64 (vector_extract (nxv2f64 ZPR:$vec), GPR64:$index)),
+            (LASTB_VPZ_D (WHILELS_PXX_D XZR, GPR64:$index),
+                         ZPR:$vec)>;
 }
 
 let Predicates = [HasSVE, HasMatMulInt8] in {
@@ -1900,10 +1956,10 @@ let Predicates = [HasSVE, HasMatMulFP32] in {
 
 let Predicates = [HasSVE, HasMatMulFP64] in {
   defm FMMLA_ZZZ_D : sve_fp_matrix_mla<1, "fmmla", ZPR64, int_aarch64_sve_fmmla, nxv2f64>;
-  defm LD1RO_B_IMM  : sve_mem_ldor_si<0b00, "ld1rob", Z_b, ZPR8>;
-  defm LD1RO_H_IMM  : sve_mem_ldor_si<0b01, "ld1roh", Z_h, ZPR16>;
-  defm LD1RO_W_IMM  : sve_mem_ldor_si<0b10, "ld1row", Z_s, ZPR32>;
-  defm LD1RO_D_IMM  : sve_mem_ldor_si<0b11, "ld1rod", Z_d, ZPR64>;
+  defm LD1RO_B_IMM  : sve_mem_ldor_si<0b00, "ld1rob", Z_b, ZPR8,  nxv16i8, nxv16i1, AArch64ld1ro>;
+  defm LD1RO_H_IMM  : sve_mem_ldor_si<0b01, "ld1roh", Z_h, ZPR16, nxv8i16, nxv8i1,  AArch64ld1ro>;
+  defm LD1RO_W_IMM  : sve_mem_ldor_si<0b10, "ld1row", Z_s, ZPR32, nxv4i32, nxv4i1,  AArch64ld1ro>;
+  defm LD1RO_D_IMM  : sve_mem_ldor_si<0b11, "ld1rod", Z_d, ZPR64, nxv2i64, nxv2i1,  AArch64ld1ro>;
   defm LD1RO_B      : sve_mem_ldor_ss<0b00, "ld1rob", Z_b, ZPR8,  GPR64NoXZRshifted8>;
   defm LD1RO_H      : sve_mem_ldor_ss<0b01, "ld1roh", Z_h, ZPR16, GPR64NoXZRshifted16>;
   defm LD1RO_W      : sve_mem_ldor_ss<0b10, "ld1row", Z_s, ZPR32, GPR64NoXZRshifted32>;
