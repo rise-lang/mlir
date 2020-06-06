@@ -375,7 +375,7 @@ define i32 @test16_no_null_opt_2(i1 %C, i32* %P) #0 {
   ret i32 %V
 }
 
-attributes #0 = { "null-pointer-is-valid"="true" }
+attributes #0 = { null_pointer_is_valid }
 
 define i1 @test17(i32* %X, i1 %C) {
 ; CHECK-LABEL: @test17(
@@ -981,7 +981,7 @@ entry:
 
 ; Test that we can speculate the loads around the select even when we can't
 ; fold the load completely away.
-define i32 @test78_deref(i1 %flag, i32* dereferenceable(4) %x, i32* dereferenceable(4) %y, i32* %z) {
+define i32 @test78_deref(i1 %flag, i32* dereferenceable(4) align 4 %x, i32* dereferenceable(4) align 4 %y, i32* %z) {
 ; CHECK-LABEL: @test78_deref(
 ; CHECK-NEXT:    [[X_VAL:%.*]] = load i32, i32* [[X:%.*]], align 4
 ; CHECK-NEXT:    [[Y_VAL:%.*]] = load i32, i32* [[Y:%.*]], align 4
@@ -1346,6 +1346,29 @@ define i32 @PR27137(i32 %a) {
   %c1 = icmp sgt i32 %s0, -1
   %s1 = select i1 %c1, i32 %s0, i32 -1
   ret i32 %s1
+}
+
+; ub-safe negation pattern
+define i32 @PR27817(i32 %x) {
+; CHECK-LABEL: @PR27817(
+; CHECK-NEXT:    [[SUB:%.*]] = sub i32 0, [[X:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %cmp = icmp eq i32 %x, -2147483648
+  %sub = sub i32 0, %x
+  %sel = select i1 %cmp, i32 -2147483648, i32 %sub
+  ret i32 %sel
+}
+
+define i32 @PR27817_nsw(i32 %x) {
+; CHECK-LABEL: @PR27817_nsw(
+; CHECK-NEXT:    [[SUB:%.*]] = sub i32 0, [[X:%.*]]
+; CHECK-NEXT:    ret i32 [[SUB]]
+;
+  %cmp = icmp eq i32 %x, -2147483648
+  %sub = sub nsw i32 0, %x
+  %sel = select i1 %cmp, i32 -2147483648, i32 %sub
+  ret i32 %sel
 }
 
 define i32 @select_icmp_slt0_xor(i32 %x) {

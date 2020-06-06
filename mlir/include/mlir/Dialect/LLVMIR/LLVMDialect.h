@@ -20,6 +20,8 @@
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/TypeSupport.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -30,6 +32,10 @@
 namespace llvm {
 class Type;
 class LLVMContext;
+namespace sys {
+template <bool mt_only>
+class SmartMutex;
+} // end namespace sys
 } // end namespace llvm
 
 namespace mlir {
@@ -71,6 +77,7 @@ public:
 
   /// Vector type utilities.
   LLVMType getVectorElementType();
+  unsigned getVectorNumElements();
   bool isVectorTy();
 
   /// Function type utilities.
@@ -199,32 +206,7 @@ private:
 #define GET_OP_CLASSES
 #include "mlir/Dialect/LLVMIR/LLVMOps.h.inc"
 
-class LLVMDialect : public Dialect {
-public:
-  explicit LLVMDialect(MLIRContext *context);
-  ~LLVMDialect();
-  static StringRef getDialectNamespace() { return "llvm"; }
-
-  llvm::LLVMContext &getLLVMContext();
-  llvm::Module &getLLVMModule();
-
-  /// Parse a type registered to this dialect.
-  Type parseType(DialectAsmParser &parser) const override;
-
-  /// Print a type registered to this dialect.
-  void printType(Type type, DialectAsmPrinter &os) const override;
-
-  /// Verify a region argument attribute registered to this dialect.
-  /// Returns failure if the verification failed, success otherwise.
-  LogicalResult verifyRegionArgAttribute(Operation *op, unsigned regionIdx,
-                                         unsigned argIdx,
-                                         NamedAttribute argAttr) override;
-
-private:
-  friend LLVMType;
-
-  std::unique_ptr<detail::LLVMDialectImpl> impl;
-};
+#include "mlir/Dialect/LLVMIR/LLVMOpsDialect.h.inc"
 
 /// Create an LLVM global containing the string "value" at the module containing
 /// surrounding the insertion point of builder. Obtain the address of that
@@ -237,6 +219,12 @@ Value createGlobalString(Location loc, OpBuilder &builder, StringRef name,
 /// LLVM requires some operations to be inside of a Module operation. This
 /// function confirms that the Operation has the desired properties.
 bool satisfiesLLVMModule(Operation *op);
+
+/// Clones the given module into the provided context. This is implemented by
+/// transforming the module into bitcode and then reparsing the bitcode in the
+/// provided context.
+std::unique_ptr<llvm::Module>
+cloneModuleIntoNewContext(llvm::LLVMContext *context, llvm::Module *module);
 
 } // end namespace LLVM
 } // end namespace mlir

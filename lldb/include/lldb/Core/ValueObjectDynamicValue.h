@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ValueObjectDynamicValue_h_
-#define liblldb_ValueObjectDynamicValue_h_
+#ifndef LLDB_CORE_VALUEOBJECTDYNAMICVALUE_H
+#define LLDB_CORE_VALUEOBJECTDYNAMICVALUE_H
 
 #include "lldb/Core/Address.h"
 #include "lldb/Core/ValueObject.h"
@@ -127,9 +127,11 @@ private:
   ValueObjectDynamicValue(ValueObject &parent,
                           lldb::DynamicValueType use_dynamic);
 
-  DISALLOW_COPY_AND_ASSIGN(ValueObjectDynamicValue);
+  ValueObjectDynamicValue(const ValueObjectDynamicValue &) = delete;
+  const ValueObjectDynamicValue &
+  operator=(const ValueObjectDynamicValue &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ValueObjectDynamicValue_h_
+#endif // LLDB_CORE_VALUEOBJECTDYNAMICVALUE_H

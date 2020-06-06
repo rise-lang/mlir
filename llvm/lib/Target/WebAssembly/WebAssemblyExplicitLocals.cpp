@@ -31,16 +31,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "wasm-explicit-locals"
 
-// A command-line option to disable this pass, and keep implicit locals
-// for the purpose of testing with lit/llc ONLY.
-// This produces output which is not valid WebAssembly, and is not supported
-// by assemblers/disassemblers and other MC based tools.
-static cl::opt<bool> WasmDisableExplicitLocals(
-    "wasm-disable-explicit-locals", cl::Hidden,
-    cl::desc("WebAssembly: output implicit locals in"
-             " instruction output for test purposes only."),
-    cl::init(false));
-
 namespace {
 class WebAssemblyExplicitLocals final : public MachineFunctionPass {
   StringRef getPassName() const override {
@@ -69,6 +59,18 @@ FunctionPass *llvm::createWebAssemblyExplicitLocals() {
   return new WebAssemblyExplicitLocals();
 }
 
+static void checkFrameBase(WebAssemblyFunctionInfo &MFI, unsigned Local,
+                           unsigned Reg) {
+  // Mark a local for the frame base vreg.
+  if (MFI.isFrameBaseVirtual() && Reg == MFI.getFrameBaseVreg()) {
+    LLVM_DEBUG({
+      dbgs() << "Allocating local " << Local << "for VReg "
+             << Register::virtReg2Index(Reg) << '\n';
+    });
+    MFI.setFrameBaseLocal(Local);
+  }
+}
+
 /// Return a local id number for the given register, assigning it a new one
 /// if it doesn't yet have one.
 static unsigned getLocalId(DenseMap<unsigned, unsigned> &Reg2Local,
@@ -76,14 +78,7 @@ static unsigned getLocalId(DenseMap<unsigned, unsigned> &Reg2Local,
                            unsigned Reg) {
   auto P = Reg2Local.insert(std::make_pair(Reg, CurLocal));
   if (P.second) {
-    // Mark the local allocated for the frame base vreg.
-    if (MFI.isFrameBaseVirtual() && Reg == MFI.getFrameBaseVreg()) {
-      LLVM_DEBUG({
-        dbgs() << "Allocating local " << CurLocal << "for VReg "
-               << Register::virtReg2Index(Reg) << '\n';
-      });
-      MFI.setFrameBaseLocal(CurLocal);
-    }
+    checkFrameBase(MFI, CurLocal, Reg);
     ++CurLocal;
   }
   return P.first->second;
@@ -178,10 +173,17 @@ static MVT typeForRegClass(const TargetRegisterClass *RC) {
 /// start of the expression tree.
 static MachineInstr *findStartOfTree(MachineOperand &MO,
                                      MachineRegisterInfo &MRI,
-                                     WebAssemblyFunctionInfo &MFI) {
+                                     const WebAssemblyFunctionInfo &MFI) {
   Register Reg = MO.getReg();
   assert(MFI.isVRegStackified(Reg));
   MachineInstr *Def = MRI.getVRegDef(Reg);
+
+  // If this instruction has any non-stackified defs, it is the start
+  for (auto DefReg : Def->defs()) {
+    if (!MFI.isVRegStackified(DefReg.getReg())) {
+      return Def;
+    }
+  }
 
   // Find the first stackified use and proceed from there.
   for (MachineOperand &DefMO : Def->explicit_uses()) {
@@ -198,10 +200,6 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** Make Locals Explicit **********\n"
                        "********** Function: "
                     << MF.getName() << '\n');
-
-  // Disable this pass if directed to do so.
-  if (WasmDisableExplicitLocals)
-    return false;
 
   bool Changed = false;
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -220,7 +218,9 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
       break;
     Register Reg = MI.getOperand(0).getReg();
     assert(!MFI.isVRegStackified(Reg));
-    Reg2Local[Reg] = static_cast<unsigned>(MI.getOperand(1).getImm());
+    auto Local = static_cast<unsigned>(MI.getOperand(1).getImm());
+    Reg2Local[Reg] = Local;
+    checkFrameBase(MFI, Local, Reg);
     MI.eraseFromParent();
     Changed = true;
   }
@@ -242,6 +242,12 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
 
       if (MI.isDebugInstr() || MI.isLabel())
         continue;
+
+      if (MI.getOpcode() == WebAssembly::IMPLICIT_DEF) {
+        MI.eraseFromParent();
+        Changed = true;
+        continue;
+      }
 
       // Replace tee instructions with local.tee. The difference is that tee
       // instructions have two defs, while local.tee instructions have one def
@@ -279,20 +285,13 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      // Insert local.sets for any defs that aren't stackified yet. Currently
-      // we handle at most one def.
-      assert(MI.getDesc().getNumDefs() <= 1);
-      if (MI.getDesc().getNumDefs() == 1) {
-        Register OldReg = MI.getOperand(0).getReg();
+      // Insert local.sets for any defs that aren't stackified yet.
+      for (auto &Def : MI.defs()) {
+        Register OldReg = Def.getReg();
         if (!MFI.isVRegStackified(OldReg)) {
           const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
           Register NewReg = MRI.createVirtualRegister(RC);
           auto InsertPt = std::next(MI.getIterator());
-          if (MI.getOpcode() == WebAssembly::IMPLICIT_DEF) {
-            MI.eraseFromParent();
-            Changed = true;
-            continue;
-          }
           if (UseEmpty[Register::virtReg2Index(OldReg)]) {
             unsigned Opc = getDropOpcode(RC);
             MachineInstr *Drop =
@@ -300,6 +299,8 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
                     .addReg(NewReg);
             // After the drop instruction, this reg operand will not be used
             Drop->getOperand(0).setIsKill();
+            if (MFI.isFrameBaseVirtual() && OldReg == MFI.getFrameBaseVreg())
+              MFI.clearFrameBaseVreg();
           } else {
             unsigned LocalId = getLocalId(Reg2Local, MFI, CurLocal, OldReg);
             unsigned Opc = getLocalSetOpcode(RC);
@@ -310,11 +311,11 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
                 .addImm(LocalId)
                 .addReg(NewReg);
           }
-          MI.getOperand(0).setReg(NewReg);
           // This register operand of the original instruction is now being used
           // by the inserted drop or local.set instruction, so make it not dead
           // yet.
-          MI.getOperand(0).setIsDead(false);
+          Def.setReg(NewReg);
+          Def.setIsDead(false);
           MFI.stackifyVReg(NewReg);
           Changed = true;
         }

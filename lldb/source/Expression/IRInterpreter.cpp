@@ -433,8 +433,6 @@ static const char *unsupported_opcode_error =
     "Interpreter doesn't handle one of the expression's opcodes";
 static const char *unsupported_operand_error =
     "Interpreter doesn't handle one of the expression's operands";
-// static const char *interpreter_initialization_error = "Interpreter couldn't
-// be initialized";
 static const char *interpreter_internal_error =
     "Interpreter encountered an internal error";
 static const char *bad_value_error =
@@ -444,8 +442,6 @@ static const char *memory_allocation_error =
 static const char *memory_write_error = "Interpreter couldn't write to memory";
 static const char *memory_read_error = "Interpreter couldn't read from memory";
 static const char *infinite_loop_error = "Interpreter ran for too many cycles";
-// static const char *bad_result_error                 = "Result of expression
-// is in bad memory";
 static const char *too_many_functions_error =
     "Interpreter doesn't handle modules with multiple function bodies.";
 
@@ -597,7 +593,8 @@ bool IRInterpreter::CanInterpret(llvm::Module &module, llvm::Function &function,
         switch (operand_type->getTypeID()) {
         default:
           break;
-        case Type::VectorTyID: {
+        case Type::FixedVectorTyID:
+        case Type::ScalableVectorTyID: {
           LLDB_LOGF(log, "Unsupported operand type: %s",
                     PrintType(operand_type).c_str());
           error.SetErrorString(unsupported_operand_error);
@@ -1370,7 +1367,7 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
 
       // Find the address of the callee function
       lldb_private::Scalar I;
-      const llvm::Value *val = call_inst->getCalledValue();
+      const llvm::Value *val = call_inst->getCalledOperand();
 
       if (!frame.EvaluateValue(I, val, module)) {
         error.SetErrorToGenericError();

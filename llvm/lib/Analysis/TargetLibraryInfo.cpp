@@ -69,11 +69,10 @@ static bool hasBcmp(const Triple &TT) {
 static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
                        ArrayRef<StringLiteral> StandardNames) {
   // Verify that the StandardNames array is in alphabetical order.
-  assert(std::is_sorted(StandardNames.begin(), StandardNames.end(),
-                        [](StringRef LHS, StringRef RHS) {
-                          return LHS < RHS;
-                        }) &&
-         "TargetLibraryInfoImpl function names must be sorted");
+  assert(
+      llvm::is_sorted(StandardNames,
+                      [](StringRef LHS, StringRef RHS) { return LHS < RHS; }) &&
+      "TargetLibraryInfoImpl function names must be sorted");
 
   // Set IO unlocked variants as unavailable
   // Set them as available per system below
@@ -105,14 +104,12 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
   TLI.setShouldExtI32Return(ShouldExtI32Return);
   TLI.setShouldSignExtI32Param(ShouldSignExtI32Param);
 
-  if (T.getArch() == Triple::r600 ||
-      T.getArch() == Triple::amdgcn)
+  if (T.isAMDGPU())
     TLI.disableAllFunctions();
 
   // There are no library implementations of memcpy and memset for AMD gpus and
   // these can be difficult to lower in the backend.
-  if (T.getArch() == Triple::r600 ||
-      T.getArch() == Triple::amdgcn) {
+  if (T.isAMDGPU()) {
     TLI.setUnavailable(LibFunc_memcpy);
     TLI.setUnavailable(LibFunc_memset);
     TLI.setUnavailable(LibFunc_memset_pattern16);
@@ -472,6 +469,9 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc_tmpfile64);
 
     // Relaxed math functions are included in math-finite.h on Linux (GLIBC).
+    // Note that math-finite.h is no longer supported by top-of-tree GLIBC,
+    // so we keep these functions around just so that they're recognized by
+    // the ConstantFolder.
     TLI.setUnavailable(LibFunc_acos_finite);
     TLI.setUnavailable(LibFunc_acosf_finite);
     TLI.setUnavailable(LibFunc_acosl_finite);
@@ -900,6 +900,8 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
             FTy.getParamType(1)->isPointerTy());
   case LibFunc_write:
     return (NumParams == 3 && FTy.getParamType(1)->isPointerTy());
+  case LibFunc_aligned_alloc:
+    return (NumParams == 2 && FTy.getReturnType()->isPointerTy());
   case LibFunc_bcopy:
   case LibFunc_bcmp:
     return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
@@ -1339,6 +1341,9 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_round:
   case LibFunc_roundf:
   case LibFunc_roundl:
+  case LibFunc_roundeven:
+  case LibFunc_roundevenf:
+  case LibFunc_roundevenl:
   case LibFunc_sin:
   case LibFunc_sinf:
   case LibFunc_sinh:
@@ -1488,9 +1493,9 @@ bool TargetLibraryInfoImpl::getLibFunc(const Function &FDecl,
                                        LibFunc &F) const {
   // Intrinsics don't overlap w/libcalls; if our module has a large number of
   // intrinsics, this ends up being an interesting compile time win since we
-  // avoid string normalization and comparison. 
+  // avoid string normalization and comparison.
   if (FDecl.isIntrinsic()) return false;
-  
+
   const DataLayout *DL =
       FDecl.getParent() ? &FDecl.getParent()->getDataLayout() : nullptr;
   return getLibFunc(FDecl.getName(), F) &&

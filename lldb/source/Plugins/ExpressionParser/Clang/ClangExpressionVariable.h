@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ClangExpressionVariable_h_
-#define liblldb_ClangExpressionVariable_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONVARIABLE_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONVARIABLE_H
 
 #include <signal.h>
 #include <stdint.h>
@@ -197,9 +197,11 @@ public:
   }
 
   /// Members
-  DISALLOW_COPY_AND_ASSIGN(ClangExpressionVariable);
+  ClangExpressionVariable(const ClangExpressionVariable &) = delete;
+  const ClangExpressionVariable &
+  operator=(const ClangExpressionVariable &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ClangExpressionVariable_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONVARIABLE_H

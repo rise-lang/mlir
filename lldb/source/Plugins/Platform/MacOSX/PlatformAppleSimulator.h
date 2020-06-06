@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_PlatformAppleSimulator_h_
-#define liblldb_PlatformAppleSimulator_h_
+#ifndef LLDB_SOURCE_PLUGINS_PLATFORM_MACOSX_PLATFORMAPPLESIMULATOR_H
+#define LLDB_SOURCE_PLUGINS_PLATFORM_MACOSX_PLATFORMAPPLESIMULATOR_H
 
 #include <mutex>
 
@@ -57,7 +57,9 @@ protected:
 #endif
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(PlatformAppleSimulator);
+  PlatformAppleSimulator(const PlatformAppleSimulator &) = delete;
+  const PlatformAppleSimulator &
+  operator=(const PlatformAppleSimulator &) = delete;
 };
 
-#endif // liblldb_PlatformAppleSimulator_h_
+#endif // LLDB_SOURCE_PLUGINS_PLATFORM_MACOSX_PLATFORMAPPLESIMULATOR_H

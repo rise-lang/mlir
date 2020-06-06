@@ -23,3 +23,17 @@ def AArch64PreLegalizerCombinerHelper: GICombinerHelper<
                                            fconstant_to_constant]> {
   let DisableRuleOption = "aarch64prelegalizercombiner-disable-rule";
 }
+
+def zip_matchdata : GIDefMatchData<"unsigned">;
+def zip : GICombineRule<
+  (defs root:$root, zip_matchdata:$matchinfo),
+  (match (wip_match_opcode G_SHUFFLE_VECTOR):$root,
+         [{ return matchZip(*${root}, MRI, ${matchinfo}); }]),
+  (apply [{ applyZip(*${root}, ${matchinfo}); }])
+>;
+
+def AArch64PostLegalizerCombinerHelper
+    : GICombinerHelper<"AArch64GenPostLegalizerCombinerHelper",
+                       [erase_undef_store, combines_for_extload, zip]> {
+  let DisableRuleOption = "aarch64postlegalizercombiner-disable-rule";
+}

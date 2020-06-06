@@ -26,7 +26,7 @@ SBStream::SBStream() : m_opaque_up(new StreamString()), m_is_file(false) {
 SBStream::SBStream(SBStream &&rhs)
     : m_opaque_up(std::move(rhs.m_opaque_up)), m_is_file(rhs.m_is_file) {}
 
-SBStream::~SBStream() {}
+SBStream::~SBStream() = default;
 
 bool SBStream::IsValid() const {
   LLDB_RECORD_METHOD_CONST_NO_ARGS(bool, SBStream, IsValid);
@@ -58,6 +58,12 @@ size_t SBStream::GetSize() {
     return 0;
 
   return static_cast<StreamString *>(m_opaque_up.get())->GetSize();
+}
+
+void SBStream::Print(const char *str) {
+  LLDB_RECORD_METHOD(void, SBStream, Print, (const char *), str);
+
+  Printf("%s", str);
 }
 
 void SBStream::Printf(const char *format, ...) {
@@ -204,6 +210,7 @@ void RegisterMethods<SBStream>(Registry &R) {
   LLDB_REGISTER_METHOD(void, SBStream, RedirectToFileHandle, (FILE *, bool));
   LLDB_REGISTER_METHOD(void, SBStream, RedirectToFileDescriptor, (int, bool));
   LLDB_REGISTER_METHOD(void, SBStream, Clear, ());
+  LLDB_REGISTER_METHOD(void, SBStream, Print, (const char *));
 }
 
 }

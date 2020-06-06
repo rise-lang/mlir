@@ -200,7 +200,7 @@ static MCAsmInfo *createARMMCAsmInfo(const MCRegisterInfo &MRI,
     MAI = new ARMELFMCAsmInfo(TheTriple);
 
   unsigned Reg = MRI.getDwarfRegNum(ARM::SP, true);
-  MAI->addInitialFrameState(MCCFIInstruction::createDefCfa(nullptr, Reg, 0));
+  MAI->addInitialFrameState(MCCFIInstruction::cfiDefCfa(nullptr, Reg, 0));
 
   return MAI;
 }
@@ -266,7 +266,9 @@ public:
   bool evaluateBranch(const MCInst &Inst, uint64_t Addr,
                       uint64_t Size, uint64_t &Target) const override {
     // We only handle PCRel branches for now.
-    if (Info->get(Inst.getOpcode()).OpInfo[0].OperandType!=MCOI::OPERAND_PCREL)
+    if (Inst.getNumOperands() == 0 ||
+        Info->get(Inst.getOpcode()).OpInfo[0].OperandType !=
+            MCOI::OPERAND_PCREL)
       return false;
 
     int64_t Imm = Inst.getOperand(0).getImm();
@@ -285,6 +287,8 @@ public:
     switch (Inst.getOpcode()) {
     default:
       OpId = 0;
+      if (Inst.getNumOperands() == 0)
+        return false;
       break;
     case ARM::MVE_WLSTP_8:
     case ARM::MVE_WLSTP_16:
@@ -319,6 +323,14 @@ static MCInstrAnalysis *createARMMCInstrAnalysis(const MCInstrInfo *Info) {
 
 static MCInstrAnalysis *createThumbMCInstrAnalysis(const MCInstrInfo *Info) {
   return new ThumbMCInstrAnalysis(Info);
+}
+
+bool ARM::isCDECoproc(size_t Coproc, const MCSubtargetInfo &STI) {
+  // Unfortunately we don't have ARMTargetInfo in the disassembler, so we have
+  // to rely on feature bits.
+  if (Coproc >= 8)
+    return false;
+  return STI.getFeatureBits()[ARM::FeatureCoprocCDE0 + Coproc];
 }
 
 // Force static initialization.

@@ -195,7 +195,7 @@ INTERFACE WEAK int SCUDO_PREFIX(malloc_info)(UNUSED int options, FILE *stream) {
       decltype(SCUDO_ALLOCATOR)::PrimaryT::SizeClassMap::MaxSize;
   auto *sizes = static_cast<scudo::uptr *>(
       SCUDO_PREFIX(calloc)(max_size, sizeof(scudo::uptr)));
-  auto callback = [](uintptr_t, size_t size, void* arg) {
+  auto callback = [](uintptr_t, size_t size, void *arg) {
     auto *sizes = reinterpret_cast<scudo::uptr *>(arg);
     if (size < max_size)
       sizes[size]++;
@@ -217,6 +217,30 @@ INTERFACE WEAK int SCUDO_PREFIX(malloc_info)(UNUSED int options, FILE *stream) {
 // must be single threaded at the point when the function is called.
 INTERFACE WEAK void SCUDO_PREFIX(malloc_disable_memory_tagging)() {
   SCUDO_ALLOCATOR.disableMemoryTagging();
+}
+
+// Sets whether scudo records stack traces and other metadata for allocations
+// and deallocations. This function only has an effect if the allocator and
+// hardware support memory tagging. The program must be single threaded at the
+// point when the function is called.
+INTERFACE WEAK void
+SCUDO_PREFIX(malloc_set_track_allocation_stacks)(int track) {
+  SCUDO_ALLOCATOR.setTrackAllocationStacks(track);
+}
+
+// Sets whether scudo zero-initializes all allocated memory. The program must
+// be single threaded at the point when the function is called.
+INTERFACE WEAK void SCUDO_PREFIX(malloc_set_zero_contents)(int zero_contents) {
+  SCUDO_ALLOCATOR.setFillContents(zero_contents ? scudo::ZeroFill
+                                                : scudo::NoFill);
+}
+
+// Sets whether scudo pattern-initializes all allocated memory. The program must
+// be single threaded at the point when the function is called.
+INTERFACE WEAK void
+SCUDO_PREFIX(malloc_set_pattern_fill_contents)(int pattern_fill_contents) {
+  SCUDO_ALLOCATOR.setFillContents(
+      pattern_fill_contents ? scudo::PatternOrZeroFill : scudo::NoFill);
 }
 
 } // extern "C"

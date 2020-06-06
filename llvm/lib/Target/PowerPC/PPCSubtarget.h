@@ -34,36 +34,36 @@ class StringRef;
 
 namespace PPC {
   // -m directive values.
-  enum {
-    DIR_NONE,
-    DIR_32,
-    DIR_440,
-    DIR_601,
-    DIR_602,
-    DIR_603,
-    DIR_7400,
-    DIR_750,
-    DIR_970,
-    DIR_A2,
-    DIR_E500,
-    DIR_E500mc,
-    DIR_E5500,
-    DIR_PWR3,
-    DIR_PWR4,
-    DIR_PWR5,
-    DIR_PWR5X,
-    DIR_PWR6,
-    DIR_PWR6X,
-    DIR_PWR7,
-    DIR_PWR8,
-    DIR_PWR9,
-    DIR_PWR_FUTURE,
-    DIR_64
-  };
+enum {
+  DIR_NONE,
+  DIR_32,
+  DIR_440,
+  DIR_601,
+  DIR_602,
+  DIR_603,
+  DIR_7400,
+  DIR_750,
+  DIR_970,
+  DIR_A2,
+  DIR_E500,
+  DIR_E500mc,
+  DIR_E5500,
+  DIR_PWR3,
+  DIR_PWR4,
+  DIR_PWR5,
+  DIR_PWR5X,
+  DIR_PWR6,
+  DIR_PWR6X,
+  DIR_PWR7,
+  DIR_PWR8,
+  DIR_PWR9,
+  DIR_PWR10,
+  DIR_PWR_FUTURE,
+  DIR_64
+};
 }
 
 class GlobalValue;
-class TargetMachine;
 
 class PPCSubtarget : public PPCGenSubtargetInfo {
 public:
@@ -135,12 +135,17 @@ protected:
   bool HasDirectMove;
   bool HasHTM;
   bool HasFloat128;
+  bool HasFusion;
+  bool HasAddiLoadFusion;
+  bool HasAddisLoadFusion;
   bool IsISA3_0;
+  bool IsISA3_1;
   bool UseLongCalls;
   bool SecurePlt;
   bool VectorsUseTwoUnits;
   bool UsePPCPreRASchedStrategy;
   bool UsePPCPostRASchedStrategy;
+  bool PredictableSelectIsExpensive;
 
   POPCNTDKind HasPOPCNTD;
 
@@ -305,7 +310,11 @@ public:
   bool hasHTM() const { return HasHTM; }
   bool hasFloat128() const { return HasFloat128; }
   bool isISA3_0() const { return IsISA3_0; }
+  bool isISA3_1() const { return IsISA3_1; }
   bool useLongCalls() const { return UseLongCalls; }
+  bool hasFusion() const { return HasFusion; }
+  bool hasAddiLoadFusion() const { return HasAddiLoadFusion; }
+  bool hasAddisLoadFusion() const { return HasAddisLoadFusion; }
   bool needsSwapsForVSXMemOps() const {
     return hasVSX() && isLittleEndian() && !hasP9Vector();
   }
@@ -327,6 +336,7 @@ public:
 
   bool is64BitELFABI() const { return  isSVR4ABI() && isPPC64(); }
   bool is32BitELFABI() const { return  isSVR4ABI() && !isPPC64(); }
+  bool isUsingPCRelativeCalls() const;
 
   /// Originally, this function return hasISEL(). Now we always enable it,
   /// but may expand the ISEL instruction later.
@@ -388,6 +398,10 @@ public:
   }
 
   bool isXRaySupported() const override { return IsPPC64 && IsLittleEndian; }
+
+  bool isPredictableSelectIsExpensive() const {
+    return PredictableSelectIsExpensive;
+  }
 };
 } // End llvm namespace
 

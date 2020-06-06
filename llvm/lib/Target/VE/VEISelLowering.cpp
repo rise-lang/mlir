@@ -229,7 +229,7 @@ Register VETargetLowering::getRegisterByName(const char *RegName, LLT VT,
                      .Case("sp", VE::SX11)    // Stack pointer
                      .Case("fp", VE::SX9)     // Frame pointer
                      .Case("sl", VE::SX8)     // Stack limit
-                     .Case("lr", VE::SX10)    // Link regsiter
+                     .Case("lr", VE::SX10)    // Link register
                      .Case("tp", VE::SX14)    // Thread pointer
                      .Case("outer", VE::SX12) // Outer regiser
                      .Case("info", VE::SX17)  // Info area register
@@ -447,7 +447,7 @@ SDValue VETargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Set inreg flag manually for codegen generated library calls that
   // return float.
-  if (CLI.Ins.size() == 1 && CLI.Ins[0].VT == MVT::f32 && !CLI.CS)
+  if (CLI.Ins.size() == 1 && CLI.Ins[0].VT == MVT::f32 && !CLI.CB)
     CLI.Ins[0].Flags.setInReg();
 
   RVInfo.AnalyzeCallResult(CLI.Ins, RetCC_VE);
@@ -572,6 +572,7 @@ VETargetLowering::VETargetLowering(const TargetMachine &TM,
   MVT PtrVT = MVT::getIntegerVT(TM.getPointerSizeInBits(0));
   setOperationAction(ISD::BlockAddress, PtrVT, Custom);
   setOperationAction(ISD::GlobalAddress, PtrVT, Custom);
+  setOperationAction(ISD::GlobalTLSAddress, PtrVT, Custom);
 
   /// VAARG handling {
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
@@ -581,6 +582,11 @@ VETargetLowering::VETargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
   /// } VAARG handling
+
+  /// Stack {
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
+  /// } Stack
 
   /// Int Ops {
   for (MVT IntVT : {MVT::i32, MVT::i64}) {
@@ -640,6 +646,8 @@ const char *VETargetLowering::getTargetNodeName(unsigned Opcode) const {
     TARGET_NODE_CASE(Lo)
     TARGET_NODE_CASE(Hi)
     TARGET_NODE_CASE(GETFUNPLT)
+    TARGET_NODE_CASE(GETSTACKTOP)
+    TARGET_NODE_CASE(GETTLSADDR)
     TARGET_NODE_CASE(CALL)
     TARGET_NODE_CASE(RET_FLAG)
     TARGET_NODE_CASE(GLOBAL_BASE_REG)
@@ -748,6 +756,56 @@ SDValue VETargetLowering::LowerBlockAddress(SDValue Op,
   return makeAddress(Op, DAG);
 }
 
+SDValue
+VETargetLowering::LowerToTLSGeneralDynamicModel(SDValue Op,
+                                                SelectionDAG &DAG) const {
+  SDLoc dl(Op);
+
+  // Generate the following code:
+  //   t1: ch,glue = callseq_start t0, 0, 0
+  //   t2: i64,ch,glue = VEISD::GETTLSADDR t1, label, t1:1
+  //   t3: ch,glue = callseq_end t2, 0, 0, t2:2
+  //   t4: i64,ch,glue = CopyFromReg t3, Register:i64 $sx0, t3:1
+  SDValue Label = withTargetFlags(Op, 0, DAG);
+  EVT PtrVT = Op.getValueType();
+
+  // Lowering the machine isd will make sure everything is in the right
+  // location.
+  SDValue Chain = DAG.getEntryNode();
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  const uint32_t *Mask = Subtarget->getRegisterInfo()->getCallPreservedMask(
+      DAG.getMachineFunction(), CallingConv::C);
+  Chain = DAG.getCALLSEQ_START(Chain, 64, 0, dl);
+  SDValue Args[] = {Chain, Label, DAG.getRegisterMask(Mask), Chain.getValue(1)};
+  Chain = DAG.getNode(VEISD::GETTLSADDR, dl, NodeTys, Args);
+  Chain = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(64, dl, true),
+                             DAG.getIntPtrConstant(0, dl, true),
+                             Chain.getValue(1), dl);
+  Chain = DAG.getCopyFromReg(Chain, dl, VE::SX0, PtrVT, Chain.getValue(1));
+
+  // GETTLSADDR will be codegen'ed as call. Inform MFI that function has calls.
+  MachineFrameInfo &MFI = DAG.getMachineFunction().getFrameInfo();
+  MFI.setHasCalls(true);
+
+  // Also generate code to prepare a GOT register if it is PIC.
+  if (isPositionIndependent()) {
+    MachineFunction &MF = DAG.getMachineFunction();
+    Subtarget->getInstrInfo()->getGlobalBaseReg(&MF);
+  }
+
+  return Chain;
+}
+
+SDValue VETargetLowering::LowerGlobalTLSAddress(SDValue Op,
+                                                SelectionDAG &DAG) const {
+  // The current implementation of nld (2.26) doesn't allow local exec model
+  // code described in VE-tls_v1.1.pdf (*1) as its input. Instead, we always
+  // generate the general dynamic model code sequence.
+  //
+  // *1: https://www.nec.com/en/global/prod/hpc/aurora/document/VE-tls_v1.1.pdf
+  return LowerToTLSGeneralDynamicModel(Op, DAG);
+}
+
 SDValue VETargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
   VEMachineFunctionInfo *FuncInfo = MF.getInfo<VEMachineFunctionInfo>();
@@ -808,14 +866,83 @@ SDValue VETargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
                      std::min(PtrVT.getSizeInBits(), VT.getSizeInBits()) / 8);
 }
 
+SDValue VETargetLowering::lowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  // Generate following code.
+  //   (void)__llvm_grow_stack(size);
+  //   ret = GETSTACKTOP;        // pseudo instruction
+  SDLoc DL(Op);
+
+  // Get the inputs.
+  SDNode *Node = Op.getNode();
+  SDValue Chain = Op.getOperand(0);
+  SDValue Size = Op.getOperand(1);
+  MaybeAlign Alignment(Op.getConstantOperandVal(2));
+  EVT VT = Node->getValueType(0);
+
+  // Chain the dynamic stack allocation so that it doesn't modify the stack
+  // pointer when other instructions are using the stack.
+  Chain = DAG.getCALLSEQ_START(Chain, 0, 0, DL);
+
+  const TargetFrameLowering &TFI = *Subtarget->getFrameLowering();
+  Align StackAlign = TFI.getStackAlign();
+  bool NeedsAlign = Alignment.valueOrOne() > StackAlign;
+
+  // Prepare arguments
+  TargetLowering::ArgListTy Args;
+  TargetLowering::ArgListEntry Entry;
+  Entry.Node = Size;
+  Entry.Ty = Entry.Node.getValueType().getTypeForEVT(*DAG.getContext());
+  Args.push_back(Entry);
+  if (NeedsAlign) {
+    Entry.Node = DAG.getConstant(~(Alignment->value() - 1ULL), DL, VT);
+    Entry.Ty = Entry.Node.getValueType().getTypeForEVT(*DAG.getContext());
+    Args.push_back(Entry);
+  }
+  Type *RetTy = Type::getVoidTy(*DAG.getContext());
+
+  EVT PtrVT = Op.getValueType();
+  SDValue Callee;
+  if (NeedsAlign) {
+    Callee = DAG.getTargetExternalSymbol("__ve_grow_stack_align", PtrVT, 0);
+  } else {
+    Callee = DAG.getTargetExternalSymbol("__ve_grow_stack", PtrVT, 0);
+  }
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(DL)
+      .setChain(Chain)
+      .setCallee(CallingConv::PreserveAll, RetTy, Callee, std::move(Args))
+      .setDiscardResult(true);
+  std::pair<SDValue, SDValue> pair = LowerCallTo(CLI);
+  Chain = pair.second;
+  SDValue Result = DAG.getNode(VEISD::GETSTACKTOP, DL, VT, Chain);
+  if (NeedsAlign) {
+    Result = DAG.getNode(ISD::ADD, DL, VT, Result,
+                         DAG.getConstant((Alignment->value() - 1ULL), DL, VT));
+    Result = DAG.getNode(ISD::AND, DL, VT, Result,
+                         DAG.getConstant(~(Alignment->value() - 1ULL), DL, VT));
+  }
+  //  Chain = Result.getValue(1);
+  Chain = DAG.getCALLSEQ_END(Chain, DAG.getIntPtrConstant(0, DL, true),
+                             DAG.getIntPtrConstant(0, DL, true), SDValue(), DL);
+
+  SDValue Ops[2] = {Result, Chain};
+  return DAG.getMergeValues(Ops, DL);
+}
+
 SDValue VETargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default:
     llvm_unreachable("Should not custom lower this!");
   case ISD::BlockAddress:
     return LowerBlockAddress(Op, DAG);
+  case ISD::DYNAMIC_STACKALLOC:
+    return lowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::GlobalTLSAddress:
+    return LowerGlobalTLSAddress(Op, DAG);
   case ISD::VASTART:
     return LowerVASTART(Op, DAG);
   case ISD::VAARG:

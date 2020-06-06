@@ -148,13 +148,18 @@ void llvm_execute_on_thread_async(
   class ThreadPoolStrategy {
   public:
     // The default value (0) means all available threads should be used,
-    // excluding affinity mask. If set, this value only represents a suggested
-    // high bound, the runtime might choose a lower value (not higher).
+    // taking the affinity mask into account. If set, this value only represents
+    // a suggested high bound, the runtime might choose a lower value (not
+    // higher).
     unsigned ThreadsRequested = 0;
 
     // If SMT is active, use hyper threads. If false, there will be only one
     // std::thread per core.
     bool UseHyperThreads = true;
+
+    // If set, will constrain 'ThreadsRequested' to the number of hardware
+    // threads, or hardware cores.
+    bool Limit = false;
 
     /// Retrieves the max available threads for the current strategy. This
     /// accounts for affinity masks and takes advantage of all CPU sockets.
@@ -165,20 +170,44 @@ void llvm_execute_on_thread_async(
     /// sockets. \p ThreadPoolNum represents a number bounded by [0,
     /// compute_thread_count()).
     void apply_thread_strategy(unsigned ThreadPoolNum) const;
+
+    /// Finds the CPU socket where a thread should go. Returns 'None' if the
+    /// thread shall remain on the actual CPU socket.
+    Optional<unsigned> compute_cpu_socket(unsigned ThreadPoolNum) const;
   };
+
+  /// Build a strategy from a number of threads as a string provided in \p Num.
+  /// When Num is above the max number of threads specified by the \p Default
+  /// strategy, we attempt to equally allocate the threads on all CPU sockets.
+  /// "0" or an empty string will return the \p Default strategy.
+  /// "all" for using all hardware threads.
+  Optional<ThreadPoolStrategy>
+  get_threadpool_strategy(StringRef Num, ThreadPoolStrategy Default = {});
 
   /// Returns a thread strategy for tasks requiring significant memory or other
   /// resources. To be used for workloads where hardware_concurrency() proves to
   /// be less efficient. Avoid this strategy if doing lots of I/O. Currently
   /// based on physical cores, if available for the host system, otherwise falls
   /// back to hardware_concurrency(). Returns 1 when LLVM is configured with
-  /// LLVM_ENABLE_THREADS = OFF
+  /// LLVM_ENABLE_THREADS = OFF.
   inline ThreadPoolStrategy
   heavyweight_hardware_concurrency(unsigned ThreadCount = 0) {
     ThreadPoolStrategy S;
     S.UseHyperThreads = false;
     S.ThreadsRequested = ThreadCount;
     return S;
+  }
+
+  /// Like heavyweight_hardware_concurrency() above, but builds a strategy
+  /// based on the rules described for get_threadpool_strategy().
+  /// If \p Num is invalid, returns a default strategy where one thread per
+  /// hardware core is used.
+  inline ThreadPoolStrategy heavyweight_hardware_concurrency(StringRef Num) {
+    Optional<ThreadPoolStrategy> S =
+        get_threadpool_strategy(Num, heavyweight_hardware_concurrency());
+    if (S)
+      return *S;
+    return heavyweight_hardware_concurrency();
   }
 
   /// Returns a default thread strategy where all available hardware ressources
@@ -219,7 +248,7 @@ void llvm_execute_on_thread_async(
 
   /// Returns a mask that represents on which hardware thread, core, CPU, NUMA
   /// group, the calling thread can be executed. On Windows, threads cannot
-  /// cross CPU boundaries.
+  /// cross CPU sockets boundaries.
   llvm::BitVector get_thread_affinity_mask();
 
   /// Returns how many physical CPUs or NUMA groups the system has.

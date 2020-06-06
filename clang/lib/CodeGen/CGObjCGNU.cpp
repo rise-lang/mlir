@@ -255,11 +255,11 @@ protected:
       isDynamic=true) {
     int attrs = property->getPropertyAttributes();
     // For read-only properties, clear the copy and retain flags
-    if (attrs & ObjCPropertyDecl::OBJC_PR_readonly) {
-      attrs &= ~ObjCPropertyDecl::OBJC_PR_copy;
-      attrs &= ~ObjCPropertyDecl::OBJC_PR_retain;
-      attrs &= ~ObjCPropertyDecl::OBJC_PR_weak;
-      attrs &= ~ObjCPropertyDecl::OBJC_PR_strong;
+    if (attrs & ObjCPropertyAttribute::kind_readonly) {
+      attrs &= ~ObjCPropertyAttribute::kind_copy;
+      attrs &= ~ObjCPropertyAttribute::kind_retain;
+      attrs &= ~ObjCPropertyAttribute::kind_weak;
+      attrs &= ~ObjCPropertyAttribute::kind_strong;
     }
     // The first flags field has the same attribute values as clang uses internally
     Fields.addInt(Int8Ty, attrs & 0xff);
@@ -617,6 +617,13 @@ public:
   llvm::Value *GenerateProtocolRef(CodeGenFunction &CGF,
                                    const ObjCProtocolDecl *PD) override;
   void GenerateProtocol(const ObjCProtocolDecl *PD) override;
+
+  virtual llvm::Constant *GenerateProtocolRef(const ObjCProtocolDecl *PD);
+
+  llvm::Constant *GetOrEmitProtocol(const ObjCProtocolDecl *PD) override {
+    return GenerateProtocolRef(PD);
+  }
+
   llvm::Function *ModuleInitFunction() override;
   llvm::FunctionCallee GetPropertyGetFunction() override;
   llvm::FunctionCallee GetPropertySetFunction() override;
@@ -821,7 +828,7 @@ class CGObjCGNUstep : public CGObjCGNU {
       // Slot_t objc_slot_lookup_super(struct objc_super*, SEL);
       SlotLookupSuperFn.init(&CGM, "objc_slot_lookup_super", SlotTy,
                              PtrToObjCSuperTy, SelectorTy);
-      // If we're in ObjC++ mode, then we want to make 
+      // If we're in ObjC++ mode, then we want to make
       if (usesSEHExceptions) {
           llvm::Type *VoidTy = llvm::Type::getVoidTy(VMContext);
           // void objc_exception_rethrow(void)
@@ -1348,7 +1355,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
   void GenerateProtocol(const ObjCProtocolDecl *PD) override {
     // Do nothing - we only emit referenced protocols.
   }
-  llvm::Constant *GenerateProtocolRef(const ObjCProtocolDecl *PD) {
+  llvm::Constant *GenerateProtocolRef(const ObjCProtocolDecl *PD) override {
     std::string ProtocolName = PD->getNameAsString();
     auto *&Protocol = ExistingProtocols[ProtocolName];
     if (Protocol)
@@ -1557,7 +1564,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
     // We have to do this by hand, rather than with @llvm.ctors, so that the
     // linker can remove the duplicate invocations.
     auto *InitVar = new llvm::GlobalVariable(TheModule, LoadFunction->getType(),
-        /*isConstant*/true, llvm::GlobalValue::LinkOnceAnyLinkage,
+        /*isConstant*/false, llvm::GlobalValue::LinkOnceAnyLinkage,
         LoadFunction, ".objc_ctor");
     // Check that this hasn't been renamed.  This shouldn't happen, because
     // this function should be called precisely once.
@@ -1657,7 +1664,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
       b.CreateRetVoid();
       // We can't use the normal LLVM global initialisation array, because we
       // need to specify that this runs early in library initialisation.
-      auto *InitVar = new llvm::GlobalVariable(CGM.getModule(), Init->getType(), 
+      auto *InitVar = new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
           /*isConstant*/true, llvm::GlobalValue::InternalLinkage,
           Init, ".objc_early_init_ptr");
       InitVar->setSection(".CRT$XCLb");
@@ -3039,13 +3046,18 @@ CGObjCGNU::GenerateProtocolList(ArrayRef<std::string> Protocols) {
 
 llvm::Value *CGObjCGNU::GenerateProtocolRef(CodeGenFunction &CGF,
                                             const ObjCProtocolDecl *PD) {
+  auto protocol = GenerateProtocolRef(PD);
+  llvm::Type *T =
+      CGM.getTypes().ConvertType(CGM.getContext().getObjCProtoType());
+  return CGF.Builder.CreateBitCast(protocol, llvm::PointerType::getUnqual(T));
+}
+
+llvm::Constant *CGObjCGNU::GenerateProtocolRef(const ObjCProtocolDecl *PD) {
   llvm::Constant *&protocol = ExistingProtocols[PD->getNameAsString()];
   if (!protocol)
     GenerateProtocol(PD);
   assert(protocol && "Unknown protocol");
-  llvm::Type *T =
-    CGM.getTypes().ConvertType(CGM.getContext().getObjCProtoType());
-  return CGF.Builder.CreateBitCast(protocol, llvm::PointerType::getUnqual(T));
+  return protocol;
 }
 
 llvm::Constant *

@@ -320,6 +320,46 @@ Preferred:
   /// Builds a B-tree in order to do foo.  See paper by...
   void example() { ... }
 
+Error and Warning Messages
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Clear diagnostic messages are important to help users identify and fix issues in
+their inputs. Use succinct but correct English prose that gives the user the
+context needed to understand what went wrong. Also, to match error message
+styles commonly produced by other tools, start the first sentence with a
+lower-case letter, and finish the last sentence without a period, if it would
+end in one otherwise. Sentences which end with different punctuation, such as
+"did you forget ';'?", should still do so.
+
+For example this is a good error message:
+
+.. code-block:: none
+
+  error: file.o: section header 3 is corrupt. Size is 10 when it should be 20
+
+This is a bad message, since it does not provide useful information and uses the
+wrong style:
+
+.. code-block:: none
+
+  error: file.o: Corrupt section header.
+
+As with other coding standards, individual projects, such as the Clang Static
+Analyzer, may have preexisting styles that do not conform to this. If a
+different formatting scheme is used consistently throughout the project, use
+that style instead. Otherwise, this standard applies to all LLVM tools,
+including clang, clang-tidy, and so on.
+
+If the tool or project does not have existing functions to emit warnings or
+errors, use the error and warning handlers provided in ``Support/WithColor.h``
+to ensure they are printed in the appropriate style, rather than printing to
+stderr directly.
+
+When using ``report_fatal_error``, follow the same standards for the message as
+regular error messages. Assertion messages and ``llvm_unreachable`` calls do not
+necessarily need to follow these same styles as they are automatically
+formatted, and thus these guidelines may not be suitable.
+
 ``#include`` Style
 ^^^^^^^^^^^^^^^^^^
 
@@ -762,6 +802,49 @@ your private interface remains private and undisturbed by outsiders.
     It's okay to put extra implementation methods in a public class itself. Just
     make them private (or protected) and all is well.
 
+Use Namespace Qualifiers to Implement Previously Declared Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When providing an out of line implementation of a function in a source file, do
+not open namespace blocks in the source file. Instead, use namespace qualifiers
+to help ensure that your definition matches an existing declaration. Do this:
+
+.. code-block:: c++
+
+  // Foo.h
+  namespace llvm {
+  int foo(const char *s);
+  }
+
+  // Foo.cpp
+  #include "Foo.h"
+  using namespace llvm;
+  int llvm::foo(const char *s) {
+    // ...
+  }
+
+Doing this helps to avoid bugs where the definition does not match the
+declaration from the header. For example, the following C++ code defines a new
+overload of ``llvm::foo`` instead of providing a definition for the existing
+function declared in the header:
+
+.. code-block:: c++
+
+  // Foo.cpp
+  #include "Foo.h"
+  namespace llvm {
+  int foo(char *s) { // Mismatch between "const char *" and "char *"
+  }
+  } // end namespace llvm
+
+This error will not be caught until the build is nearly complete, when the
+linker fails to find a definition for any uses of the original function.  If the
+function were instead defined with a namespace qualifier, the error would have
+been caught immediately when the definition was compiled.
+
+Class method implementations must already name the class and new overloads
+cannot be introduced out of line, so this recommendation does not apply to them.
+
 .. _early exits:
 
 Use Early Exits and ``continue`` to Simplify Code
@@ -1109,6 +1192,13 @@ and then exit the program. When assertions are disabled (i.e. in release
 builds), ``llvm_unreachable`` becomes a hint to compilers to skip generating
 code for this branch. If the compiler does not support this, it will fall back
 to the "abort" implementation.
+
+Use ``llvm_unreachable`` to mark a specific point in code that should never be
+reached. This is especially desirable for addressing warnings about unreachable
+branches, etc., but can be used whenever reaching a particular code path is
+unconditionally a bug (not originating from user input; see below) of some kind.
+Use of ``assert`` should always include a testable predicate (as opposed to
+``assert(false)``).
 
 Neither assertions or ``llvm_unreachable`` will abort the program on a release
 build. If the error condition can be triggered by user input then the

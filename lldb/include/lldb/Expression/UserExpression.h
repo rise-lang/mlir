@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_UserExpression_h_
-#define liblldb_UserExpression_h_
+#ifndef LLDB_EXPRESSION_USEREXPRESSION_H
+#define LLDB_EXPRESSION_USEREXPRESSION_H
 
 #include <memory>
 #include <string>
@@ -194,7 +194,7 @@ public:
 
   /// Return the language that should be used when parsing.  To use the
   /// default, return eLanguageTypeUnknown.
-  lldb::LanguageType Language() override { return m_language; }
+  lldb::LanguageType Language() const override { return m_language; }
 
   /// Return the desired result type of the function, or eResultTypeAny if
   /// indifferent.
@@ -308,4 +308,4 @@ protected:
 
 } // namespace lldb_private
 
-#endif // liblldb_UserExpression_h_
+#endif // LLDB_EXPRESSION_USEREXPRESSION_H

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
-#define SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
 
 #include "SymbolFileDWARF.h"
 
@@ -31,8 +31,8 @@ public:
 
   DWARFCompileUnit *GetDWOCompileUnitForHash(uint64_t hash);
 
-  size_t GetObjCMethodDIEOffsets(lldb_private::ConstString class_name,
-                                 DIEArray &method_die_offsets) override;
+  void GetObjCMethods(lldb_private::ConstString class_name,
+                      llvm::function_ref<bool(DWARFDIE die)> callback) override;
 
   llvm::Expected<lldb_private::TypeSystem &>
   GetTypeSystemForLanguage(lldb::LanguageType language) override;
@@ -69,4 +69,4 @@ protected:
   SymbolFileDWARF &m_base_symbol_file;
 };
 
-#endif // SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H

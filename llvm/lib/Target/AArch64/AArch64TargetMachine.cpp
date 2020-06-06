@@ -11,6 +11,7 @@
 
 #include "AArch64TargetMachine.h"
 #include "AArch64.h"
+#include "AArch64MachineFunctionInfo.h"
 #include "AArch64MacroFusion.h"
 #include "AArch64Subtarget.h"
 #include "AArch64TargetObjectFile.h"
@@ -26,6 +27,7 @@
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
 #include "llvm/CodeGen/GlobalISel/Localizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
+#include "llvm/CodeGen/MIRParser/MIParser.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -146,6 +148,11 @@ static cl::opt<int> EnableGlobalISelAtO(
     cl::desc("Enable GlobalISel at or below an opt level (-1 to disable)"),
     cl::init(0));
 
+static cl::opt<bool> EnableSVEIntrinsicOpts(
+    "aarch64-sve-intrinsic-opts", cl::Hidden,
+    cl::desc("Enable SVE intrinsic opts"),
+    cl::init(true));
+
 static cl::opt<bool> EnableFalkorHWPFFix("aarch64-enable-falkor-hwpf-fix",
                                          cl::init(true), cl::Hidden);
 
@@ -176,12 +183,14 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAArch64Target() {
   initializeAArch64LoadStoreOptPass(*PR);
   initializeAArch64SIMDInstrOptPass(*PR);
   initializeAArch64PreLegalizerCombinerPass(*PR);
+  initializeAArch64PostLegalizerCombinerPass(*PR);
   initializeAArch64PromoteConstantPass(*PR);
   initializeAArch64RedundantCopyEliminationPass(*PR);
   initializeAArch64StorePairSuppressPass(*PR);
   initializeFalkorHWPFFixPass(*PR);
   initializeFalkorMarkStridedAccessesLegacyPass(*PR);
   initializeLDTLSCleanupPass(*PR);
+  initializeSVEIntrinsicOptsPass(*PR);
   initializeAArch64SpeculationHardeningPass(*PR);
   initializeAArch64StackTaggingPass(*PR);
   initializeAArch64StackTaggingPreRAPass(*PR);
@@ -309,6 +318,9 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
 
   // AArch64 supports default outlining behaviour.
   setSupportsDefaultOutlining(true);
+
+  // AArch64 supports the debug entry values.
+  setSupportsDebugEntryValues(true);
 }
 
 AArch64TargetMachine::~AArch64TargetMachine() = default;
@@ -399,6 +411,7 @@ public:
   bool addIRTranslator() override;
   void addPreLegalizeMachineIR() override;
   bool addLegalizeMachineIR() override;
+  void addPreRegBankSelect() override;
   bool addRegBankSelect() override;
   void addPreGlobalInstructionSelect() override;
   bool addGlobalInstructionSelect() override;
@@ -431,6 +444,10 @@ void AArch64PassConfig::addIRPasses() {
   // ourselves.
   addPass(createAtomicExpandPass());
 
+  // Expand any SVE vector library calls that we can't code generate directly.
+  if (EnableSVEIntrinsicOpts && TM->getOptLevel() == CodeGenOpt::Aggressive)
+    addPass(createSVEIntrinsicOptsPass());
+
   // Cmpxchg instructions are often used with a subsequent comparison to
   // determine whether it succeeded. We can exploit existing control-flow in
   // ldrex/strex loops to simplify this, but it needs tidying up.
@@ -450,6 +467,9 @@ void AArch64PassConfig::addIRPasses() {
 
   TargetPassConfig::addIRPasses();
 
+  addPass(createAArch64StackTaggingPass(
+      /*IsOptNone=*/TM->getOptLevel() == CodeGenOpt::None));
+
   // Match interleaved memory accesses to ldN/stN intrinsics.
   if (TM->getOptLevel() != CodeGenOpt::None) {
     addPass(createInterleavedLoadCombinePass());
@@ -468,9 +488,6 @@ void AArch64PassConfig::addIRPasses() {
     // invariant.
     addPass(createLICMPass());
   }
-
-  addPass(createAArch64StackTaggingPass(/* MergeInit = */ TM->getOptLevel() !=
-                                        CodeGenOpt::None));
 
   // Add Control Flow Guard checks.
   if (TM->getTargetTriple().isOSWindows())
@@ -535,6 +552,14 @@ void AArch64PassConfig::addPreLegalizeMachineIR() {
 bool AArch64PassConfig::addLegalizeMachineIR() {
   addPass(new Legalizer());
   return false;
+}
+
+void AArch64PassConfig::addPreRegBankSelect() {
+  // For now we don't add this to the pipeline for -O0. We could do in future
+  // if we split the combines into separate O0/opt groupings.
+  bool IsOptNone = getOptLevel() == CodeGenOpt::None;
+  if (!IsOptNone)
+    addPass(createAArch64PostLegalizeCombiner(IsOptNone));
 }
 
 bool AArch64PassConfig::addRegBankSelect() {
@@ -644,4 +669,28 @@ void AArch64PassConfig::addPreEmitPass() {
   if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH &&
       TM->getTargetTriple().isOSBinFormatMachO())
     addPass(createAArch64CollectLOHPass());
+
+  // SVE bundles move prefixes with destructive operations.
+  addPass(createUnpackMachineBundles(nullptr));
+}
+
+yaml::MachineFunctionInfo *
+AArch64TargetMachine::createDefaultFuncInfoYAML() const {
+  return new yaml::AArch64FunctionInfo();
+}
+
+yaml::MachineFunctionInfo *
+AArch64TargetMachine::convertFuncInfoToYAML(const MachineFunction &MF) const {
+  const auto *MFI = MF.getInfo<AArch64FunctionInfo>();
+  return new yaml::AArch64FunctionInfo(*MFI);
+}
+
+bool AArch64TargetMachine::parseMachineFunctionInfo(
+    const yaml::MachineFunctionInfo &MFI, PerFunctionMIParsingState &PFS,
+    SMDiagnostic &Error, SMRange &SourceRange) const {
+  const auto &YamlMFI =
+      reinterpret_cast<const yaml::AArch64FunctionInfo &>(MFI);
+  MachineFunction &MF = PFS.MF;
+  MF.getInfo<AArch64FunctionInfo>()->initializeBaseYamlFields(YamlMFI);
+  return false;
 }

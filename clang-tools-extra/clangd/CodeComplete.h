@@ -16,12 +16,14 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_CODECOMPLETE_H
 
 #include "Headers.h"
-#include "Logger.h"
-#include "Path.h"
 #include "Protocol.h"
+#include "Quality.h"
 #include "index/Index.h"
 #include "index/Symbol.h"
 #include "index/SymbolOrigin.h"
+#include "support/Logger.h"
+#include "support/Markup.h"
+#include "support/Path.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "clang/Sema/CodeCompleteOptions.h"
 #include "clang/Tooling/CompilationDatabase.h"
@@ -29,12 +31,14 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
+#include <functional>
 #include <future>
 
 namespace clang {
 class NamedDecl;
 namespace clangd {
 struct PreambleData;
+struct CodeCompletion;
 
 struct CodeCompleteOptions {
   /// Returns options that can be passed to clang's completion engine.
@@ -69,6 +73,9 @@ struct CodeCompleteOptions {
   /// Limit the number of results returned (0 means no limit).
   /// If more results are available, we set CompletionList.isIncomplete.
   size_t Limit = 0;
+
+  /// Whether to present doc comments as plain-text or markdown.
+  MarkupKind DocumentationFormat = MarkupKind::PlainText;
 
   enum IncludeInsertion {
     IWYU,
@@ -129,6 +136,16 @@ struct CodeCompleteOptions {
     /// Always use text-based completion.
     NeverParse,
   } RunParser = ParseIfReady;
+
+  /// Callback invoked on all CompletionCandidate after they are scored and
+  /// before they are ranked (by -Score). Thus the results are yielded in
+  /// arbitrary order.
+  ///
+  /// This callbacks allows capturing various internal structures used by clangd
+  /// during code completion. Eg: Symbol quality and relevance signals.
+  std::function<void(const CodeCompletion &, const SymbolQualitySignals &,
+                     const SymbolRelevanceSignals &, float Score)>
+      RecordCCResult;
 };
 
 // Semi-structured representation of a code-complete suggestion for our C++ API.
@@ -148,7 +165,8 @@ struct CodeCompletion {
   std::string SnippetSuffix;
   // Type to be displayed for this completion.
   std::string ReturnType;
-  std::string Documentation;
+  // The parsed documentation comment.
+  llvm::Optional<markup::Document> Documentation;
   CompletionItemKind Kind = CompletionItemKind::Missing;
   // This completion item may represent several symbols that can be inserted in
   // the same way, such as function overloads. In this case BundleSize > 1, and
@@ -263,7 +281,7 @@ CodeCompleteResult codeComplete(PathRef FileName,
 /// Get signature help at a specified \p Pos in \p FileName.
 SignatureHelp signatureHelp(PathRef FileName,
                             const tooling::CompileCommand &Command,
-                            const PreambleData *Preamble, StringRef Contents,
+                            const PreambleData &Preamble, StringRef Contents,
                             Position Pos,
                             IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
                             const SymbolIndex *Index);
@@ -295,6 +313,10 @@ struct CompletionPrefix {
 // Heuristically parses before Offset to determine what should be completed.
 CompletionPrefix guessCompletionPrefix(llvm::StringRef Content,
                                        unsigned Offset);
+
+// Whether it makes sense to complete at the point based on typed characters.
+// For instance, we implicitly trigger at `a->^` but not at `a>^`.
+bool allowImplicitCompletion(llvm::StringRef Content, unsigned Offset);
 
 } // namespace clangd
 } // namespace clang

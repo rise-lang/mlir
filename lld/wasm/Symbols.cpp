@@ -29,6 +29,10 @@ std::string toString(const wasm::Symbol &sym) {
 }
 
 std::string maybeDemangleSymbol(StringRef name) {
+  // WebAssembly requires caller and callee signatures to match, so we mangle
+  // `main` in the case where we need to pass it arguments.
+  if (name == "__main_argc_argv")
+    return "main";
   if (wasm::config->demangle)
     return demangleItanium(name);
   return std::string(name);
@@ -152,7 +156,7 @@ void Symbol::setGOTIndex(uint32_t index) {
   LLVM_DEBUG(dbgs() << "setGOTIndex " << name << " -> " << index << "\n");
   assert(gotIndex == INVALID_INDEX);
   if (config->isPic) {
-    // Any symbol that is assigned a GOT entry must be exported othewise the
+    // Any symbol that is assigned a GOT entry must be exported otherwise the
     // dynamic linker won't be able create the entry that contains it.
     forceExport = true;
   }

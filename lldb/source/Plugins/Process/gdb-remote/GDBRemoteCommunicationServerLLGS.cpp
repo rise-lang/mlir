@@ -458,11 +458,15 @@ static llvm::StringRef GetKindGenericOrEmpty(const RegisterInfo &reg_info) {
   }
 }
 
-static void CollectRegNums(const uint32_t *reg_num, StreamString &response) {
+static void CollectRegNums(const uint32_t *reg_num, StreamString &response,
+                           bool usehex) {
   for (int i = 0; *reg_num != LLDB_INVALID_REGNUM; ++reg_num, ++i) {
     if (i > 0)
       response.PutChar(',');
-    response.Printf("%" PRIx32, *reg_num);
+    if (usehex)
+      response.Printf("%" PRIx32, *reg_num);
+    else
+      response.Printf("%" PRIu32, *reg_num);
   }
 }
 
@@ -1011,9 +1015,9 @@ void GDBRemoteCommunicationServerLLGS::DataAvailableCallback() {
 }
 
 Status GDBRemoteCommunicationServerLLGS::InitializeConnection(
-    std::unique_ptr<Connection> &&connection) {
+    std::unique_ptr<Connection> connection) {
   IOObjectSP read_object_sp = connection->GetReadObject();
-  GDBRemoteCommunicationServer::SetConnection(connection.release());
+  GDBRemoteCommunicationServer::SetConnection(std::move(connection));
 
   Status error;
   m_network_handle_up = m_mainloop.RegisterReadObject(
@@ -1049,7 +1053,7 @@ Status GDBRemoteCommunicationServerLLGS::SetSTDIOFileDescriptor(int fd) {
   }
 
   m_stdio_communication.SetCloseOnEOF(false);
-  m_stdio_communication.SetConnection(conn_up.release());
+  m_stdio_communication.SetConnection(std::move(conn_up));
   if (!m_stdio_communication.IsConnected()) {
     error.SetErrorString(
         "failed to set connection for inferior I/O communication");
@@ -1816,13 +1820,13 @@ GDBRemoteCommunicationServerLLGS::Handle_qRegisterInfo(
 
   if (reg_info->value_regs && reg_info->value_regs[0] != LLDB_INVALID_REGNUM) {
     response.PutCString("container-regs:");
-    CollectRegNums(reg_info->value_regs, response);
+    CollectRegNums(reg_info->value_regs, response, true);
     response.PutChar(';');
   }
 
   if (reg_info->invalidate_regs && reg_info->invalidate_regs[0]) {
     response.PutCString("invalidate-regs:");
-    CollectRegNums(reg_info->invalidate_regs, response);
+    CollectRegNums(reg_info->invalidate_regs, response, true);
     response.PutChar(';');
   }
 
@@ -2036,7 +2040,7 @@ GDBRemoteCommunicationServerLLGS::Handle_P(StringExtractorGDBRemote &packet) {
         packet, "P packet missing '=' char after register number");
 
   // Parse out the value.
-  uint8_t reg_bytes[32]; // big enough to support up to 256 bit ymmN register
+  uint8_t reg_bytes[RegisterValue::kMaxRegisterByteSize];
   size_t reg_size = packet.GetHexBytesAvail(reg_bytes);
 
   // Get the thread to use.
@@ -2807,13 +2811,13 @@ GDBRemoteCommunicationServerLLGS::BuildTargetXml() {
     if (reg_info->value_regs &&
         reg_info->value_regs[0] != LLDB_INVALID_REGNUM) {
       response.PutCString("value_regnums=\"");
-      CollectRegNums(reg_info->value_regs, response);
+      CollectRegNums(reg_info->value_regs, response, false);
       response.Printf("\" ");
     }
 
     if (reg_info->invalidate_regs && reg_info->invalidate_regs[0]) {
       response.PutCString("invalidate_regnums=\"");
-      CollectRegNums(reg_info->invalidate_regs, response);
+      CollectRegNums(reg_info->invalidate_regs, response, false);
       response.Printf("\" ");
     }
 

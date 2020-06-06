@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_Module_h_
-#define liblldb_Module_h_
+#ifndef LLDB_CORE_MODULE_H
+#define LLDB_CORE_MODULE_H
 
 #include "lldb/Core/Address.h"
 #include "lldb/Core/ModuleList.h"
@@ -20,6 +20,7 @@
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/Utility/XcodeSDK.h"
 #include "lldb/Utility/UUID.h"
 #include "lldb/lldb-defines.h"
 #include "lldb/lldb-enumerations.h"
@@ -302,7 +303,7 @@ public:
   ///     A symbol context list that gets filled in with all of the
   ///     matches.
   void FindFunctions(ConstString name,
-                     const CompilerDeclContext *parent_decl_ctx,
+                     const CompilerDeclContext &parent_decl_ctx,
                      lldb::FunctionNameType name_type_mask, bool symbols_ok,
                      bool inlines_ok, SymbolContextList &sc_list);
 
@@ -365,7 +366,7 @@ public:
   ///     A list of variables that gets the matches appended to.
   ///
   void FindGlobalVariables(ConstString name,
-                           const CompilerDeclContext *parent_decl_ctx,
+                           const CompilerDeclContext &parent_decl_ctx,
                            size_t max_matches, VariableList &variable_list);
 
   /// Find global and static variables by regular expression.
@@ -444,7 +445,7 @@ public:
   /// \param[out] type_list
   ///     A type list gets populated with any matches.
   void FindTypesInNamespace(ConstString type_name,
-                            const CompilerDeclContext *parent_decl_ctx,
+                            const CompilerDeclContext &parent_decl_ctx,
                             size_t max_matches, TypeList &type_list);
 
   /// Get const accessor for the module architecture.
@@ -508,6 +509,11 @@ public:
   void SetObjectModificationTime(const llvm::sys::TimePoint<> &mod_time) {
     m_mod_time = mod_time;
   }
+
+  /// This callback will be called by SymbolFile implementations when
+  /// parsing a compile unit that contains SDK information.
+  /// \param sysroot will be added to the path remapping dictionary.
+  void RegisterXcodeSDK(llvm::StringRef sdk, llvm::StringRef sysroot);
 
   /// Tells whether this module is capable of being the main executable for a
   /// process.
@@ -971,6 +977,7 @@ protected:
   /// module that doesn't match where the sources currently are.
   PathMappingList m_source_mappings =
       ModuleList::GetGlobalModuleListProperties().GetSymlinkMappings();
+
   lldb::SectionListUP m_sections_up; ///< Unified section list for module that
                                      /// is used by the ObjectFile and and
                                      /// ObjectFile instances for the debug info
@@ -1037,14 +1044,15 @@ private:
   Module(); // Only used internally by CreateJITModule ()
 
   void FindTypes_Impl(
-      ConstString name, const CompilerDeclContext *parent_decl_ctx,
+      ConstString name, const CompilerDeclContext &parent_decl_ctx,
       size_t max_matches,
       llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
       TypeMap &types);
 
-  DISALLOW_COPY_AND_ASSIGN(Module);
+  Module(const Module &) = delete;
+  const Module &operator=(const Module &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_Module_h_
+#endif // LLDB_CORE_MODULE_H

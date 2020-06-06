@@ -833,8 +833,7 @@ struct TypeTestResolution {
     Single,    ///< Single element (last example in "Short Inline Bit Vectors")
     AllOnes,   ///< All-ones bit vector ("Eliminating Bit Vector Checks for
                ///  All-Ones Bit Vectors")
-    Unknown,   ///< Unknown (analysis not performed, don't lower)
-  } TheKind = Unknown;
+  } TheKind = Unsat;
 
   /// Range of size-1 expressed as a bit width. For example, if the size is in
   /// range [1,256], this number will be 8. This helps generate the most compact
@@ -1008,6 +1007,10 @@ private:
   StringSaver Saver;
   BumpPtrAllocator Alloc;
 
+  // The total number of basic blocks in the module in the per-module summary or
+  // the total number of basic blocks in the LTO unit in the combined index.
+  uint64_t BlockCount;
+
   // YAML I/O support.
   friend yaml::MappingTraits<ModuleSummaryIndex>;
 
@@ -1020,15 +1023,15 @@ private:
 public:
   // See HaveGVs variable comment.
   ModuleSummaryIndex(bool HaveGVs, bool EnableSplitLTOUnit = false)
-      : HaveGVs(HaveGVs), EnableSplitLTOUnit(EnableSplitLTOUnit), Saver(Alloc) {
-  }
+      : HaveGVs(HaveGVs), EnableSplitLTOUnit(EnableSplitLTOUnit), Saver(Alloc),
+        BlockCount(0) {}
 
   // Current version for the module summary in bitcode files.
   // The BitcodeSummaryVersion should be bumped whenever we introduce changes
   // in the way some record are interpreted, like flags for instance.
   // Note that incrementing this may require changes in both BitcodeReader.cpp
   // and BitcodeWriter.cpp.
-  static constexpr uint64_t BitcodeSummaryVersion = 9;
+  static constexpr uint64_t BitcodeSummaryVersion = 8;
 
   // Regular LTO module name for ASM writer
   static constexpr const char *getRegularLTOModuleName() {
@@ -1036,6 +1039,13 @@ public:
   }
 
   bool haveGVs() const { return HaveGVs; }
+
+  uint64_t getFlags() const;
+  void setFlags(uint64_t Flags);
+
+  uint64_t getBlockCount() const { return BlockCount; }
+  void addBlockCount(uint64_t C) { BlockCount += C; }
+  void setBlockCount(uint64_t C) { BlockCount = C; }
 
   gvsummary_iterator begin() { return GlobalValueMap.begin(); }
   const_gvsummary_iterator begin() const { return GlobalValueMap.begin(); }

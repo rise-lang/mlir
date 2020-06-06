@@ -7,11 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 def isWave32 : Predicate<"Subtarget->getWavefrontSize() == 32">,
-  AssemblerPredicate <"FeatureWavefrontSize32">;
+  AssemblerPredicate <(all_of FeatureWavefrontSize32)>;
 def isWave64 : Predicate<"Subtarget->getWavefrontSize() == 64">,
-  AssemblerPredicate <"FeatureWavefrontSize64">;
-
-def DisableInst : Predicate <"false">, AssemblerPredicate<"FeatureDisable">;
+  AssemblerPredicate <(all_of FeatureWavefrontSize64)>;
 
 class GCNPredicateControl : PredicateControl {
   Predicate SIAssemblerPredicate = isGFX6GFX7;
@@ -266,7 +264,7 @@ def SIload_d16_hi_i8 : SDNode<"AMDGPUISD::LOAD_D16_HI_I8",
 
 def SIdenorm_mode : SDNode<"AMDGPUISD::DENORM_MODE",
   SDTypeProfile<0 ,1, [SDTCisInt<0>]>,
-  [SDNPHasChain, SDNPSideEffect, SDNPOptInGlue, SDNPOutGlue]
+  [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]
 >;
 
 //===----------------------------------------------------------------------===//
@@ -630,6 +628,16 @@ def add_ctpop : PatFrag <
   (add (ctpop $src0), $src1)
 >;
 
+foreach I = 1-4 in {
+def shl#I#_add : PatFrag <
+  (ops node:$src0, node:$src1),
+  (add (shl_oneuse $src0, (i32 I)), $src1)> {
+  // FIXME: Poor substitute for disabling pattern in SelectionDAG
+  let PredicateCode = [{return false;}];
+  let GISelPredicateCode = [{return true;}];
+}
+}
+
 multiclass SIAtomicM0Glue2 <string op_name, bit is_amdgpu = 0,
                             SDTypeProfile tc = SDTAtomic2,
                             bit IsInt = 1> {
@@ -958,7 +966,7 @@ def VOPDstS64orS32 : BoolRC {
 }
 
 // SCSrc_i1 is the operand for pseudo instructions only.
-// Boolean immeadiates shall not be exposed to codegen instructions.
+// Boolean immediates shall not be exposed to codegen instructions.
 def SCSrc_i1 : RegisterOperand<SReg_1_XEXEC> {
   let OperandNamespace = "AMDGPU";
   let OperandType = "OPERAND_REG_IMM_INT32";
@@ -1123,7 +1131,7 @@ def blgp : NamedOperandU32<"BLGP", NamedMatchClass<"BLGP">>;
 def cbsz : NamedOperandU32<"CBSZ", NamedMatchClass<"CBSZ">>;
 def abid : NamedOperandU32<"ABID", NamedMatchClass<"ABID">>;
 
-def hwreg : NamedOperandU16<"Hwreg", NamedMatchClass<"Hwreg", 0>>;
+def hwreg : NamedOperandU32<"Hwreg", NamedMatchClass<"Hwreg", 0>>;
 
 def exp_tgt : NamedOperandU32<"ExpTgt", NamedMatchClass<"ExpTgt", 0>> {
 
@@ -1302,13 +1310,10 @@ def VOP3Mods_nnan : ComplexPattern<fAny, 2, "SelectVOP3Mods_NNaN">;
 def VOP3OMods : ComplexPattern<untyped, 3, "SelectVOP3OMods">;
 
 def VOP3PMods  : ComplexPattern<untyped, 2, "SelectVOP3PMods">;
-def VOP3PMods0 : ComplexPattern<untyped, 3, "SelectVOP3PMods0">;
 
 def VOP3OpSel  : ComplexPattern<untyped, 2, "SelectVOP3OpSel">;
-def VOP3OpSel0 : ComplexPattern<untyped, 3, "SelectVOP3OpSel0">;
 
 def VOP3OpSelMods  : ComplexPattern<untyped, 2, "SelectVOP3OpSelMods">;
-def VOP3OpSelMods0 : ComplexPattern<untyped, 3, "SelectVOP3OpSelMods0">;
 
 def VOP3PMadMixMods  : ComplexPattern<untyped, 2, "SelectVOP3PMadMixMods">;
 
@@ -1704,7 +1709,7 @@ class getInsVOP3P <RegisterOperand Src0RC, RegisterOperand Src1RC,
     !if (HasClamp,
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
-           clampmod:$clamp,
+           clampmod0:$clamp,
            op_sel:$op_sel, op_sel_hi:$op_sel_hi,
            neg_lo:$neg_lo, neg_hi:$neg_hi),
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
@@ -1716,7 +1721,7 @@ class getInsVOP3P <RegisterOperand Src0RC, RegisterOperand Src1RC,
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
            Src2Mod:$src2_modifiers, Src2RC:$src2,
-           clampmod:$clamp,
+           clampmod0:$clamp,
            op_sel:$op_sel, op_sel_hi:$op_sel_hi,
            neg_lo:$neg_lo, neg_hi:$neg_hi),
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
@@ -1739,7 +1744,7 @@ class getInsVOP3OpSel <RegisterOperand Src0RC,
     !if (HasClamp,
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
-           clampmod:$clamp,
+           clampmod0:$clamp,
            op_sel:$op_sel),
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
@@ -1749,7 +1754,7 @@ class getInsVOP3OpSel <RegisterOperand Src0RC,
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
            Src2Mod:$src2_modifiers, Src2RC:$src2,
-           clampmod:$clamp,
+           clampmod0:$clamp,
            op_sel:$op_sel),
       (ins Src0Mod:$src0_modifiers, Src0RC:$src0,
            Src1Mod:$src1_modifiers, Src1RC:$src1,
@@ -2261,6 +2266,7 @@ def VOP_F16_F16_F16 : VOPProfile <[f16, f16, f16, untyped]>;
 def VOP_F16_F16_I16 : VOPProfile <[f16, f16, i16, untyped]>;
 def VOP_F16_F16_I32 : VOPProfile <[f16, f16, i32, untyped]>;
 def VOP_I16_I16_I16 : VOPProfile <[i16, i16, i16, untyped]>;
+def VOP_I16_I16_I16_ARITH : VOPProfile <[i16, i16, i16, untyped], 0, /*EnableClamp=*/1>;
 
 def VOP_I16_I16_I16_I16 : VOPProfile <[i16, i16, i16, i16, untyped]>;
 def VOP_F16_F16_F16_F16 : VOPProfile <[f16, f16, f16, f16, untyped]>;

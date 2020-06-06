@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ObjectFile_h_
-#define liblldb_ObjectFile_h_
+#ifndef LLDB_SYMBOL_OBJECTFILE_H
+#define LLDB_SYMBOL_OBJECTFILE_H
 
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/ModuleChild.h"
@@ -686,7 +686,8 @@ protected:
                                         uint64_t Offset);
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(ObjectFile);
+  ObjectFile(const ObjectFile &) = delete;
+  const ObjectFile &operator=(const ObjectFile &) = delete;
 };
 
 } // namespace lldb_private
@@ -703,4 +704,4 @@ template <> struct format_provider<lldb_private::ObjectFile::Strata> {
 };
 } // namespace llvm
 
-#endif // liblldb_ObjectFile_h_
+#endif // LLDB_SYMBOL_OBJECTFILE_H

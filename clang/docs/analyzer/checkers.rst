@@ -1374,6 +1374,54 @@ double freed, or use after freed. This check attempts to find such problems.
    zx_handle_close(sb);
  }
 
+WebKit
+^^^^^^
+
+WebKit is an open-source web browser engine available for macOS, iOS and Linux.
+This section describes checkers that can find issues in WebKit codebase.
+
+Most of the checkers focus on memory management for which WebKit uses custom implementation of reference counted smartpointers.
+
+Checkers are formulated in terms related to ref-counting:
+ - *Ref-counted type* is either ``Ref<T>`` or ``RefPtr<T>``.
+ - *Ref-countable type* is any type that implements ``ref()`` and ``deref()`` methods as ``RefPtr<>`` is a template (i. e. relies on duck typing).
+ - *Uncounted type* is ref-countable but not ref-counted type.
+
+.. _webkit-RefCntblBaseVirtualDtor:
+
+webkit.RefCntblBaseVirtualDtor
+""""""""""""""""""""""""""""""""""""
+All uncounted types used as base classes must have a virtual destructor.
+
+Ref-counted types hold their ref-countable data by a raw pointer and allow implicit upcasting from ref-counted pointer to derived type to ref-counted pointer to base type. This might lead to an object of (dynamic) derived type being deleted via pointer to the base class type which C++ standard defines as UB in case the base class doesn't have virtual destructor ``[expr.delete]``.
+
+.. code-block:: cpp
+
+ struct RefCntblBase {
+   void ref() {}
+   void deref() {}
+ };
+
+ struct Derived : RefCntblBase { }; // warn
+
+.. _webkit-WebKitNoUncountedMemberChecker:
+
+webkit.WebKitNoUncountedMemberChecker
+""""""""""""""""""""""""""""""""""""
+Raw pointers and references to uncounted types can't be used as class members. Only ref-counted types are allowed.
+
+.. code-block:: cpp
+
+ struct RefCntbl {
+   void ref() {}
+   void deref() {}
+ };
+
+ struct Foo {
+   RefCntbl * ptr; // warn
+   RefCntbl & ptr; // warn
+   // ...
+ };
 
 .. _alpha-checkers:
 
@@ -1929,6 +1977,38 @@ Warns against using one vs. many plural pattern in code when generating localize
 
 alpha.security
 ^^^^^^^^^^^^^^
+
+
+alpha.security.cert
+^^^^^^^^^^^^^^^^^^^
+
+SEI CERT checkers which tries to find errors based on their `C coding rules <https://wiki.sei.cmu.edu/confluence/display/c/2+Rules>`_.
+
+.. _alpha-security-cert-pos-checkers:
+
+alpha.security.cert.pos
+^^^^^^^^^^^^^^^^^^^^^^^
+
+SEI CERT checkers of `POSIX C coding rules <https://wiki.sei.cmu.edu/confluence/pages/viewpage.action?pageId=87152405>`_.
+
+.. _alpha-security-cert-pos-34c:
+
+alpha.security.cert.pos.34c
+"""""""""""""""""""""""""""
+Finds calls to the ``putenv`` function which pass a pointer to an automatic variable as the argument.
+
+.. code-block:: c
+
+  int func(const char *var) {
+    char env[1024];
+    int retval = snprintf(env, sizeof(env),"TEST=%s", var);
+    if (retval < 0 || (size_t)retval >= sizeof(env)) {
+        /* Handle error */
+    }
+ 
+    return putenv(env); // putenv function should not be called with auto variables
+  }
+  
 .. _alpha-security-ArrayBound:
 
 alpha.security.ArrayBound (C)
@@ -2167,9 +2247,9 @@ lck_rw_try_lock_exclusive, lck_rw_try_lock_shared, pthread_mutex_unlock, pthread
 alpha.unix.SimpleStream (C)
 """""""""""""""""""""""""""
 Check for misuses of stream APIs. Check for misuses of stream APIs: ``fopen, fclose``
-(demo checker, the subject of the demo (`Slides <http://llvm.org/devmtg/2012-11/Zaks-Rose-Checker24Hours.pdf>`_ ,
+(demo checker, the subject of the demo (`Slides <https://llvm.org/devmtg/2012-11/Zaks-Rose-Checker24Hours.pdf>`_ ,
 `Video <https://youtu.be/kdxlsP5QVPw>`_) by Anna Zaks and Jordan Rose presented at the
-`2012 LLVM Developers' Meeting <http://llvm.org/devmtg/2012-11/>`_).
+`2012 LLVM Developers' Meeting <https://llvm.org/devmtg/2012-11/>`_).
 
 .. code-block:: c
 

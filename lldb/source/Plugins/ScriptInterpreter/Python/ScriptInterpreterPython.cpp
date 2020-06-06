@@ -224,10 +224,6 @@ struct InitializePythonRAII {
 public:
   InitializePythonRAII()
       : m_gil_state(PyGILState_UNLOCKED), m_was_already_initialized(false) {
-    // Python will muck with STDIN terminal state, so save off any current TTY
-    // settings so we can restore them.
-    m_stdin_tty_state.Save(STDIN_FILENO, false);
-
     InitializePythonHome();
 
 #ifdef LLDB_USE_LIBEDIT_READLINE_COMPAT_MODULE
@@ -271,20 +267,40 @@ public:
       // We initialized the threads in this function, just unlock the GIL.
       PyEval_SaveThread();
     }
-
-    m_stdin_tty_state.Restore();
   }
 
 private:
   void InitializePythonHome() {
-#if defined(LLDB_PYTHON_HOME)
+#if LLDB_EMBED_PYTHON_HOME
 #if PY_MAJOR_VERSION >= 3
-    size_t size = 0;
-    static wchar_t *g_python_home = Py_DecodeLocale(LLDB_PYTHON_HOME, &size);
+    typedef wchar_t* str_type;
 #else
-    static char g_python_home[] = LLDB_PYTHON_HOME;
+    typedef char* str_type;
 #endif
-    Py_SetPythonHome(g_python_home);
+    static str_type g_python_home = []() -> str_type {
+      const char *lldb_python_home = LLDB_PYTHON_HOME;
+      const char *absolute_python_home = nullptr;
+      llvm::SmallString<64> path;
+      if (llvm::sys::path::is_absolute(lldb_python_home)) {
+        absolute_python_home = lldb_python_home;
+      } else {
+        FileSpec spec = HostInfo::GetShlibDir();
+        if (!spec)
+          return nullptr;
+        spec.GetPath(path);
+        llvm::sys::path::append(path, lldb_python_home);
+        absolute_python_home = path.c_str();
+      }
+#if PY_MAJOR_VERSION >= 3
+      size_t size = 0;
+      return Py_DecodeLocale(absolute_python_home, &size);
+#else
+      return strdup(absolute_python_home);
+#endif
+    }();
+    if (g_python_home != nullptr) {
+      Py_SetPythonHome(g_python_home);
+    }
 #else
 #if defined(__APPLE__) && PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION == 7
     // For Darwin, the only Python version supported is the one shipped in the
@@ -931,7 +947,7 @@ bool ScriptInterpreterPythonImpl::ExecuteOneLine(
                                            true));
 #endif
           if (conn_up->IsConnected()) {
-            output_comm.SetConnection(conn_up.release());
+            output_comm.SetConnection(std::move(conn_up));
             output_comm.SetReadThreadBytesReceivedCallback(
                 ReadThreadBytesReceived, &result->GetOutputStream());
             output_comm.StartReadThread();
@@ -2750,6 +2766,7 @@ bool ScriptInterpreterPythonImpl::LoadScriptingModule(
   {
     FileSpec target_file(pathname);
     FileSystem::Instance().Resolve(target_file);
+    FileSystem::Instance().Collect(target_file);
     std::string basename(target_file.GetFilename().GetCString());
 
     StreamString command_stream;
@@ -3133,20 +3150,15 @@ uint32_t ScriptInterpreterPythonImpl::GetFlagsForCommandObject(
   if (PyErr_Occurred())
     PyErr_Clear();
 
-  // right now we know this function exists and is callable..
-  PythonObject py_return(
-      PyRefType::Owned,
-      PyObject_CallMethod(implementor.get(), callee_name, nullptr));
+  long long py_return = unwrapOrSetPythonException(
+      As<long long>(implementor.CallMethod(callee_name)));
 
   // if it fails, print the error but otherwise go on
   if (PyErr_Occurred()) {
     PyErr_Print();
     PyErr_Clear();
-  }
-
-  if (py_return.IsAllocated() && PythonInteger::Check(py_return.get())) {
-    PythonInteger int_value(PyRefType::Borrowed, py_return.get());
-    result = int_value.GetInteger();
+  } else {
+    result = py_return;
   }
 
   return result;

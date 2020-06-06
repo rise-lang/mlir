@@ -477,6 +477,23 @@ unsigned llvm::dwarf::getMacinfo(StringRef MacinfoString) {
       .Default(DW_MACINFO_invalid);
 }
 
+StringRef llvm::dwarf::MacroString(unsigned Encoding) {
+  switch (Encoding) {
+  default:
+    return StringRef();
+#define HANDLE_DW_MACRO(ID, NAME)                                              \
+  case DW_MACRO_##NAME:                                                        \
+    return "DW_MACRO_" #NAME;
+#include "llvm/BinaryFormat/Dwarf.def"
+  }
+}
+
+unsigned llvm::dwarf::getMacro(StringRef MacroString) {
+  return StringSwitch<unsigned>(MacroString)
+#define HANDLE_DW_MACRO(ID, NAME) .Case("DW_MACRO_" #NAME, ID)
+#include "llvm/BinaryFormat/Dwarf.def"
+      .Default(DW_MACINFO_invalid);
+}
 StringRef llvm::dwarf::RangeListEncodingString(unsigned Encoding) {
   switch (Encoding) {
   default:
@@ -751,6 +768,20 @@ bool llvm::dwarf::isValidFormForVersion(Form F, unsigned Version,
     return FV > 0 && FV <= Version;
   }
   return ExtensionsOk;
+}
+
+StringRef llvm::dwarf::FormatString(DwarfFormat Format) {
+  switch (Format) {
+  case DWARF32:
+    return "DWARF32";
+  case DWARF64:
+    return "DWARF64";
+  }
+  return StringRef();
+}
+
+StringRef llvm::dwarf::FormatString(bool IsDWARF64) {
+  return FormatString(IsDWARF64 ? DWARF64 : DWARF32);
 }
 
 constexpr char llvm::dwarf::EnumTraits<Attribute>::Type[];

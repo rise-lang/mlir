@@ -18,6 +18,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -25,6 +26,28 @@
 
 using namespace llvm;
 using namespace llvm::AMDGPU;
+
+static cl::opt<bool> Keep16BitSuffixes(
+  "amdgpu-keep-16-bit-reg-suffixes",
+  cl::desc("Keep .l and .h suffixes in asm for debugging purposes"),
+  cl::init(false),
+  cl::ReallyHidden);
+
+void AMDGPUInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
+  // FIXME: The current implementation of
+  // AsmParser::parseRegisterOrRegisterNumber in MC implies we either emit this
+  // as an integer or we provide a name which represents a physical register.
+  // For CFI instructions we really want to emit a name for the DWARF register
+  // instead, because there may be multiple DWARF registers corresponding to a
+  // single physical register. One case where this problem manifests is with
+  // wave32/wave64 where using the physical register name is ambiguous: if we
+  // write e.g. `.cfi_undefined v0` we lose information about the wavefront
+  // size which we need to encode the register in the final DWARF. Ideally we
+  // would extend MC to support parsing DWARF register names so we could do
+  // something like `.cfi_undefined dwarf_wave32_v0`. For now we just live with
+  // non-pretty DWARF register names in assembly text.
+  OS << RegNo;
+}
 
 void AMDGPUInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                   StringRef Annot, const MCSubtargetInfo &STI,
@@ -164,10 +187,10 @@ void AMDGPUInstPrinter::printSMRDOffset8(const MCInst *MI, unsigned OpNo,
   printU32ImmOperand(MI, OpNo, STI, O);
 }
 
-void AMDGPUInstPrinter::printSMRDOffset20(const MCInst *MI, unsigned OpNo,
+void AMDGPUInstPrinter::printSMEMOffset(const MCInst *MI, unsigned OpNo,
                                         const MCSubtargetInfo &STI,
                                         raw_ostream &O) {
-  printU32ImmOperand(MI, OpNo, STI, O);
+  O << formatHex(MI->getOperand(OpNo).getImm());
 }
 
 void AMDGPUInstPrinter::printSMRDLiteralOffset(const MCInst *MI, unsigned OpNo,
@@ -292,7 +315,6 @@ void AMDGPUInstPrinter::printRegOperand(unsigned RegNo, raw_ostream &O,
   switch (RegNo) {
   case AMDGPU::FP_REG:
   case AMDGPU::SP_REG:
-  case AMDGPU::SCRATCH_WAVE_OFFSET_REG:
   case AMDGPU::PRIVATE_RSRC_REG:
     llvm_unreachable("pseudo-register should not ever be emitted");
   case AMDGPU::SCC:
@@ -302,7 +324,12 @@ void AMDGPUInstPrinter::printRegOperand(unsigned RegNo, raw_ostream &O,
   }
 #endif
 
-  O << getRegisterName(RegNo);
+  StringRef RegName(getRegisterName(RegNo));
+  if (!Keep16BitSuffixes)
+    if (!RegName.consume_back(".l"))
+      RegName.consume_back(".h");
+
+  O << RegName;
 }
 
 void AMDGPUInstPrinter::printVOPDst(const MCInst *MI, unsigned OpNo,

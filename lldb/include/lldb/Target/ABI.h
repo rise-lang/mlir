@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ABI_h_
-#define liblldb_ABI_h_
+#ifndef LLDB_TARGET_ABI_H
+#define LLDB_TARGET_ABI_H
 
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Symbol/UnwindPlan.h"
@@ -148,7 +148,8 @@ protected:
   std::unique_ptr<llvm::MCRegisterInfo> m_mc_register_info_up;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(ABI);
+  ABI(const ABI &) = delete;
+  const ABI &operator=(const ABI &) = delete;
 };
 
 class RegInfoBasedABI : public ABI {
@@ -187,4 +188,4 @@ protected:
 
 } // namespace lldb_private
 
-#endif // liblldb_ABI_h_
+#endif // LLDB_TARGET_ABI_H

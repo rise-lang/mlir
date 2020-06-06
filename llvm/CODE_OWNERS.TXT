@@ -52,8 +52,8 @@ N: Pete Couperus
 E: petecoup@synopsys.com
 D: ARC backend (lib/Target/ARC/*)
 
-N: Sanjoy Das
-E: sanjoy@playingwithpointers.com
+N: Philip Reames
+E: listmail@philipreames.com
 D: IndVar Simplify, Scalar Evolution
 
 N: Marshall Clow
@@ -218,10 +218,6 @@ D: SystemZ Backend
 N: Hans Wennborg
 E: hans@chromium.org
 D: Release management (x.y.0 releases)
-
-N: whitequark
-E: whitequark@whitequark.org
-D: C API, OCaml bindings
 
 N: Jake Ehrlich
 E: jakehehrlich@google.com

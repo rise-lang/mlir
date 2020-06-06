@@ -6,8 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03
-// UNSUPPORTED: libcxxabi-no-threads, libcxxabi-no-exceptions
+// UNSUPPORTED: c++03
+// UNSUPPORTED: libcxxabi-no-threads
+// UNSUPPORTED: no-exceptions
 
 #define TESTING_CXA_GUARD
 #include "../src/cxa_guard_impl.h"

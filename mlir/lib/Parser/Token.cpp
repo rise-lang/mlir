@@ -37,7 +37,7 @@ Optional<unsigned> Token::getUnsignedIntegerValue() const {
 
 /// For an integer token, return its value as a uint64_t.  If it doesn't fit,
 /// return None.
-Optional<uint64_t> Token::getUInt64IntegerValue() const {
+Optional<uint64_t> Token::getUInt64IntegerValue(StringRef spelling) {
   bool isHex = spelling.size() > 1 && spelling[1] == 'x';
 
   uint64_t result = 0;
@@ -57,11 +57,24 @@ Optional<double> Token::getFloatingPointValue() const {
 
 /// For an inttype token, return its bitwidth.
 Optional<unsigned> Token::getIntTypeBitwidth() const {
+  assert(getKind() == inttype);
+  unsigned bitwidthStart = (spelling[0] == 'i' ? 1 : 2);
   unsigned result = 0;
-  if (spelling[1] == '0' || spelling.drop_front().getAsInteger(10, result) ||
+  if (spelling[bitwidthStart] == '0' ||
+      spelling.drop_front(bitwidthStart).getAsInteger(10, result) ||
       result == 0)
     return None;
   return result;
+}
+
+Optional<bool> Token::getIntTypeSignedness() const {
+  assert(getKind() == inttype);
+  if (spelling[0] == 'i')
+    return llvm::None;
+  if (spelling[0] == 's')
+    return true;
+  assert(spelling[0] == 'u');
+  return false;
 }
 
 /// Given a token containing a string literal, return its value, including
@@ -130,9 +143,6 @@ StringRef Token::getTokenSpelling(Kind kind) {
   default:
     llvm_unreachable("This token kind has no fixed spelling");
 #define TOK_PUNCTUATION(NAME, SPELLING)                                        \
-  case NAME:                                                                   \
-    return SPELLING;
-#define TOK_OPERATOR(NAME, SPELLING)                                           \
   case NAME:                                                                   \
     return SPELLING;
 #define TOK_KEYWORD(SPELLING)                                                  \

@@ -2,11 +2,13 @@ static_library("Passes") {
   output_name = "LLVMPasses"
   deps = [
     "//llvm/lib/Analysis",
+    "//llvm/lib/Analysis/ML:MLPolicies",
     "//llvm/lib/CodeGen",
     "//llvm/lib/IR",
     "//llvm/lib/Support",
     "//llvm/lib/Target",
     "//llvm/lib/Transforms/AggressiveInstCombine",
+    "//llvm/lib/Transforms/Coroutines",
     "//llvm/lib/Transforms/IPO",
     "//llvm/lib/Transforms/InstCombine",
     "//llvm/lib/Transforms/Instrumentation",

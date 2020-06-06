@@ -36,6 +36,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/SanitizerStats.h"
@@ -76,6 +77,7 @@ class ObjCAtThrowStmt;
 class ObjCAtSynchronizedStmt;
 class ObjCAutoreleasePoolStmt;
 class ReturnsNonNullAttr;
+class SVETypeFlags;
 
 namespace analyze_os_log {
 class OSLogBufferLayout;
@@ -253,6 +255,114 @@ public:
     llvm::BasicBlock *Block;
     EHScopeStack::stable_iterator ScopeDepth;
     unsigned Index;
+  };
+
+  // Helper class for the OpenMP IR Builder. Allows reusability of code used for
+  // region body, and finalization codegen callbacks. This will class will also
+  // contain privatization functions used by the privatization call backs
+  struct OMPBuilderCBHelpers {
+
+    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+
+    /// Emit the Finalization for an OMP region
+    /// \param CGF	The Codegen function this belongs to
+    /// \param IP	Insertion point for generating the finalization code.
+    static void FinalizeOMPRegion(CodeGenFunction &CGF, InsertPointTy IP) {
+      CGBuilderTy::InsertPointGuard IPG(CGF.Builder);
+      assert(IP.getBlock()->end() != IP.getPoint() &&
+             "OpenMP IR Builder should cause terminated block!");
+
+      llvm::BasicBlock *IPBB = IP.getBlock();
+      llvm::BasicBlock *DestBB = IPBB->getUniqueSuccessor();
+      assert(DestBB && "Finalization block should have one successor!");
+
+      // erase and replace with cleanup branch.
+      IPBB->getTerminator()->eraseFromParent();
+      CGF.Builder.SetInsertPoint(IPBB);
+      CodeGenFunction::JumpDest Dest = CGF.getJumpDestInCurrentScope(DestBB);
+      CGF.EmitBranchThroughCleanup(Dest);
+    }
+
+    /// Emit the body of an OMP region
+    /// \param CGF	The Codegen function this belongs to
+    /// \param RegionBodyStmt	The body statement for the OpenMP region being
+    /// 			 generated
+    /// \param CodeGenIP	Insertion point for generating the body code.
+    /// \param FiniBB	The finalization basic block
+    static void EmitOMPRegionBody(CodeGenFunction &CGF,
+                                  const Stmt *RegionBodyStmt,
+                                  InsertPointTy CodeGenIP,
+                                  llvm::BasicBlock &FiniBB) {
+      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
+        CodeGenIPBBTI->eraseFromParent();
+
+      CGF.Builder.SetInsertPoint(CodeGenIPBB);
+
+      CGF.EmitStmt(RegionBodyStmt);
+
+      if (CGF.Builder.saveIP().isSet())
+        CGF.Builder.CreateBr(&FiniBB);
+    }
+
+    /// RAII for preserving necessary info during Outlined region body codegen.
+    class OutlinedRegionBodyRAII {
+
+      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
+      CodeGenFunction::JumpDest OldReturnBlock;
+      CodeGenFunction &CGF;
+
+    public:
+      OutlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
+                             llvm::BasicBlock &RetBB)
+          : CGF(cgf) {
+        assert(AllocaIP.isSet() &&
+               "Must specify Insertion point for allocas of outlined function");
+        OldAllocaIP = CGF.AllocaInsertPt;
+        CGF.AllocaInsertPt = &*AllocaIP.getPoint();
+
+        OldReturnBlock = CGF.ReturnBlock;
+        CGF.ReturnBlock = CGF.getJumpDestInCurrentScope(&RetBB);
+      }
+
+      ~OutlinedRegionBodyRAII() {
+        CGF.AllocaInsertPt = OldAllocaIP;
+        CGF.ReturnBlock = OldReturnBlock;
+      }
+    };
+
+    /// RAII for preserving necessary info during inlined region body codegen.
+    class InlinedRegionBodyRAII {
+
+      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
+      CodeGenFunction &CGF;
+
+    public:
+      InlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
+                            llvm::BasicBlock &FiniBB)
+          : CGF(cgf) {
+        // Alloca insertion block should be in the entry block of the containing
+        // function so it expects an empty AllocaIP in which case will reuse the
+        // old alloca insertion point, or a new AllocaIP in the same block as
+        // the old one
+        assert((!AllocaIP.isSet() ||
+                CGF.AllocaInsertPt->getParent() == AllocaIP.getBlock()) &&
+               "Insertion point should be in the entry block of containing "
+               "function!");
+        OldAllocaIP = CGF.AllocaInsertPt;
+        if (AllocaIP.isSet())
+          CGF.AllocaInsertPt = &*AllocaIP.getPoint();
+
+        // TODO: Remove the call, after making sure the counter is not used by
+        //       the EHStack.
+        // Since this is an inlined region, it should not modify the
+        // ReturnBlock, and should reuse the one for the enclosing outlined
+        // region. So, the JumpDest being return by the function is discarded
+        (void)CGF.getJumpDestInCurrentScope(&FiniBB);
+      }
+
+      ~InlinedRegionBodyRAII() { CGF.AllocaInsertPt = OldAllocaIP; }
+    };
   };
 
   CodeGenModule &CGM;  // Per-module state.
@@ -484,6 +594,9 @@ public:
   /// True if CodeGen currently emits code inside presereved access index
   /// region.
   bool IsInPreservedAIRegion = false;
+
+  /// True if the current statement has nomerge attribute.
+  bool InNoMergeAttributedStmt = false;
 
   const CodeGen::CGBlockInfo *BlockInfo = nullptr;
   llvm::Value *BlockPointer = nullptr;
@@ -2155,13 +2268,6 @@ public:
 
   LValue MakeNaturalAlignPointeeAddrLValue(llvm::Value *V, QualType T);
   LValue MakeNaturalAlignAddrLValue(llvm::Value *V, QualType T);
-  CharUnits getNaturalTypeAlignment(QualType T,
-                                    LValueBaseInfo *BaseInfo = nullptr,
-                                    TBAAAccessInfo *TBAAInfo = nullptr,
-                                    bool forPointeeType = false);
-  CharUnits getNaturalPointeeTypeAlignment(QualType T,
-                                           LValueBaseInfo *BaseInfo = nullptr,
-                                           TBAAAccessInfo *TBAAInfo = nullptr);
 
   Address EmitLoadOfReference(LValue RefLVal,
                               LValueBaseInfo *PointeeBaseInfo = nullptr,
@@ -2595,7 +2701,8 @@ public:
   Address EmitCXXUuidofExpr(const CXXUuidofExpr *E);
 
   /// Situations in which we might emit a check for the suitability of a
-  ///        pointer or glvalue.
+  /// pointer or glvalue. Needs to be kept in sync with ubsan_handlers.cpp in
+  /// compiler-rt.
   enum TypeCheckKind {
     /// Checking the operand of a load. Must be suitably sized and aligned.
     TCK_Load,
@@ -3152,6 +3259,7 @@ public:
   void EmitOMPTaskwaitDirective(const OMPTaskwaitDirective &S);
   void EmitOMPTaskgroupDirective(const OMPTaskgroupDirective &S);
   void EmitOMPFlushDirective(const OMPFlushDirective &S);
+  void EmitOMPDepobjDirective(const OMPDepobjDirective &S);
   void EmitOMPOrderedDirective(const OMPOrderedDirective &S);
   void EmitOMPAtomicDirective(const OMPAtomicDirective &S);
   void EmitOMPTargetDirective(const OMPTargetDirective &S);
@@ -3520,6 +3628,7 @@ public:
   LValue EmitUnaryOpLValue(const UnaryOperator *E);
   LValue EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                                 bool Accessed = false);
+  LValue EmitMatrixSubscriptExpr(const MatrixSubscriptExpr *E);
   LValue EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
                                  bool IsLowerBound = true);
   LValue EmitExtVectorElementExpr(const ExtVectorElementExpr *E);
@@ -3762,6 +3871,14 @@ public:
   llvm::Value *EmitARMMVEBuiltinExpr(unsigned BuiltinID, const CallExpr *E,
                                      ReturnValueSlot ReturnValue,
                                      llvm::Triple::ArchType Arch);
+  llvm::Value *EmitARMCDEBuiltinExpr(unsigned BuiltinID, const CallExpr *E,
+                                     ReturnValueSlot ReturnValue,
+                                     llvm::Triple::ArchType Arch);
+  llvm::Value *EmitCMSEClearRecord(llvm::Value *V, llvm::IntegerType *ITy,
+                                   QualType RTy);
+  llvm::Value *EmitCMSEClearRecord(llvm::Value *V, llvm::ArrayType *ATy,
+                                   QualType RTy);
+  llvm::Value *EmitCMSEClearFP16(llvm::Value *V);
 
   llvm::Value *EmitCommonNeonBuiltinExpr(unsigned BuiltinID,
                                          unsigned LLVMIntrinsic,
@@ -3780,12 +3897,56 @@ public:
                             SmallVectorImpl<llvm::Value*> &O,
                             const char *name,
                             unsigned shift = 0, bool rightshift = false);
+  llvm::Value *EmitNeonSplat(llvm::Value *V, llvm::Constant *Idx,
+                             const llvm::ElementCount &Count);
   llvm::Value *EmitNeonSplat(llvm::Value *V, llvm::Constant *Idx);
   llvm::Value *EmitNeonShiftVector(llvm::Value *V, llvm::Type *Ty,
                                    bool negateForRightShift);
   llvm::Value *EmitNeonRShiftImm(llvm::Value *Vec, llvm::Value *Amt,
                                  llvm::Type *Ty, bool usgn, const char *name);
   llvm::Value *vectorWrapScalar16(llvm::Value *Op);
+  /// SVEBuiltinMemEltTy - Returns the memory element type for this memory
+  /// access builtin.  Only required if it can't be inferred from the base
+  /// pointer operand.
+  llvm::Type *SVEBuiltinMemEltTy(SVETypeFlags TypeFlags);
+
+  SmallVector<llvm::Type *, 2> getSVEOverloadTypes(SVETypeFlags TypeFlags,
+                                                   ArrayRef<llvm::Value *> Ops);
+  llvm::Type *getEltType(SVETypeFlags TypeFlags);
+  llvm::ScalableVectorType *getSVEType(const SVETypeFlags &TypeFlags);
+  llvm::ScalableVectorType *getSVEPredType(SVETypeFlags TypeFlags);
+  llvm::Value *EmitSVEAllTruePred(SVETypeFlags TypeFlags);
+  llvm::Value *EmitSVEDupX(llvm::Value *Scalar);
+  llvm::Value *EmitSVEDupX(llvm::Value *Scalar, llvm::Type *Ty);
+  llvm::Value *EmitSVEReinterpret(llvm::Value *Val, llvm::Type *Ty);
+  llvm::Value *EmitSVEPMull(SVETypeFlags TypeFlags,
+                            llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                            unsigned BuiltinID);
+  llvm::Value *EmitSVEMovl(SVETypeFlags TypeFlags,
+                           llvm::ArrayRef<llvm::Value *> Ops,
+                           unsigned BuiltinID);
+  llvm::Value *EmitSVEPredicateCast(llvm::Value *Pred,
+                                    llvm::ScalableVectorType *VTy);
+  llvm::Value *EmitSVEGatherLoad(SVETypeFlags TypeFlags,
+                                 llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                                 unsigned IntID);
+  llvm::Value *EmitSVEScatterStore(SVETypeFlags TypeFlags,
+                                   llvm::SmallVectorImpl<llvm::Value *> &Ops,
+                                   unsigned IntID);
+  llvm::Value *EmitSVEMaskedLoad(const CallExpr *, llvm::Type *ReturnTy,
+                                 SmallVectorImpl<llvm::Value *> &Ops,
+                                 unsigned BuiltinID, bool IsZExtReturn);
+  llvm::Value *EmitSVEMaskedStore(const CallExpr *,
+                                  SmallVectorImpl<llvm::Value *> &Ops,
+                                  unsigned BuiltinID);
+  llvm::Value *EmitSVEPrefetchLoad(SVETypeFlags TypeFlags,
+                                   SmallVectorImpl<llvm::Value *> &Ops,
+                                   unsigned BuiltinID);
+  llvm::Value *EmitSVEGatherPrefetch(SVETypeFlags TypeFlags,
+                                     SmallVectorImpl<llvm::Value *> &Ops,
+                                     unsigned IntID);
+  llvm::Value *EmitAArch64SVEBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
+
   llvm::Value *EmitAArch64BuiltinExpr(unsigned BuiltinID, const CallExpr *E,
                                       llvm::Triple::ArchType Arch);
   llvm::Value *EmitBPFBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
@@ -4180,6 +4341,9 @@ public:
   /// SetFPModel - Control floating point behavior via fp-model settings.
   void SetFPModel();
 
+  /// Set the codegen fast-math flags.
+  void SetFastMathFlags(FPOptions FPFeatures);
+
 private:
   llvm::MDNode *getRangeForLoadFromType(QualType Ty);
   void EmitReturnOfRValue(RValue RV, QualType Ty);
@@ -4200,7 +4364,7 @@ private:
   ///
   /// \param AI - The first function argument of the expansion.
   void ExpandTypeFromArgs(QualType Ty, LValue Dst,
-                          SmallVectorImpl<llvm::Value *>::iterator &AI);
+                          llvm::Function::arg_iterator &AI);
 
   /// ExpandTypeToArgs - Expand an CallArg \arg Arg, with the LLVM type for \arg
   /// Ty, into individual arguments on the provided vector \arg IRCallArgs,
@@ -4420,6 +4584,11 @@ inline llvm::Value *DominatingLLVMValue::restore(CodeGenFunction &CGF,
 }
 
 }  // end namespace CodeGen
+
+// Map the LangOption for floating point exception behavior into
+// the corresponding enum in the IR.
+llvm::fp::ExceptionBehavior
+ToConstrainedExceptMD(LangOptions::FPExceptionModeKind Kind);
 }  // end namespace clang
 
 #endif

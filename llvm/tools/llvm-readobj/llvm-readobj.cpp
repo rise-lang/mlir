@@ -466,22 +466,22 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer,
     Dumper->printFileHeaders();
   if (opts::SectionHeaders)
     Dumper->printSectionHeaders();
-  if (opts::Relocations)
-    Dumper->printRelocations();
-  if (opts::DynRelocs)
-    Dumper->printDynamicRelocations();
-  if (opts::Symbols || opts::DynamicSymbols)
-    Dumper->printSymbols(opts::Symbols, opts::DynamicSymbols);
   if (opts::HashSymbols)
     Dumper->printHashSymbols();
-  if (opts::UnwindInfo)
-    Dumper->printUnwindInfo();
+  if (opts::ProgramHeaders || opts::SectionMapping == cl::BOU_TRUE)
+    Dumper->printProgramHeaders(opts::ProgramHeaders, opts::SectionMapping);
   if (opts::DynamicTable)
     Dumper->printDynamicTable();
   if (opts::NeededLibraries)
     Dumper->printNeededLibraries();
-  if (opts::ProgramHeaders || opts::SectionMapping == cl::BOU_TRUE)
-    Dumper->printProgramHeaders(opts::ProgramHeaders, opts::SectionMapping);
+  if (opts::Relocations)
+    Dumper->printRelocations();
+  if (opts::DynRelocs)
+    Dumper->printDynamicRelocations();
+  if (opts::UnwindInfo)
+    Dumper->printUnwindInfo();
+  if (opts::Symbols || opts::DynamicSymbols)
+    Dumper->printSymbols(opts::Symbols, opts::DynamicSymbols);
   if (!opts::StringDump.empty())
     Dumper->printSectionsAsString(Obj, opts::StringDump);
   if (!opts::HexDump.empty())
@@ -489,7 +489,7 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer,
   if (opts::HashTable)
     Dumper->printHashTable();
   if (opts::GnuHashTable)
-    Dumper->printGnuHashTable();
+    Dumper->printGnuHashTable(Obj);
   if (opts::VersionInfo)
     Dumper->printVersionInfo();
   if (Obj->isELF()) {
@@ -502,7 +502,7 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer,
     if (opts::SectionGroups)
       Dumper->printGroupSections();
     if (opts::HashHistogram)
-      Dumper->printHashHistogram();
+      Dumper->printHashHistograms();
     if (opts::CGProfile)
       Dumper->printCGProfile();
     if (opts::Addrsig)

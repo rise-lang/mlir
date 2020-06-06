@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ObjCLanguageRuntime_h_
-#define liblldb_ObjCLanguageRuntime_h_
+#ifndef LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_OBJCLANGUAGERUNTIME_H
+#define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_OBJCLANGUAGERUNTIME_H
 
 #include <functional>
 #include <map>
@@ -186,7 +186,8 @@ public:
     TaggedPointerVendor() = default;
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(TaggedPointerVendor);
+    TaggedPointerVendor(const TaggedPointerVendor &) = delete;
+    const TaggedPointerVendor &operator=(const TaggedPointerVendor &) = delete;
   };
 
   ~ObjCLanguageRuntime() override;
@@ -417,9 +418,10 @@ protected:
 
   void ReadObjCLibraryIfNeeded(const ModuleList &module_list);
 
-  DISALLOW_COPY_AND_ASSIGN(ObjCLanguageRuntime);
+  ObjCLanguageRuntime(const ObjCLanguageRuntime &) = delete;
+  const ObjCLanguageRuntime &operator=(const ObjCLanguageRuntime &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ObjCLanguageRuntime_h_
+#endif // LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_OBJCLANGUAGERUNTIME_H

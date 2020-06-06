@@ -11,6 +11,7 @@
 
 # CHECK:      .eh_frame contents:
 # CHECK:      00000000 00000010 00000000 CIE
+# CHECK-NEXT:   Format:                DWARF32
 # CHECK-NEXT:   Version:               1
 # CHECK-NEXT:   Augmentation:          "zR"
 # CHECK-NEXT:   Code alignment factor: 1
@@ -23,7 +24,7 @@
 _start:
  nop
 
-.section .eh_frame, "a"
+.section .eh_frame,"a",@unwind
   .long 16   # Size
   .long 0x00 # ID
   .byte 0x01 # Version

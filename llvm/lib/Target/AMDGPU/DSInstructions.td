@@ -1,4 +1,4 @@
-//===-- DSInstructions.td - DS Instruction Defintions ---------------------===//
+//===-- DSInstructions.td - DS Instruction Definitions --------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -725,7 +725,7 @@ defm : DSWritePat_mc <DS_WRITE_B16, i32, "truncstorei16_local">;
 defm : DSWritePat_mc <DS_WRITE_B8, i16, "truncstorei8_local">;
 defm : DSWritePat_mc <DS_WRITE_B16, i16, "store_local">;
 
-foreach vt = VGPR_32.RegTypes in {
+foreach vt = Reg32Types.types in {
 defm : DSWritePat_mc <DS_WRITE_B32, vt, "store_local">;
 }
 

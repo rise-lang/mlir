@@ -15,9 +15,9 @@
 #include "toy/Parser.h"
 #include "toy/Passes.h"
 
-#include "mlir/Analysis/Verifier.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Module.h"
+#include "mlir/IR/Verifier.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/Parser.h"
 #include "mlir/Pass/Pass.h"
@@ -125,7 +125,6 @@ int dumpMLIR() {
   if (enableOpt || isLoweringToAffine) {
     // Inline all functions into main and then delete them.
     pm.addPass(mlir::createInlinerPass());
-    pm.addPass(mlir::createSymbolDCEPass());
 
     // Now that there is only one function, we can infer the shapes of each of
     // the operations.

@@ -38,8 +38,8 @@
 #include "ToolChains/NaCl.h"
 #include "ToolChains/NetBSD.h"
 #include "ToolChains/OpenBSD.h"
-#include "ToolChains/PS4CPU.h"
 #include "ToolChains/PPCLinux.h"
+#include "ToolChains/PS4CPU.h"
 #include "ToolChains/RISCVToolchain.h"
 #include "ToolChains/Solaris.h"
 #include "ToolChains/TCE.h"
@@ -71,6 +71,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
@@ -138,6 +139,13 @@ Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
   Name = std::string(llvm::sys::path::filename(ClangExecutable));
   Dir = std::string(llvm::sys::path::parent_path(ClangExecutable));
   InstalledDir = Dir; // Provide a sensible default installed dir.
+
+  if ((!SysRoot.empty()) && llvm::sys::path::is_relative(SysRoot)) {
+    // Prepend InstalledDir if SysRoot is relative
+    SmallString<128> P(InstalledDir);
+    llvm::sys::path::append(P, SysRoot);
+    SysRoot = std::string(P);
+  }
 
 #if defined(CLANG_CONFIG_FILE_SYSTEM_DIR)
   SystemConfigDir = CLANG_CONFIG_FILE_SYSTEM_DIR;
@@ -1266,10 +1274,6 @@ void Driver::generateCompilationDiagnostics(
   // Print the version of the compiler.
   PrintVersion(C, llvm::errs());
 
-  Diag(clang::diag::note_drv_command_failed_diag_msg)
-      << "PLEASE submit a bug report to " BUG_REPORT_URL " and include the "
-         "crash backtrace, preprocessed source, and associated run script.";
-
   // Suppress driver output and emit preprocessor output to temp file.
   Mode = CPPMode;
   CCGenDiagnostics = true;
@@ -1808,6 +1812,11 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
   if (C.getArgs().hasArg(options::OPT_print_effective_triple)) {
     const llvm::Triple Triple(TC.ComputeEffectiveClangTriple(C.getArgs()));
     llvm::outs() << Triple.getTriple() << "\n";
+    return false;
+  }
+
+  if (C.getArgs().hasArg(options::OPT_print_targets)) {
+    llvm::TargetRegistry::printRegisteredTargetsForVersion(llvm::outs());
     return false;
   }
 
@@ -2522,13 +2531,13 @@ class OffloadingActionBuilder final {
       std::set<CudaArch> GpuArchs;
       bool Error = false;
       for (Arg *A : Args) {
-        if (!(A->getOption().matches(options::OPT_cuda_gpu_arch_EQ) ||
-              A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ)))
+        if (!(A->getOption().matches(options::OPT_offload_arch_EQ) ||
+              A->getOption().matches(options::OPT_no_offload_arch_EQ)))
           continue;
         A->claim();
 
         const StringRef ArchStr = A->getValue();
-        if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ) &&
+        if (A->getOption().matches(options::OPT_no_offload_arch_EQ) &&
             ArchStr == "all") {
           GpuArchs.clear();
           continue;
@@ -2537,9 +2546,9 @@ class OffloadingActionBuilder final {
         if (Arch == CudaArch::UNKNOWN) {
           C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
           Error = true;
-        } else if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
+        } else if (A->getOption().matches(options::OPT_offload_arch_EQ))
           GpuArchs.insert(Arch);
-        else if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ))
+        else if (A->getOption().matches(options::OPT_no_offload_arch_EQ))
           GpuArchs.erase(Arch);
         else
           llvm_unreachable("Unexpected option.");
@@ -4853,6 +4862,8 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       TC = std::make_unique<toolchains::Solaris>(*this, Target, Args);
       break;
     case llvm::Triple::AMDHSA:
+      TC = std::make_unique<toolchains::ROCMToolChain>(*this, Target, Args);
+      break;
     case llvm::Triple::AMDPAL:
     case llvm::Triple::Mesa3D:
       TC = std::make_unique<toolchains::AMDGPUToolChain>(*this, Target, Args);

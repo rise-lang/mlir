@@ -210,6 +210,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
 
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
   setOperationAction(ISD::DEBUGTRAP, MVT::Other, Legal);
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
 
   if (Subtarget.hasStdExtA()) {
     setMaxAtomicSizeInBitsSupported(Subtarget.getXLen());
@@ -336,6 +337,17 @@ bool RISCVTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
   return Subtarget.is64Bit() && SrcVT == MVT::i32 && DstVT == MVT::i64;
 }
 
+bool RISCVTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
+                                       bool ForCodeSize) const {
+  if (VT == MVT::f32 && !Subtarget.hasStdExtF())
+    return false;
+  if (VT == MVT::f64 && !Subtarget.hasStdExtD())
+    return false;
+  if (Imm.isNegZero())
+    return false;
+  return Imm.isZero();
+}
+
 bool RISCVTargetLowering::hasBitPreservingFPLogic(EVT VT) const {
   return (VT == MVT::f32 && Subtarget.hasStdExtF()) ||
          (VT == MVT::f64 && Subtarget.hasStdExtD());
@@ -418,6 +430,8 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     SDValue FPConv = DAG.getNode(RISCVISD::FMV_W_X_RV64, DL, MVT::f32, NewOp0);
     return FPConv;
   }
+  case ISD::INTRINSIC_WO_CHAIN:
+    return LowerINTRINSIC_WO_CHAIN(Op, DAG);
   }
 }
 
@@ -434,7 +448,7 @@ static SDValue getTargetNode(BlockAddressSDNode *N, SDLoc DL, EVT Ty,
 
 static SDValue getTargetNode(ConstantPoolSDNode *N, SDLoc DL, EVT Ty,
                              SelectionDAG &DAG, unsigned Flags) {
-  return DAG.getTargetConstantPool(N->getConstVal(), Ty, N->getAlignment(),
+  return DAG.getTargetConstantPool(N->getConstVal(), Ty, N->getAlign(),
                                    N->getOffset(), Flags);
 }
 
@@ -821,6 +835,20 @@ SDValue RISCVTargetLowering::lowerShiftRightParts(SDValue Op, SelectionDAG &DAG,
   return DAG.getMergeValues(Parts, DL);
 }
 
+SDValue RISCVTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
+  SDLoc DL(Op);
+  switch (IntNo) {
+  default:
+    return SDValue();    // Don't custom lower most intrinsics.
+  case Intrinsic::thread_pointer: {
+    EVT PtrVT = getPointerTy(DAG.getDataLayout());
+    return DAG.getRegister(RISCV::X4, PtrVT);
+  }
+  }
+}
+
 // Returns the opcode of the target-specific SDNode that implements the 32-bit
 // form of the given Opcode.
 static RISCVISD::NodeType getRISCVWOpcode(unsigned Opcode) {
@@ -1178,7 +1206,7 @@ static MachineBasicBlock *emitSplitF64Pseudo(MachineInstr &MI,
                           RI);
   MachineMemOperand *MMO =
       MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
-                              MachineMemOperand::MOLoad, 8, 8);
+                              MachineMemOperand::MOLoad, 8, Align(8));
   BuildMI(*BB, MI, DL, TII.get(RISCV::LW), LoReg)
       .addFrameIndex(FI)
       .addImm(0)
@@ -1208,7 +1236,7 @@ static MachineBasicBlock *emitBuildPairF64Pseudo(MachineInstr &MI,
 
   MachineMemOperand *MMO =
       MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(MF, FI),
-                              MachineMemOperand::MOStore, 8, 8);
+                              MachineMemOperand::MOStore, 8, Align(8));
   BuildMI(*BB, MI, DL, TII.get(RISCV::SW))
       .addReg(LoReg, getKillRegState(MI.getOperand(1).isKill()))
       .addFrameIndex(FI)
@@ -2124,7 +2152,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   if (IsTailCall)
     ++NumTailCalls;
-  else if (CLI.CS && CLI.CS.isMustTailCall())
+  else if (CLI.CB && CLI.CB->isMustTailCall())
     report_fatal_error("failed to perform tail call elimination on a call "
                        "site marked musttail");
 
@@ -2325,6 +2353,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   }
 
   Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
+  DAG.addNoMergeSiteInfo(Chain.getNode(), CLI.NoMerge);
   Glue = Chain.getValue(1);
 
   // Mark the end of the call, which is glued to the call itself.
@@ -2492,6 +2521,10 @@ void RISCVTargetLowering::validateCCReservedRegs(
       }))
     F.getContext().diagnose(DiagnosticInfoUnsupported{
         F, "Argument register required, but has been reserved."});
+}
+
+bool RISCVTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  return CI->isTailCall();
 }
 
 const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
@@ -2883,12 +2916,12 @@ Value *RISCVTargetLowering::emitMaskedAtomicCmpXchgIntrinsic(
   return Result;
 }
 
-unsigned RISCVTargetLowering::getExceptionPointerRegister(
+Register RISCVTargetLowering::getExceptionPointerRegister(
     const Constant *PersonalityFn) const {
   return RISCV::X10;
 }
 
-unsigned RISCVTargetLowering::getExceptionSelectorRegister(
+Register RISCVTargetLowering::getExceptionSelectorRegister(
     const Constant *PersonalityFn) const {
   return RISCV::X11;
 }

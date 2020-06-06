@@ -154,6 +154,10 @@ static cl::opt<bool>
                        cl::desc("Allows loops to be peeled when the dynamic "
                                 "trip count is known to be low."));
 
+static cl::opt<bool> UnrollAllowLoopNestsPeeling(
+    "unroll-allow-loop-nests-peeling", cl::init(false), cl::Hidden,
+    cl::desc("Allows loop nests to be peeled."));
+
 static cl::opt<bool> UnrollUnrollRemainder(
   "unroll-remainder", cl::Hidden,
   cl::desc("Allow the loop remainder to be unrolled."));
@@ -215,6 +219,7 @@ TargetTransformInfo::UnrollingPreferences llvm::gatherUnrollingPreferences(
   UP.Force = false;
   UP.UpperBound = false;
   UP.AllowPeeling = true;
+  UP.AllowLoopNestsPeeling = false;
   UP.UnrollAndJam = false;
   UP.PeelProfiledIterations = true;
   UP.UnrollAndJamInnerLoopThreshold = 60;
@@ -255,6 +260,8 @@ TargetTransformInfo::UnrollingPreferences llvm::gatherUnrollingPreferences(
     UP.UpperBound = false;
   if (UnrollAllowPeeling.getNumOccurrences() > 0)
     UP.AllowPeeling = UnrollAllowPeeling;
+  if (UnrollAllowLoopNestsPeeling.getNumOccurrences() > 0)
+    UP.AllowLoopNestsPeeling = UnrollAllowLoopNestsPeeling;
   if (UnrollUnrollRemainder.getNumOccurrences() > 0)
     UP.UnrollRemainder = UnrollUnrollRemainder;
 
@@ -439,7 +446,7 @@ static Optional<EstimatedUnrollCost> analyzeLoopUnrollCost(
 
         // First accumulate the cost of this instruction.
         if (!Cost.IsFree) {
-          UnrolledCost += TTI.getUserCost(I);
+          UnrolledCost += TTI.getUserCost(I, TargetTransformInfo::TCK_CodeSize);
           LLVM_DEBUG(dbgs() << "Adding cost of instruction (iteration "
                             << Iteration << "): ");
           LLVM_DEBUG(I->dump());
@@ -532,7 +539,7 @@ static Optional<EstimatedUnrollCost> analyzeLoopUnrollCost(
 
         // Track this instruction's expected baseline cost when executing the
         // rolled loop form.
-        RolledDynamicCost += TTI.getUserCost(&I);
+        RolledDynamicCost += TTI.getUserCost(&I, TargetTransformInfo::TCK_CodeSize);
 
         // Visit the instruction to analyze its loop cost after unrolling,
         // and if the visitor returns true, mark the instruction as free after
@@ -1148,7 +1155,7 @@ static LoopUnrollResult tryToUnrollLoop(
       {UP.Count, TripCount, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
        UseUpperBound, MaxOrZero, TripMultiple, UP.PeelCount, UP.UnrollRemainder,
        ForgetAllSCEV},
-      LI, &SE, &DT, &AC, &ORE, PreserveLCSSA, &RemainderLoop);
+      LI, &SE, &DT, &AC, &TTI, &ORE, PreserveLCSSA, &RemainderLoop);
   if (UnrollResult == LoopUnrollResult::Unmodified)
     return LoopUnrollResult::Unmodified;
 
@@ -1402,10 +1409,9 @@ PreservedAnalyses LoopUnrollPass::run(Function &F,
   if (auto *LAMProxy = AM.getCachedResult<LoopAnalysisManagerFunctionProxy>(F))
     LAM = &LAMProxy->getManager();
 
-  const ModuleAnalysisManager &MAM =
-      AM.getResult<ModuleAnalysisManagerFunctionProxy>(F).getManager();
+  auto &MAMProxy = AM.getResult<ModuleAnalysisManagerFunctionProxy>(F);
   ProfileSummaryInfo *PSI =
-      MAM.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
+      MAMProxy.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
   auto *BFI = (PSI && PSI->hasProfileSummary()) ?
       &AM.getResult<BlockFrequencyAnalysis>(F) : nullptr;
 

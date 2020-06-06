@@ -281,8 +281,10 @@ Type *TruncInstCombine::getBestTruncatedType() {
 /// version of \p Ty, otherwise return \p Ty.
 static Type *getReducedType(Value *V, Type *Ty) {
   assert(Ty && !Ty->isVectorTy() && "Expect Scalar Type");
-  if (auto *VTy = dyn_cast<VectorType>(V->getType()))
-    return VectorType::get(Ty, VTy->getNumElements());
+  if (auto *VTy = dyn_cast<VectorType>(V->getType())) {
+    // FIXME: should this handle scalable vectors?
+    return FixedVectorType::get(Ty, VTy->getNumElements());
+  }
   return Ty;
 }
 
@@ -291,9 +293,7 @@ Value *TruncInstCombine::getReducedOperand(Value *V, Type *SclTy) {
   if (auto *C = dyn_cast<Constant>(V)) {
     C = ConstantExpr::getIntegerCast(C, Ty, false);
     // If we got a constantexpr back, try to simplify it with DL info.
-    if (Constant *FoldedC = ConstantFoldConstant(C, DL, &TLI))
-      C = FoldedC;
-    return C;
+    return ConstantFoldConstant(C, DL, &TLI);
   }
 
   auto *I = cast<Instruction>(V);

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ValueObjectChild_h_
-#define liblldb_ValueObjectChild_h_
+#ifndef LLDB_CORE_VALUEOBJECTCHILD_H
+#define LLDB_CORE_VALUEOBJECTCHILD_H
 
 #include "lldb/Core/ValueObject.h"
 
@@ -88,9 +88,10 @@ protected:
                    AddressType child_ptr_or_ref_addr_type,
                    uint64_t language_flags);
 
-  DISALLOW_COPY_AND_ASSIGN(ValueObjectChild);
+  ValueObjectChild(const ValueObjectChild &) = delete;
+  const ValueObjectChild &operator=(const ValueObjectChild &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ValueObjectChild_h_
+#endif // LLDB_CORE_VALUEOBJECTCHILD_H

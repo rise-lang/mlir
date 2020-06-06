@@ -108,6 +108,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]
   case Decl::Label:        // __label__ x;
   case Decl::Import:
+  case Decl::MSGuid:    // __declspec(uuid("..."))
   case Decl::OMPThreadPrivate:
   case Decl::OMPAllocate:
   case Decl::OMPCapturedExpr:
@@ -249,7 +250,7 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
   // variables cannot have an initializer.
   llvm::Constant *Init = nullptr;
   if (Ty.getAddressSpace() == LangAS::opencl_local ||
-      D.hasAttr<CUDASharedAttr>())
+      D.hasAttr<CUDASharedAttr>() || D.hasAttr<LoaderUninitializedAttr>())
     Init = llvm::UndefValue::get(LTy);
   else
     Init = EmitNullConstant(Ty);
@@ -341,7 +342,7 @@ CodeGenFunction::AddInitializerToStaticVarDecl(const VarDecl &D,
   // the global to match the initializer.  (We have to do this
   // because some types, like unions, can't be completely represented
   // in the LLVM type system.)
-  if (GV->getType()->getElementType() != Init->getType()) {
+  if (GV->getValueType() != Init->getType()) {
     llvm::GlobalVariable *OldGV = GV;
 
     GV = new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
@@ -1050,13 +1051,13 @@ static llvm::Constant *constWithPadding(CodeGenModule &CGM, IsPattern isPattern,
   llvm::Type *OrigTy = constant->getType();
   if (const auto STy = dyn_cast<llvm::StructType>(OrigTy))
     return constStructWithPadding(CGM, isPattern, STy, constant);
-  if (auto *STy = dyn_cast<llvm::SequentialType>(OrigTy)) {
+  if (auto *ArrayTy = dyn_cast<llvm::ArrayType>(OrigTy)) {
     llvm::SmallVector<llvm::Constant *, 8> Values;
-    unsigned Size = STy->getNumElements();
+    uint64_t Size = ArrayTy->getNumElements();
     if (!Size)
       return constant;
-    llvm::Type *ElemTy = STy->getElementType();
-    bool ZeroInitializer = constant->isZeroValue();
+    llvm::Type *ElemTy = ArrayTy->getElementType();
+    bool ZeroInitializer = constant->isNullValue();
     llvm::Constant *OpValue, *PaddedOp;
     if (ZeroInitializer) {
       OpValue = llvm::Constant::getNullValue(ElemTy);
@@ -1072,13 +1073,12 @@ static llvm::Constant *constWithPadding(CodeGenModule &CGM, IsPattern isPattern,
     auto *NewElemTy = Values[0]->getType();
     if (NewElemTy == ElemTy)
       return constant;
-    if (OrigTy->isArrayTy()) {
-      auto *ArrayTy = llvm::ArrayType::get(NewElemTy, Size);
-      return llvm::ConstantArray::get(ArrayTy, Values);
-    } else {
-      return llvm::ConstantVector::get(Values);
-    }
+    auto *NewArrayTy = llvm::ArrayType::get(NewElemTy, Size);
+    return llvm::ConstantArray::get(NewArrayTy, Values);
   }
+  // FIXME: Add handling for tail padding in vectors. Vectors don't
+  // have padding between or inside elements, but the total amount of
+  // data can be less than the allocated size.
   return constant;
 }
 
@@ -1517,9 +1517,12 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
         // is rare.
         if (!Bypasses.IsBypassed(&D) &&
             !(!getLangOpts().CPlusPlus && hasLabelBeenSeenInCurrentScope())) {
-          uint64_t size = CGM.getDataLayout().getTypeAllocSize(allocaTy);
+          llvm::TypeSize size =
+              CGM.getDataLayout().getTypeAllocSize(allocaTy);
           emission.SizeForLifetimeMarkers =
-              EmitLifetimeStart(size, AllocaAddr.getPointer());
+              size.isScalable() ? EmitLifetimeStart(-1, AllocaAddr.getPointer())
+                                : EmitLifetimeStart(size.getFixedSize(),
+                                                    AllocaAddr.getPointer());
         }
       } else {
         assert(!emission.useLifetimeMarkers());

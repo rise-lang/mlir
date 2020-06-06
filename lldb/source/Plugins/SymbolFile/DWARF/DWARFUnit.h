@@ -6,12 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARF_DWARFUnit_h_
-#define SymbolFileDWARF_DWARFUnit_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFUNIT_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFUNIT_H
 
 #include "DWARFDIE.h"
 #include "DWARFDebugInfoEntry.h"
 #include "lldb/lldb-enumerations.h"
+#include "lldb/Utility/XcodeSDK.h"
 #include "llvm/Support/RWMutex.h"
 #include <atomic>
 
@@ -59,6 +60,9 @@ public:
   dw_offset_t GetLength() const { return m_length; }
   dw_offset_t GetAbbrOffset() const { return m_abbr_offset; }
   uint8_t GetUnitType() const { return m_unit_type; }
+  const llvm::DWARFUnitIndex::Entry *GetIndexEntry() const {
+    return m_index_entry;
+  }
   uint64_t GetTypeHash() const { return m_type_hash; }
   dw_offset_t GetTypeOffset() const { return m_type_offset; }
   bool IsTypeUnit() const {
@@ -94,7 +98,8 @@ public:
     bool m_clear_dies = false;
     ScopedExtractDIEs(DWARFUnit &cu);
     ~ScopedExtractDIEs();
-    DISALLOW_COPY_AND_ASSIGN(ScopedExtractDIEs);
+    ScopedExtractDIEs(const ScopedExtractDIEs &) = delete;
+    const ScopedExtractDIEs &operator=(const ScopedExtractDIEs &) = delete;
     ScopedExtractDIEs(ScopedExtractDIEs &&rhs);
     ScopedExtractDIEs &operator=(ScopedExtractDIEs &&rhs);
   };
@@ -215,6 +220,8 @@ public:
   uint8_t GetUnitType() const { return m_header.GetUnitType(); }
   bool IsTypeUnit() const { return m_header.IsTypeUnit(); }
 
+  llvm::Optional<uint64_t> GetStringOffsetSectionItem(uint32_t index) const;
+
   /// Return a list of address ranges resulting from a (possibly encoded)
   /// range list starting at a given offset in the appropriate ranges section.
   llvm::Expected<DWARFRangeList> FindRnglistFromOffset(dw_offset_t offset);
@@ -250,7 +257,7 @@ public:
   std::unique_ptr<llvm::DWARFLocationTable>
   GetLocationTable(const lldb_private::DataExtractor &data) const;
 
-  const lldb_private::DWARFDataExtractor &GetLocationData() const;
+  lldb_private::DWARFDataExtractor GetLocationData() const;
 
 protected:
   DWARFUnit(SymbolFileDWARF &dwarf, lldb::user_id_t uid,
@@ -331,11 +338,13 @@ private:
   void ClearDIEsRWLocked();
 
   void AddUnitDIE(const DWARFDebugInfoEntry &cu_die);
+  void SetDwoStrOffsetsBase();
 
   void ComputeCompDirAndGuessPathStyle();
   void ComputeAbsolutePath();
 
-  DISALLOW_COPY_AND_ASSIGN(DWARFUnit);
+  DWARFUnit(const DWARFUnit &) = delete;
+  const DWARFUnit &operator=(const DWARFUnit &) = delete;
 };
 
-#endif // SymbolFileDWARF_DWARFUnit_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFUNIT_H

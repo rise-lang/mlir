@@ -9,6 +9,7 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_unittest(AnalysisTests
   AliasAnalysisTest.cpp
   AliasSetTrackerTest.cpp
+  AssumeBundleQueriesTest.cpp
   BasicAliasAnalysisTest.cpp
   BlockFrequencyInfoTest.cpp
   BranchProbabilityInfoTest.cpp
@@ -16,6 +17,7 @@ add_llvm_unittest(AnalysisTests
   CaptureTrackingTest.cpp
   CFGTest.cpp
   CGSCCPassManagerTest.cpp
+  DDGTest.cpp
   DivergenceAnalysisTest.cpp
   DomTreeUpdaterTest.cpp
   GlobalsModRefTest.cpp
@@ -23,9 +25,9 @@ add_llvm_unittest(AnalysisTests
   LazyCallGraphTest.cpp
   LoadsTest.cpp
   LoopInfoTest.cpp
+  LoopNestTest.cpp
   MemoryBuiltinsTest.cpp
   MemorySSATest.cpp
-  OrderedBasicBlockTest.cpp
   OrderedInstructionsTest.cpp
   PhiValuesTest.cpp
   ProfileSummaryInfoTest.cpp
@@ -39,3 +41,5 @@ add_llvm_unittest(AnalysisTests
   ValueTrackingTest.cpp
   VectorUtilsTest.cpp
   )
+
+add_subdirectory(ML)

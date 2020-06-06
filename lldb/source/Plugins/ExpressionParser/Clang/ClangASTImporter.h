@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ClangASTImporter_h_
-#define liblldb_ClangASTImporter_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGASTIMPORTER_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGASTIMPORTER_H
 
 #include <map>
 #include <memory>
@@ -102,8 +102,8 @@ public:
   // Namespace maps
   //
 
-  typedef std::vector<std::pair<lldb::ModuleSP, CompilerDeclContext>>
-      NamespaceMap;
+  typedef std::pair<lldb::ModuleSP, CompilerDeclContext> NamespaceMapItem;
+  typedef std::vector<NamespaceMapItem> NamespaceMap;
   typedef std::shared_ptr<NamespaceMap> NamespaceMapSP;
 
   void RegisterNamespaceMap(const clang::NamespaceDecl *decl,
@@ -327,4 +327,4 @@ public:
 
 } // namespace lldb_private
 
-#endif // liblldb_ClangASTImporter_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGASTIMPORTER_H

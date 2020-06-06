@@ -420,7 +420,7 @@ void ModuloScheduleExpander::generateExistingPhis(
     unsigned NewReg = 0;
     unsigned AccessStage = (LoopValStage != -1) ? LoopValStage : StageScheduled;
     // In the epilog, we may need to look back one stage to get the correct
-    // Phi name because the epilog and prolog blocks execute the same stage.
+    // Phi name, because the epilog and prolog blocks execute the same stage.
     // The correct name is from the previous block only when the Phi has
     // been completely scheduled prior to the epilog, and Phi value is not
     // needed in multiple stages.
@@ -913,7 +913,12 @@ bool ModuloScheduleExpander::computeDelta(MachineInstr &MI, unsigned &Delta) {
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const MachineOperand *BaseOp;
   int64_t Offset;
-  if (!TII->getMemOperandWithOffset(MI, BaseOp, Offset, TRI))
+  bool OffsetIsScalable;
+  if (!TII->getMemOperandWithOffset(MI, BaseOp, Offset, OffsetIsScalable, TRI))
+    return false;
+
+  // FIXME: This algorithm assumes instructions have fixed-size offsets.
+  if (OffsetIsScalable)
     return false;
 
   if (!BaseOp->isReg())
@@ -1435,11 +1440,15 @@ Register KernelRewriter::remapUse(Register Reg, MachineInstr &MI) {
     // immediately prior to pruning.
     auto RC = MRI.getRegClass(Reg);
     Register R = MRI.createVirtualRegister(RC);
-    BuildMI(*BB, MI, DebugLoc(), TII->get(TargetOpcode::PHI), R)
-        .addReg(IllegalPhiDefault.getValue())
-        .addMBB(PreheaderBB) // Block choice is arbitrary and has no effect.
-        .addReg(LoopReg)
-        .addMBB(BB); // Block choice is arbitrary and has no effect.
+    MachineInstr *IllegalPhi =
+        BuildMI(*BB, MI, DebugLoc(), TII->get(TargetOpcode::PHI), R)
+            .addReg(IllegalPhiDefault.getValue())
+            .addMBB(PreheaderBB) // Block choice is arbitrary and has no effect.
+            .addReg(LoopReg)
+            .addMBB(BB); // Block choice is arbitrary and has no effect.
+    // Illegal phi should belong to the producer stage so that it can be
+    // filtered correctly during peeling.
+    S.setStage(IllegalPhi, LoopProducerStage);
     return R;
   }
 
@@ -1620,18 +1629,21 @@ void PeelingModuloScheduleExpander::moveStageBetweenBlocks(
     MachineInstr *MI = &*I++;
     if (MI->isPHI()) {
       // This is an illegal PHI. If we move any instructions using an illegal
-      // PHI, we need to create a legal Phi
-      Register PhiR = MI->getOperand(0).getReg();
-      auto RC = MRI.getRegClass(PhiR);
-      Register NR = MRI.createVirtualRegister(RC);
-      MachineInstr *NI = BuildMI(*DestBB, DestBB->getFirstNonPHI(), DebugLoc(),
-                                 TII->get(TargetOpcode::PHI), NR)
-                             .addReg(PhiR)
-                             .addMBB(SourceBB);
-      BlockMIs[{DestBB, CanonicalMIs[MI]}] = NI;
-      CanonicalMIs[NI] = CanonicalMIs[MI];
-      Remaps[PhiR] = NR;
-      continue;
+      // PHI, we need to create a legal Phi.
+      if (getStage(MI) != Stage) {
+        // The legal Phi is not necessary if the illegal phi's stage
+        // is being moved.
+        Register PhiR = MI->getOperand(0).getReg();
+        auto RC = MRI.getRegClass(PhiR);
+        Register NR = MRI.createVirtualRegister(RC);
+        MachineInstr *NI = BuildMI(*DestBB, DestBB->getFirstNonPHI(),
+                                   DebugLoc(), TII->get(TargetOpcode::PHI), NR)
+                               .addReg(PhiR)
+                               .addMBB(SourceBB);
+        BlockMIs[{DestBB, CanonicalMIs[MI]}] = NI;
+        CanonicalMIs[NI] = CanonicalMIs[MI];
+        Remaps[PhiR] = NR;
+      }
     }
     if (getStage(MI) != Stage)
       continue;
@@ -1649,8 +1661,8 @@ void PeelingModuloScheduleExpander::moveStageBetweenBlocks(
     // we don't need the phi anymore.
     if (getStage(Def) == Stage) {
       Register PhiReg = MI.getOperand(0).getReg();
-      MRI.replaceRegWith(MI.getOperand(0).getReg(),
-                         Def->getOperand(0).getReg());
+      assert(Def->findRegisterDefOperandIdx(MI.getOperand(1).getReg()) != -1);
+      MRI.replaceRegWith(MI.getOperand(0).getReg(), MI.getOperand(1).getReg());
       MI.getOperand(0).setReg(PhiReg);
       PhiToDelete.push_back(&MI);
     }

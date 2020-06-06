@@ -4,6 +4,7 @@ group("unittests") {
   deps = [
     "ADT:ADTTests",
     "Analysis:AnalysisTests",
+    "Analysis/ML:MLAnalysisTests",
     "AsmParser:AsmParserTests",
     "BinaryFormat:BinaryFormatTests",
     "Bitcode:BitcodeTests",
@@ -54,6 +55,12 @@ group("unittests") {
     deps += [
       "Target/AArch64:AArch64Tests",
       "tools/llvm-exegesis/AArch64:LLVMExegesisAArch64Tests",
+    ]
+  }
+  if (llvm_build_AMDGPU) {
+    deps += [
+      "MC/AMDGPU:AMDGPUDwarfTests",
+      "Target/AMDGPU:AMDGPUTests",
     ]
   }
   if (llvm_build_ARM) {
