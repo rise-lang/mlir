@@ -787,12 +787,8 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
             shape.push_back(arrayType.getSize().getIntValue());
           }
 
-          Type memrefElementType;
-          if (arrayType.getElementType().isa<Float>()) {
-            memrefElementType = FloatType::getF32(rewriter.getContext());
-          } else if (arrayType.getElementType().isa<Int>()) {
-            memrefElementType = IntegerType::get(32, rewriter.getContext());
-          }
+          Type memrefElementType = FloatType::getF32(rewriter.getContext());
+
 
           auto array = rewriter.create<AllocOp>(
               loc, MemRefType::get(shape, memrefElementType));

@@ -42,26 +42,18 @@ public:
 
   /// Hook for custom parsing of types
   mlir::Type parseType(DialectAsmParser &parser) const override;
-  mlir::Type parseTypeInternal(DialectAsmParser &parser, StringRef typeString) const;
-  RiseType parseRiseType(DialectAsmParser &parser, StringRef typeString, mlir::Location loc) const;
-  FunType parseFunType(DialectAsmParser &parser) const;
-  DataType parseDataType(StringRef typeString, mlir::Location loc) const;
-  Nat parseNat(StringRef typeString, mlir::Location loc) const;
 
   /// Hook for custom printing of types
   void printType(mlir::Type type, DialectAsmPrinter &) const override;
+  void printTypeInternal(mlir::Type type, raw_ostream &stream, DialectAsmPrinter &printer) const;
 
   /// Hook for custom parsing of Attributes
   mlir::Attribute parseAttribute(DialectAsmParser &parser,
                                  Type type) const override;
-  LiteralAttr parseLiteralAttribute(DialectAsmParser &parser,
-                                    mlir::Location loc) const;
-  DataTypeAttr parseDataTypeAttribute(StringRef attrString,
-                                      mlir::Location loc) const;
-  NatAttr parseNatAttribute(StringRef attrString, mlir::Location loc) const;
 
   /// Hook for custom printing of Attributes
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
+
 };
 
 } // end namespace rise

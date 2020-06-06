@@ -46,8 +46,6 @@ enum RiseTypeKind {
   RISE_DATATYPE_WRAPPER,
   RISE_NAT,
   RISE_DATATYPE,
-  RISE_INT,
-  RISE_FLOAT,
   RISE_TUPLE,
   RISE_ARRAY,
   RISE_SCALAR
@@ -65,15 +63,15 @@ enum RiseTypeKind {
 ///          ++------++      +---+      +--+--+--+
 ///           ^      ^                     ^  ^
 ///           |      |                     |  |
-///   +-------+      +-------+          +--+  +-------+
-///   |       |      |       |          |             |
-/// +-+-+ +---+-+ +--+--+ +--+--+   +---+---+ +-------+-------+
-/// |Int| |Float| |Array| |Tuple|   |FunType| |DataTypeWrapper|
-/// +---+ +-----+ +-----+ +-----+   +-------+ +---------------+
+///    +-------+     +-------+          +--+  +-------+
+///    |            |       |          |             |
+/// +--+---+     +--+--+ +--+--+   +---+---+ +-------+-------+
+/// |Scalar|     |Array| |Tuple|   |FunType| |DataTypeWrapper|
+/// +------+     +-----+ +-----+   +-------+ +---------------+
 ///
 /// RISE types are divided into three categories that all inherit from
 /// mlir::Type:
-///    Data types: include Int, Float, Array and Tuple types.
+///    Data types: include Array and Tuple and Scalar types.
 ///
 ///    Natural numbers: Used for tracking the length of the array in the type.
 ///
@@ -140,11 +138,6 @@ public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
 
-//  static mlir::LogicalResult
-//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
-//                               mlir::MLIRContext *context, Nat size,
-//                               DataType elementType);
-
   /// This method is used to get an instance of ArrayType.
   static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
 
@@ -154,48 +147,11 @@ public:
   Type getWrappedType();
 };
 
-/// We will experiment with adopting the Integer types of the Standard dialect
-class Int : public Type::TypeBase<Int, DataType> {
-public:
-  /// Inherit some necessary constructors from 'TypeBase'.
-  using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_INT; }
-
-  /// This method is used to get an instance of Int.
-  static Int get(mlir::MLIRContext *context) {
-    return Base::get(context, RiseTypeKind::RISE_INT);
-  }
-};
-
-/// We will experiment with adopting the Float types of the Standard dialect
-class Float : public Type::TypeBase<Float, DataType> {
-public:
-  /// Inherit some necessary constructors from 'TypeBase'.
-  using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_FLOAT; }
-
-  /// This method is used to get an instance of Float.
-  static Float get(mlir::MLIRContext *context) {
-    return Base::get(context, RiseTypeKind::RISE_FLOAT);
-  }
-};
-
 class ArrayType : public mlir::Type::TypeBase<ArrayType, DataType,
                                               detail::ArrayTypeStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-//  static mlir::LogicalResult
-//  verifyConstructionInvariants(llvm::Optional<mlir::Location> loc,
-//                               mlir::MLIRContext *context, Nat size,
-//                               Type elementType);
 
   /// This method is used to get an instance of ArrayType.
   static ArrayType get(mlir::MLIRContext *context, Nat size,

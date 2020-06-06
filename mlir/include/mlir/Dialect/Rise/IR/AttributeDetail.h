@@ -93,8 +93,7 @@ struct NatAttributeStorage : public mlir::AttributeStorage {
         NatAttributeStorage(key);
   }
 
-  Nat value; // TODO: This is the culprit for the current errors. Make the rest
-             // conform to this. Add a getValue method to Nat
+  Nat value;
 };
 } // namespace detail
 } // namespace rise

@@ -47,16 +47,11 @@ class Rise_Op<string mnemonic, list<OpTrait> traits = []>
 
 /// Type predicates
 def NatType : Type<CPred<"$_self.isa<Nat>()">, "nat type">;
-
-def IntType : Type<CPred<"$_self.isa<Int>()">, "int type">;
-def FloatType : Type<CPred<"$_self.isa<Float>()">, "float type">;
 def TupleType : Type<CPred<"$_self.isa<Tuple>()">, "tuple type">;
 def ArrayType : Type<CPred<"$_self.isa<ArrayType>()">, "array type">;
 def ScalarType : Type<CPred<"$_self.isa<ScalarType>()">, "scalar type">;
-def DataType : Type<Or<[
-  IntType.predicate, FloatType.predicate, TupleType.predicate,
-  ArrayType.predicate, ScalarType.predicate
-]>>;
+def DataType : Type<Or<[TupleType.predicate, ArrayType.predicate,
+ScalarType.predicate]>>;
 def NatOrDataType : Type<Or<[NatType.predicate, DataType.predicate]>>;
 
 def FunType : Type<CPred<"$_self.isa<FunType>()">, "fun type">;
@@ -81,108 +76,8 @@ def LiteralAttr : Attr<CPred<"$_self.isa<LiteralAttr>()">, "literal "
 }
 
 //===----------------------------------------------------------------------===//
-// Rise Operations
+// Rise Operations: Core Lambda Calculus
 //===----------------------------------------------------------------------===//
-
-def RiseContinuationTranslation : Rise_Op<"cont"> {
-  let summary = "rise cont";
-  let description =
-      "A marker where to continue with the lowering to imperative";
-  let arguments = (ins AnyType : $cont);
-  let results = (outs AnyType);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseFunOp : Rise_Op<"fun", [SingleBlockImplicitTerminator<"ReturnOp">]> {
-  let summary = "rise fun";
-  let regions = (region SizedRegion<1> : $region);
-  //  let arguments = (ins AnyType:$out, Variadic<AnyType>:$inputs);
-  let arguments = (ins StrAttr:$name, Variadic<AnyType>:$inputs);  // This is not really used. We have region arguments, not "normal" arguments.
-  //  let results = (outs AnyType : $output);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-
-def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
-  let summary = "rise embed";
-  let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
-  let results = (outs AnyType : $wrapped);
-  let regions = (region SizedRegion<1> : $region);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseIdxOp : Rise_Op<"codegen.idx"> {
-  let summary = "rise idx";
-  let arguments = (ins DataType : $arg0, AnyType : $arg1);
-  let results = (outs DataType : $output);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseCastOp : Rise_Op<"codegen.cast"> {
-  let summary = "rise codegen.cast op";
-  let arguments = (ins AnyType);
-  let results = (outs DataType);
-}
-
-def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {
-  let summary = "rise bin_op";
-  let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
-  let results = (outs AnyType : $output);
-  // let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseZipIntermediateOp : Rise_Op<"codegen.zip"> {
-  let summary = "rise zip_interm";
-  let arguments = (ins AnyType : $lhs, AnyType : $rhs);
-  let results = (outs AnyType : $output);
-  // let parser = [{ return parse$cppClass(parser, result); }];
-}
-def RiseFstIntermediateOp : Rise_Op<"codegen.fst"> {
-  let summary = "rise fst_interm";
-  let arguments = (ins AnyType : $value);
-  let results = (outs AnyType : $output);
-  // let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseSndIntermediateOp : Rise_Op<"codegen.snd"> {
-  let summary = "rise snd_interm";
-  let arguments = (ins AnyType : $value);
-  let results = (outs AnyType : $output);
-  // let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseAssignOp : Rise_Op<"codegen.assign"> {
-  let summary = "rise assign";
-  let arguments = (ins AnyType : $value, AnyType : $assignee);
-  // let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseOutOp : Rise_Op<"out"> {
-  let summary = "rise out";
-  let arguments = (ins AnyType:$input, AnyType:$output);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def RiseInOp : Rise_Op<"in"> {
-  let summary = "rise in";
-  let arguments = (ins AnyMemRef : $input);
-  let results = (outs AnyType : $output);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def LiteralOp : Rise_Op<"literal"> {
-  let summary = "literal";
-  let arguments = (ins LiteralAttr : $literal);
-  let results = (outs AnyType);
-  //    let extraClassDeclaration = [{LiteralAttr getValue() { return
-  //    getAttr("value"); }
-  //        /// Returns true if a constant operation can be built with the given
-  //        value
-  //        /// and result type.
-  //        static bool isBuildableWith(LiteralAttr value, mlir::Type type);
-  //    }];
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
 
 def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let summary = "lambda";
@@ -210,6 +105,48 @@ def ApplyOp : Rise_Op<"apply"> {
   let results = (outs AnyType : $result);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
+
+//===----------------------------------------------------------------------===//
+// Rise Operations: Interoperability
+//===----------------------------------------------------------------------===//
+
+def RiseInOp : Rise_Op<"in"> {
+  let summary = "rise in";
+  let description = "";
+  let arguments = (ins AnyMemRef : $input);
+  let results = (outs AnyType : $output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseOutOp : Rise_Op<"out"> {
+  let summary = "rise out";
+  let arguments = (ins AnyType:$input, AnyType:$output);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
+  let summary = "rise embed";
+  let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
+  let results = (outs AnyType : $wrapped);
+  let regions = (region SizedRegion<1> : $region);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def ReturnOp : Rise_Op<"return", [Terminator]> {
+  let summary = "rise terminator operation";
+  let description =
+      "This operation is used as a terminator for the region of a lambda and embed. "
+      "We will experiment with using the standard return operation instead.";
+  let arguments = (ins Variadic<AnyType> : $operands);
+  let parser = [{ return parse$cppClass(parser, result); }];
+  let builders = [OpBuilder<
+    "OpBuilder &b, OperationState &result", [{ build(b, result, llvm::None); }]
+  >];
+}
+
+//===----------------------------------------------------------------------===//
+// Rise Operations: Patterns
+//===----------------------------------------------------------------------===//
 
 def MapSeqOp : Rise_Op<"mapSeq"> {
   let summary = "mapSeq";
@@ -291,16 +228,56 @@ def SndOp : Rise_Op<"snd"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def ReturnOp : Rise_Op<"return", [Terminator]> {
-  let summary = "rise terminator operation";
-  let description =
-      "This operation is used as a terminator for the region of a lambda. "
-      "We will experiment with using the standard return operation instead.";
-  let arguments = (ins Variadic<AnyType> : $operands);
+def LiteralOp : Rise_Op<"literal"> {
+  let summary = "literal";
+  let arguments = (ins LiteralAttr : $literal);
+  let results = (outs AnyType);
   let parser = [{ return parse$cppClass(parser, result); }];
-  let builders = [OpBuilder<
-    "OpBuilder &b, OperationState &result", [{ build(b, result, llvm::None); }]
-  >];
+}
+
+//===----------------------------------------------------------------------===//
+// Rise Operations: Intermediate Codegen
+//===----------------------------------------------------------------------===//
+
+def RiseIdxOp : Rise_Op<"codegen.idx"> {
+  let summary = "rise idx";
+  let arguments = (ins DataType : $arg0, AnyType : $arg1);
+  let results = (outs DataType : $output);
+}
+
+def RiseCastOp : Rise_Op<"codegen.cast"> {
+  let summary = "rise codegen.cast op";
+  let arguments = (ins AnyType);
+  let results = (outs DataType);
+}
+
+def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {
+  let summary = "rise bin_op";
+  let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
+  let results = (outs AnyType : $output);
+  // let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def RiseZipIntermediateOp : Rise_Op<"codegen.zip"> {
+  let summary = "rise zip_interm";
+  let arguments = (ins AnyType : $lhs, AnyType : $rhs);
+  let results = (outs AnyType : $output);
+}
+def RiseFstIntermediateOp : Rise_Op<"codegen.fst"> {
+  let summary = "rise fst_interm";
+  let arguments = (ins AnyType : $value);
+  let results = (outs AnyType : $output);
+}
+
+def RiseSndIntermediateOp : Rise_Op<"codegen.snd"> {
+  let summary = "rise snd_interm";
+  let arguments = (ins AnyType : $value);
+  let results = (outs AnyType : $output);
+}
+
+def RiseAssignOp : Rise_Op<"codegen.assign"> {
+  let summary = "rise assign";
+  let arguments = (ins AnyType : $value, AnyType : $assignee);
 }
 
 //===----------------------------------------------------------------------===//
@@ -328,6 +305,5 @@ def MulOp : Rise_Op<"mul"> {
   let results = (outs FunType : $mulFun);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
-
 
 #endif // RISE_OPS
