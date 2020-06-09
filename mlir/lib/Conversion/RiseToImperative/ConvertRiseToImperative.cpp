@@ -63,9 +63,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   Block &block = funcOp.getBody().front();
   funcOp.walk([&](Operation *op) {
     if (RiseInOp inOp = dyn_cast<RiseInOp>(op)) {
-      //      inOp.output().replaceAllUsesWith(inOp.input());
       rewriter.setInsertionPointAfter(inOp);
-      //      rewriter.eraseOp(inOp);
     }
   });
 
@@ -104,7 +102,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     if (!inst)
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
-        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<RiseOutOp>(inst) || isa<LiteralOp>(inst)) {
+        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<RiseOutOp>(inst) ||
+        isa<LiteralOp>(inst)) {
       if (inst->getParentOfType<LambdaOp>()) {
       } else {
         leftoverOps.push_back(inst);
@@ -122,7 +121,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
 
   // Translation to imperative
   emitRemark(funcOp.getLoc()) << "AccT finished. Starting CodeGen.";
-
 
   SmallVector<rise::RiseAssignOp, 10> assignOps;
   funcOp.walk([&assignOps](Operation *inst) {
@@ -144,7 +142,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
-  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -168,7 +165,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     op->dropAllReferences();
     rewriter.eraseOp(op);
   }
-
   return;
 }
 
@@ -209,52 +205,10 @@ void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter) {
   }
 }
 
-// Old translation of embed which we prob need in codegen
-///// Acceptor Translation
-// void mlir::rise::AccT(ReturnOp returnOp, Value out, PatternRewriter
-// &rewriter) {
-//  if (!returnOp.getOperand(0).isa<OpResult>()) {
-//    emitRemark(returnOp.getLoc())
-//        << "Directly returning an argument is not supported in lowering to "
-//           "imperative currently";
-//    return;
-//  }
-//  if (ApplyOp apply =
-//          dyn_cast<ApplyOp>(returnOp.getOperand(0).getDefiningOp())) {
-//    AccT(apply, out, rewriter);
-//    return;
-//  } else if (RiseEmbedOp embedOp = dyn_cast<RiseEmbedOp>(
-//                 returnOp.getOperand(0).getDefiningOp())) {
-//    emitRemark(returnOp.getLoc())
-//        << "AccT of RiseEmbedOp. Copy operations from this block to result.";
-//
-//    // Translating all operands first
-//    for (int i = 0; i < embedOp.getOperands().size(); i++) {
-//      auto operand = embedOp.getOperand(i);
-//      auto operandCont = ConT(operand, rewriter.getInsertionPoint(),
-//      rewriter);
-//      embedOp.region().front().getArgument(i).replaceAllUsesWith(operandCont);
-//    }
-//    rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
-//        embedOp.getRegion().front().getOperations().back());
-//
-//    rewriter.getInsertionBlock()->getOperations().splice(
-//        rewriter.getInsertionPoint(),
-//        embedOp.getRegion().front().getOperations(),
-//        embedOp.getRegion().front().begin(), Block::iterator(embedReturn));
-//
-//    auto assignment = rewriter.create<RiseAssignOp>(
-//        embedReturn.getLoc(), embedReturn.getOperand(0), out);
-//
-//    return;
-//  } else {
-//    emitError(returnOp.getLoc()) << "AccT of a rise.return went wrong!";
-//    return;
-//  }
-//}
 
 void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
-  if (out.getType().getDialect().getNamespace() != RiseDialect::getDialectNamespace()) {
+  if (out.getType().getDialect().getNamespace() !=
+      RiseDialect::getDialectNamespace()) {
     emitError(apply.getLoc()) << "type of out is wrong! Dumping it";
     out.getType().dump();
   }
@@ -628,18 +582,20 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     RiseIdxOp xi;
     // TODO: not needed anymore
-//    if (contArray.getType().isa<MemRefType>()) {
-//      ArrayRef<int64_t> inShape =
-//          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-//
-//      MemRefType inIndexOpResult =
-//          MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-//
-//      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
-//                                      loopInductionVar);
-//    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
-//      //      std::cout << "got an idx and not a memref! \n" << std::flush;
-//    }
+    //    if (contArray.getType().isa<MemRefType>()) {
+    //      ArrayRef<int64_t> inShape =
+    //          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
+    //
+    //      MemRefType inIndexOpResult =
+    //          MemRefType::get(inShape,
+    //          FloatType::getF32(rewriter.getContext()));
+    //
+    //      xi = rewriter.create<RiseIdxOp>(loc, inIndexOpResult, contArray,
+    //                                      loopInductionVar);
+    //    } else if (isa<RiseIdxOp>(contArray.getDefiningOp())) {
+    //      //      std::cout << "got an idx and not a memref! \n" <<
+    //      std::flush;
+    //    }
     if (contArray.getType().isa<ArrayType>()) {
       xi = rewriter.create<RiseIdxOp>(
           loc, contArray.getType().cast<ArrayType>().getElementType(),
@@ -788,7 +744,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
           }
 
           Type memrefElementType = FloatType::getF32(rewriter.getContext());
-
 
           auto array = rewriter.create<AllocOp>(
               loc, MemRefType::get(shape, memrefElementType));
@@ -1019,6 +974,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
     } else if (RiseCastOp castOp =
                    dyn_cast<RiseCastOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for cast";
+      val.getDefiningOp()->getParentOfType<FuncOp>().dump();
       return codeGenStore(castOp.getOperand(), val, path, rewriter);
     } else if (RiseEmbedOp embedOp =
                    dyn_cast<RiseEmbedOp>(storeLocation.getDefiningOp())) {
@@ -1033,7 +989,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
           embedOp.getRegion().front().getOperations().back());
       assert(embedReturn &&
-                 "Region of EmbedOp has to be terminated using rise.return!");
+             "Region of EmbedOp has to be terminated using rise.return!");
       embedOp.getResult().replaceAllUsesWith(embedReturn.getOperand(0));
 
       // inline all operations of the embedOp region except for return
@@ -1055,6 +1011,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
   } else {
     // We have reached a BlockArgument
     // call to reverse here.
+    emitRemark(val.getLoc()) << "CodegenStore for BlockArg";
     generateReadAccess(path, val, storeLocation, rewriter);
   }
   return path;
@@ -1170,11 +1127,11 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       emitRemark(val.getLoc()) << "Codegen for Load";
       return val;
     } else if (RiseInOp inOp = dyn_cast<RiseInOp>(val.getDefiningOp())) {
-      emitRemark(val.getLoc()) << "Codegen for Load";
-      return codeGen(inOp.input(), path, rewriter);
+      emitRemark(val.getLoc()) << "Codegen for In, generating read operation for operand";
+      return generateWriteAccess(path, inOp.input(), rewriter);
     } else if (RiseCastOp castOp = dyn_cast<RiseCastOp>(val.getDefiningOp())) {
-      emitRemark(val.getLoc()) << "Codegen for Cast";
-      return codeGen(castOp.getOperand(), path, rewriter);
+      emitRemark(val.getLoc()) << "Codegen for Cast, reversing";
+      return generateWriteAccess(path, castOp.getOperand(), rewriter);
     } else {
       emitRemark(val.getLoc())
           << "I don't know how to do codegen for: "
