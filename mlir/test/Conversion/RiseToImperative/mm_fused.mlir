@@ -1,10 +1,18 @@
 // RUN: mlir-opt %s
-// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so
+// mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so | FileCheck %s --check-prefix=MM_irreg
+
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
+    %outputArray1 = alloc() : memref<2048x2048xf32>
+    %outputArray = alloc() : memref<2048x2048xf32>
+    %outputArray2 = alloc() : memref<2048x2048xf32>
+
     %A = rise.in %inA : !rise.array<2048, array<2048, scalar<f32>>>
     %B = rise.in %inB : !rise.array<2048, array<2048, scalar<f32>>>
+    %transpose = rise.transpose #rise.nat<2048> #rise.nat<2048> #rise.scalar<f32>
+    %B_trans = rise.apply %transpose, %B
+
 
     %m1fun = rise.lambda (%arow : !rise.array<2048, scalar<f32>>) -> !rise.array<2048, scalar<f32>> {
         %m2fun = rise.lambda (%bcol : !rise.array<2048, scalar<f32>>) -> !rise.array<2048, scalar<f32>> {
@@ -37,7 +45,7 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
             rise.return %result : !rise.scalar<f32>
         }
         %m2 = rise.mapSeq {to = "affine"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>
-        %result = rise.apply %m2, %m2fun, %B
+        %result = rise.apply %m2, %m2fun, %B_trans
         rise.return %result : !rise.array<2048, array<2048, scalar<f32>>>
     }
     %m1 = rise.mapSeq {to = "affine"}  #rise.nat<2048> #rise.array<2048, scalar<f32>> #rise.array<2048, scalar<f32>>

@@ -110,7 +110,7 @@ def ApplyOp : Rise_Op<"apply"> {
 // Rise Operations: Interoperability
 //===----------------------------------------------------------------------===//
 
-def RiseInOp : Rise_Op<"in"> {
+def InOp : Rise_Op<"in"> {
   let summary = "rise in";
   let description = "";
   let arguments = (ins AnyMemRef : $input);
@@ -118,13 +118,13 @@ def RiseInOp : Rise_Op<"in"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseOutOp : Rise_Op<"out"> {
+def OutOp : Rise_Op<"out"> {
   let summary = "rise out";
   let arguments = (ins AnyType:$input, AnyType:$output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseEmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
+def EmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let summary = "rise embed";
   let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
   let results = (outs AnyType : $wrapped);
@@ -228,6 +228,13 @@ def SndOp : Rise_Op<"snd"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def TransposeOp : Rise_Op<"transpose"> {
+  let summary = "transpose";
+  let arguments = (ins NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let results = (outs FunType : $tranposeFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def LiteralOp : Rise_Op<"literal"> {
   let summary = "literal";
   let arguments = (ins LiteralAttr : $literal);
@@ -239,43 +246,49 @@ def LiteralOp : Rise_Op<"literal"> {
 // Rise Operations: Intermediate Codegen
 //===----------------------------------------------------------------------===//
 
-def RiseIdxOp : Rise_Op<"codegen.idx"> {
+def IdxOp : Rise_Op<"codegen.idx"> {
   let summary = "rise idx";
   let arguments = (ins DataType : $arg0, AnyType : $arg1);
   let results = (outs DataType : $output);
 }
 
-def RiseCastOp : Rise_Op<"codegen.cast"> {
+def CastOp : Rise_Op<"codegen.cast"> {
   let summary = "rise codegen.cast op";
   let arguments = (ins AnyType);
   let results = (outs DataType);
 }
 
-def RiseBinaryOp : Rise_Op<"codegen.bin_op"> {
+def BinaryOp : Rise_Op<"codegen.bin_op"> {
   let summary = "rise bin_op";
   let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
   let results = (outs AnyType : $output);
   // let parser = [{ return parse$cppClass(parser, result); }];
 }
 
-def RiseZipIntermediateOp : Rise_Op<"codegen.zip"> {
+def ZipIntermediateOp : Rise_Op<"codegen.zip"> {
   let summary = "rise zip_interm";
   let arguments = (ins AnyType : $lhs, AnyType : $rhs);
   let results = (outs AnyType : $output);
 }
-def RiseFstIntermediateOp : Rise_Op<"codegen.fst"> {
+def FstIntermediateOp : Rise_Op<"codegen.fst"> {
   let summary = "rise fst_interm";
   let arguments = (ins AnyType : $value);
   let results = (outs AnyType : $output);
 }
 
-def RiseSndIntermediateOp : Rise_Op<"codegen.snd"> {
+def SndIntermediateOp : Rise_Op<"codegen.snd"> {
   let summary = "rise snd_interm";
   let arguments = (ins AnyType : $value);
   let results = (outs AnyType : $output);
 }
 
-def RiseAssignOp : Rise_Op<"codegen.assign"> {
+def TransposeIntermediateOp : Rise_Op<"codegen.transpose"> {
+  let summary = "rise snd_interm";
+  let arguments = (ins AnyType : $value);
+  let results = (outs AnyType : $output);
+}
+
+def AssignOp : Rise_Op<"codegen.assign"> {
   let summary = "rise assign";
   let arguments = (ins AnyType : $value, AnyType : $assignee);
 }

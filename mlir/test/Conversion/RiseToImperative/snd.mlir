@@ -38,6 +38,5 @@ func @simple_snd() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_SND: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_SND: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_SND: [10, 10, 10, 10]

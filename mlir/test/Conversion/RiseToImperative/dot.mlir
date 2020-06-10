@@ -63,7 +63,6 @@ func @simple_dot() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_DOT: Unranked Memref rank = 0 descriptor@ = {{.*}}
-// SIMPLE_DOT: Memref base@ = {{.*}} rank = 0 offset = 0 data =
+// SIMPLE_DOT: Unranked Memref base@ = {{.*}} rank = 0 offset = 0 sizes = [] strides = [] data =
 // SIMPLE_DOT: [100]
 

@@ -35,7 +35,6 @@ func @mapMapId() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// MAP_MAP_ADD: Unranked Memref rank = 2 descriptor@ = {{.*}}
 // MAP_MAP_ADD: Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [4, 4] strides = [4, 1] data =
 // MAP_MAP_ADD: {{[[10,10,10,10],}}
 // MAP_MAP_ADD: {{[10,10,10,10],}}

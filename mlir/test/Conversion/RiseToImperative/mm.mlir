@@ -70,7 +70,6 @@ func @mm() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// MM: Unranked Memref rank = 2 descriptor@ = {{.*}}
 // MM: Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [4, 4] strides = [4, 1] data =
 // MM: {{[[100,   100,   100,   100],}}
 // MM: [100,   100,   100,   100],

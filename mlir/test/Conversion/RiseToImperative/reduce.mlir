@@ -34,6 +34,5 @@ func @simple_reduction() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_1D_REDUCTION: Unranked Memref rank = 0 descriptor@ = {{.*}}
-// SIMPLE_1D_REDUCTION: Memref base@ = {{.*}} rank = 0 offset = 0 data =
+// SIMPLE_1D_REDUCTION: Memref base@ = {{.*}} rank = 0 offset = 0 sizes = [] strides = [] data =
 // SIMPLE_1D_REDUCTION: [5120]

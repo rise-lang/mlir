@@ -100,7 +100,7 @@ LogicalResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 // RiseWrapOp
 //===----------------------------------------------------------------------===//
-LogicalResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::OperandType, 4> operands;
   SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
@@ -139,9 +139,9 @@ LogicalResult parseRiseEmbedOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// RiseInOp
+// InOp
 //===----------------------------------------------------------------------===//
-LogicalResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseInOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType operand;
 
@@ -160,13 +160,12 @@ LogicalResult parseRiseInOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// RiseOutOp
+// OutOp
 //===----------------------------------------------------------------------===//
-LogicalResult parseRiseOutOp(OpAsmParser &parser, OperationState &result) {
+LogicalResult parseOutOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   OpAsmParser::OperandType outputOperand;
   OpAsmParser::OperandType resultOperand;
-
 
   if (parser.parseOperand(outputOperand))
     return failure();
@@ -540,6 +539,39 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
                                 ArrayType::get(builder.getContext(),
                                                n.getValue(), s.getValue()),
                                 t.getValue()))));
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Transpose
+//===----------------------------------------------------------------------===//
+
+/// reduce: {n m : nat} → {t : data} → (n.m.t) → (m.n.t)
+LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  NatAttr n, m;
+  DataTypeAttr t;
+  //  result.setOperandListToResizable();
+
+  // number of elements in Array
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(m, "m", result.attributes))
+    failure();
+  // elementType of Array
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(
+      FunType::get(builder.getContext(),
+                   ArrayType::get(builder.getContext(), n.getValue(),
+                                  ArrayType::get(builder.getContext(),
+                                                 m.getValue(), t.getValue())),
+      ArrayType::get(
+          builder.getContext(), m.getValue(),
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()))));
 
   return success();
 }

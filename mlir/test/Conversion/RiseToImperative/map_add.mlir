@@ -45,7 +45,6 @@ func @array_times_2() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// ARRAY_TIMES_2: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // ARRAY_TIMES_2: [10, 10, 10, 10]
 

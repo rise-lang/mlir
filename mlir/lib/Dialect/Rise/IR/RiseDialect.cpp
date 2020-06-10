@@ -108,6 +108,7 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
     // todo specify valid wrapped types
     return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
   }
+  return nullptr;
 }
 
 // This enables printing types inside DataTypeAttrs without "!rise."

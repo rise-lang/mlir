@@ -43,6 +43,5 @@ func @simple_add_tuples() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_ADD_TUPLES: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_ADD_TUPLES: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_ADD_TUPLES: [15, 15, 15, 15]

@@ -38,7 +38,6 @@ func @simple_fst() {
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// SIMPLE_FST: Unranked Memref rank = 1 descriptor@ = {{.*}}
 // SIMPLE_FST: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_FST: [5, 5, 5, 5]
 
