@@ -32,7 +32,7 @@ Value in(Value in, Type type) {
   return ValueBuilder<rise::InOp>(type, in);
 }
 
-Value mapSeq(rise::Nat n, rise::DataType s, rise::DataType t, StringRef lowerTo) {
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t) {
 // MapB
   rise::FunType mapType = rise::FunType::get(
       ScopedContext::getContext(),
@@ -48,16 +48,25 @@ Value mapSeq(rise::Nat n, rise::DataType s, rise::DataType t, StringRef lowerTo)
                                       StringAttr::get(lowerTo, ScopedContext::getContext()));
 }
 
-Value applyMapSeq(rise::Nat n, rise::DataType s, rise::DataType t, StringRef lowerTo, Value lambda, Value array) {
-  Value mapSeq = mlir::edsc::mapSeq(n,s,t,lowerTo);
+//Value mlir::edsc::op::mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t, Value lambda, Value array) {
+//  Value mapSeq = mlir::edsc::op::mapSeq(lowerTo, n, s, t);
+//
+//  return ValueBuilder<rise::ApplyOp>(
+//      rise::ArrayType::get(ScopedContext::getContext(), n, s),
+//      mapSeq,
+//      ValueRange{lambda, array});
+//}
 
-  return ValueBuilder<rise::ApplyOp>(
-      rise::ArrayType::get(ScopedContext::getContext(), n, s),
-      mapSeq,
-      ValueRange{lambda, array});
-}
-
-
+//Value mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t, function_ref<Value(void)> createLambda, Value array) {
+//
+//  auto lambda = createLambda();
+//  Value mapSeq = mlir::edsc::op::mapSeq(n,s,t,lowerTo);
+//
+//  return ValueBuilder<rise::ApplyOp>(
+//      rise::ArrayType::get(ScopedContext::getContext(), n, s),
+//      mapSeq,
+//      ValueRange{lambda, array});
+//}
 
 
 } // namespace edsc

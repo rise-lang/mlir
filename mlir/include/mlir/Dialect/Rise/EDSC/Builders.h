@@ -42,8 +42,10 @@ namespace edsc {
 
 namespace op {
 
-Value orr(Value lhs, Value rhs);
-Value in(Value in);
+Value mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t);
+//Value mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t, Value lambda, Value array);
+
+
 
 } // namespace op
 
