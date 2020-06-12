@@ -20,6 +20,8 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Types.h"
 
+using namespace mlir::rise;
+
 namespace mlir {
 namespace edsc {
 
@@ -40,10 +42,27 @@ namespace edsc {
 //  SmallVector<LoopBuilder, 4> loops;
 //};
 
+//class LambdaBuilder :
+
+
 namespace op {
 
-Value mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t);
-//Value mapSeq(StringRef lowerTo, rise::Nat n, rise::DataType s, rise::DataType t, Value lambda, Value array);
+
+Value in(Value in, Type type);
+Value literal(DataType t, StringRef literal);
+Value zip(Nat n, DataType s, DataType t);
+Value zip(Nat n, DataType s, DataType t, Value lhs, Value rhs);
+Value fst(DataType s, DataType t);
+Value fst(DataType s, DataType t, Value tuple);
+Value snd(DataType s, DataType t);
+Value snd(DataType s, DataType t, Value tuple);
+Value transpose(Nat n, Nat m, DataType t);
+Value transpose(Nat n, Nat m, DataType t, Value array);
+Value lambda(ArrayRef<Type> argTypes);
+Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
+Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda, Value array);
+Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
+Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda, Value initializer, Value array);
 
 
 
