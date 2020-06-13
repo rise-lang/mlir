@@ -58,13 +58,15 @@ Value snd(DataType s, DataType t);
 Value snd(DataType s, DataType t, Value tuple);
 Value transpose(Nat n, Nat m, DataType t);
 Value transpose(Nat n, Nat m, DataType t, Value array);
-Value lambda(ArrayRef<Type> argTypes);
+Value lambda(FunType lambdaType, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
+Value embed(Type result, ValueRange exposedValues, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda, Value array);
 Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda, Value initializer, Value array);
 
-
+void rise_return(Value returnValue);
+void out(Value writeTo, Value result);
 
 } // namespace op
 

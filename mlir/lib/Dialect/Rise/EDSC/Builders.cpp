@@ -131,15 +131,66 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
                                ValueRange{lambda, array});
 }
 
-Value mlir::edsc::op::lambda(ArrayRef<Type> argTypes) {
-  // TODO:: continue here.
-  // I did all builders for Valuecreating ops which don't have a region
-  // tomorrow do lambda and embed
-  // and ops which create no value (out, return)
-
-
-  return nullptr;
+// TODO: maybe change the builder to automatically introduce a return for the last Value created in bodybuilder
+Value mlir::edsc::op::lambda(FunType lambdaType, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc, MutableArrayRef<BlockArgument> args){
+    if(bodyBuilder) {
+      ScopedContext nestedContext(nestedBuilder, nestedLoc);
+      OpBuilder::InsertionGuard guard(nestedBuilder);
+      bodyBuilder(args);
+    }
+  });
 }
+
+// TODO maybe a builder like:
+// I mean something that we can access blockargs better, not 100% sure how
+//Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+
+
+Value mlir::edsc::op::embed(Type result, ValueRange exposedValues, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<EmbedOp>(result, exposedValues, [&](OpBuilder &nestedBuilder, Location nestedLoc, MutableArrayRef<BlockArgument> args){
+    if(bodyBuilder) {
+      ScopedContext nestedContext(nestedBuilder, nestedLoc);
+      OpBuilder::InsertionGuard guard(nestedBuilder);
+      bodyBuilder(args);
+    }
+  });
+}
+
+void mlir::edsc::op::rise_return(Value returnValue) {
+  OperationBuilder<rise::ReturnOp>(ValueRange{returnValue});
+  return;
+}
+
+void mlir::edsc::op::out(Value writeTo, Value result) {
+  OperationBuilder<rise::OutOp>(writeTo, result);
+  return;
+}
+
+
+// TODO: This is what affineLoopBuilder looks like. The function is directly passed in the arguments here. Way better than before.
+
+//void mlir::edsc::op::lambdaBuilder(ValueRange lbs, ValueRange ubs, int64_t step,
+//                                   function_ref<void(Value)> bodyBuilder) {
+//  // Fetch the builder and location.
+//  assert(ScopedContext::getContext() && "EDSC ScopedContext not set up");
+//  OpBuilder &builder = ScopedContext::getBuilderRef();
+//  Location loc = ScopedContext::getLocation();
+//
+//  // Create the actual loop and call the body builder, if provided, after
+//  // updating the scoped context.
+//  builder.create<AffineForOp>(
+//      loc, lbs, builder.getMultiDimIdentityMap(lbs.size()), ubs,
+//      builder.getMultiDimIdentityMap(ubs.size()), step,
+//      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value iv) {
+//        if (bodyBuilder) {
+//          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+//          OpBuilder::InsertionGuard guard(nestedBuilder);
+//          bodyBuilder(iv);
+//        }
+//        nestedBuilder.create<AffineTerminatorOp>(nestedLoc);
+//      });
+//}
 
 // Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
 // function_ref<Value(void)> createLambda, Value array) {

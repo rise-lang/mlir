@@ -30,7 +30,6 @@ include "mlir/IR/OpBase.td"
 
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-
 def Rise_Dialect : Dialect {
   let name = "rise";
   let cppNamespace = "";
@@ -50,8 +49,9 @@ def NatType : Type<CPred<"$_self.isa<Nat>()">, "nat type">;
 def TupleType : Type<CPred<"$_self.isa<Tuple>()">, "tuple type">;
 def ArrayType : Type<CPred<"$_self.isa<ArrayType>()">, "array type">;
 def ScalarType : Type<CPred<"$_self.isa<ScalarType>()">, "scalar type">;
-def DataType : Type<Or<[TupleType.predicate, ArrayType.predicate,
-ScalarType.predicate]>>;
+def DataType
+    : Type<
+          Or<[TupleType.predicate, ArrayType.predicate, ScalarType.predicate]>>;
 def NatOrDataType : Type<Or<[NatType.predicate, DataType.predicate]>>;
 
 def FunType : Type<CPred<"$_self.isa<FunType>()">, "fun type">;
@@ -87,7 +87,12 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
       "Hence, this operation gives a Region the meaning of a functional lambda "
       "expression.";
   let regions = (region SizedRegion<1> : $region);
-  let results = (outs FunType : $lambda_result);
+  let results = (outs FunType : $lambdaType);
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
+                            "FunType lambdaType, function_ref<void(OpBuilder "
+                            "&, Location, MutableArrayRef<BlockArgument>)> "
+                            "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -120,7 +125,7 @@ def InOp : Rise_Op<"in"> {
 
 def OutOp : Rise_Op<"out"> {
   let summary = "rise out";
-  let arguments = (ins AnyType:$input, AnyType:$output);
+  let arguments = (ins AnyType : $output, AnyType : $input);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -129,19 +134,25 @@ def EmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
   let results = (outs AnyType : $wrapped);
   let regions = (region SizedRegion<1> : $region);
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<
+      "OpBuilder &builder, OperationState &result, "
+      "Type wrapped, ValueRange exposedValues, function_ref<void(OpBuilder "
+      "&, Location, MutableArrayRef<BlockArgument>)> "
+      "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def ReturnOp : Rise_Op<"return", [Terminator]> {
   let summary = "rise terminator operation";
   let description =
-      "This operation is used as a terminator for the region of a lambda and embed. "
+      "This operation is used as a terminator for the region of a lambda and "
+      "embed. "
       "We will experiment with using the standard return operation instead.";
   let arguments = (ins Variadic<AnyType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
-  let builders = [OpBuilder<
-    "OpBuilder &b, OperationState &result", [{ build(b, result, llvm::None); }]
-  >];
+  let builders = [OpBuilder<"OpBuilder &b, OperationState &result",
+                            [{ build(b, result, llvm::None); }]>];
 }
 
 //===----------------------------------------------------------------------===//

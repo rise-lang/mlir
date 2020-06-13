@@ -138,6 +138,27 @@ LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
+void EmbedOp::build(
+    OpBuilder &builder, OperationState &result, Type wrapped, ValueRange exposedValues,
+    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  result.addTypes(wrapped);
+
+  Region *embedRegion = result.addRegion();
+  Block *body = new Block;
+
+  for (Value val : exposedValues) {
+    assert(val.getType().isa<ScalarType>() && "Only scalar Types can be exposed with rise.embed!");
+    body->addArgument(val.getType().dyn_cast<ScalarType>().getWrappedType());
+  }
+  embedRegion->push_back(body);
+
+  if (bodyBuilder) {
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(body);
+    bodyBuilder(builder, result.location, body->getArguments());
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // InOp
 //===----------------------------------------------------------------------===//
@@ -248,6 +269,28 @@ LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 
   LambdaOp::ensureTerminator(*body, builder, result.location);
   return success();
+}
+
+void LambdaOp::build(
+    OpBuilder &builder, OperationState &result, FunType lambdaType,
+    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  result.addTypes(lambdaType);
+
+  Region *lambdaRegion = result.addRegion();
+  Block *body = new Block;
+
+  body->addArgument(lambdaType.getInput());
+  while (lambdaType.getOutput().isa<FunType>()) {
+    lambdaType = lambdaType.getOutput().dyn_cast<FunType>();
+    body->addArgument(lambdaType.getInput());
+  }
+  lambdaRegion->push_back(body);
+
+  if (bodyBuilder) {
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(body);
+    bodyBuilder(builder, result.location, body->getArguments());
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -569,9 +612,9 @@ LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
                    ArrayType::get(builder.getContext(), n.getValue(),
                                   ArrayType::get(builder.getContext(),
                                                  m.getValue(), t.getValue())),
-      ArrayType::get(
-          builder.getContext(), m.getValue(),
-          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()))));
+                   ArrayType::get(builder.getContext(), m.getValue(),
+                                  ArrayType::get(builder.getContext(),
+                                                 n.getValue(), t.getValue()))));
 
   return success();
 }

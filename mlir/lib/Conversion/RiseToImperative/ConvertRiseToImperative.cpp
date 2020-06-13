@@ -144,6 +144,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
+  funcOp.dump();
+
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -163,8 +165,10 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   size_t unneededOps = erasureList.size();
   for (size_t i = 0; i < unneededOps; i++) {
     auto op = erasureList.pop_back_val();
+    std::cout << "erasing op: " << op->getName().getStringRef().str() << "deps: " << op->getUses().empty() << ", undoing deps: " << std::flush;
     op->dropAllUses();
     op->dropAllReferences();
+    std::cout << "still op: " << op->getName().getStringRef().str() << "deps: " << op->getUses().empty() << "\n" << std::flush;
     rewriter.eraseOp(op);
   }
   return;
@@ -243,11 +247,11 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
       EmbedOp embedOp = rewriter.create<EmbedOp>(
           appliedFun->getLoc(),
-          ArrayRef<Type>{ScalarType::get(
-              rewriter.getContext(), FloatType::getF32(rewriter.getContext()))},
+          ScalarType::get(
+              rewriter.getContext(), FloatType::getF32(rewriter.getContext())),
           ValueRange());
-      Block *embedBlock = new Block();
-      embedOp.region().push_front(embedBlock);
+//      Block *embedBlock = new Block();
+//      embedOp.region().push_front(embedBlock);
       rewriter.setInsertionPointToStart(&embedOp.region().front());
 
       auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
@@ -278,11 +282,11 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
       EmbedOp embedOp = rewriter.create<EmbedOp>(
           appliedFun->getLoc(),
-          ArrayRef<Type>{ScalarType::get(
-              rewriter.getContext(), FloatType::getF32(rewriter.getContext()))},
+          ScalarType::get(
+              rewriter.getContext(), FloatType::getF32(rewriter.getContext())),
           ValueRange());
-      Block *embedBlock = new Block();
-      embedOp.region().push_front(embedBlock);
+//      Block *embedBlock = new Block();
+//      embedOp.region().push_front(embedBlock);
       rewriter.setInsertionPointToStart(&embedOp.region().front());
 
       auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
@@ -853,14 +857,14 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         // introduce tmp Array of length n:
         EmbedOp embedOp = rewriter.create<EmbedOp>(
             mapOp.getLoc(),
-            ArrayRef<Type>{ArrayType::get(
+            ArrayType::get(
                 rewriter.getContext(), mapOp.n(),
                 ScalarType::get(rewriter.getContext(),
-                                FloatType::getF32(rewriter.getContext())))},
+                                FloatType::getF32(rewriter.getContext()))),
             ValueRange());
 
-        Block *embedBlock = new Block();
-        embedOp.region().push_front(embedBlock);
+//        Block *embedBlock = new Block();
+//        embedOp.region().push_front(embedBlock);
         rewriter.setInsertionPointToStart(&embedOp.region().front());
         auto tmpArray = rewriter.create<AllocOp>(
             loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
@@ -880,14 +884,14 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         // introduce tmp Array of length n:
         EmbedOp embedOp = rewriter.create<EmbedOp>(
             mapOp.getLoc(),
-            ArrayRef<Type>{ArrayType::get(
+            ArrayType::get(
                 rewriter.getContext(), mapOp.n(),
                 ScalarType::get(rewriter.getContext(),
-                                FloatType::getF32(rewriter.getContext())))},
+                                FloatType::getF32(rewriter.getContext()))),
             ValueRange());
 
-        Block *embedBlock = new Block();
-        embedOp.region().push_front(embedBlock);
+//        Block *embedBlock = new Block();
+//        embedOp.region().push_front(embedBlock);
         rewriter.setInsertionPointToStart(&embedOp.region().front());
         auto tmpArray = rewriter.create<AllocOp>(
             loc, MemRefType::get(ArrayRef<int64_t>{mapOp.n().getIntValue()},
