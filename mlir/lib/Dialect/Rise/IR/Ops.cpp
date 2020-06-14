@@ -139,8 +139,10 @@ LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
 }
 
 void EmbedOp::build(
-    OpBuilder &builder, OperationState &result, Type wrapped, ValueRange exposedValues,
-    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)> bodyBuilder) {
+    OpBuilder &builder, OperationState &result, Type wrapped,
+    ValueRange exposedValues,
+    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+        bodyBuilder) {
   result.addTypes(wrapped);
   result.addOperands(exposedValues);
 
@@ -148,7 +150,8 @@ void EmbedOp::build(
   Block *body = new Block();
 
   for (Value val : exposedValues) {
-    assert(val.getType().isa<ScalarType>() && "Only scalar Types can be exposed with rise.embed!");
+    assert(val.getType().isa<ScalarType>() &&
+           "Only scalar Types can be exposed with rise.embed!");
     body->addArgument(val.getType().dyn_cast<ScalarType>().getWrappedType());
   }
   embedRegion->push_back(body);
@@ -206,26 +209,6 @@ LogicalResult parseOutOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// RiseContinuationTranslation
-//===----------------------------------------------------------------------===//
-LogicalResult parseRiseContinuationTranslation(OpAsmParser &parser,
-                                               OperationState &result) {
-  auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType contValue;
-
-  if (parser.parseOperand(contValue))
-    return failure();
-
-  if (parser.resolveOperandUnsafe(contValue, result.operands))
-    return failure();
-
-  /// Maybe add the ability to request a result type as in "This will be
-  // translated into a memref
-
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
 // LambdaOp
 //===----------------------------------------------------------------------===//
 LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
@@ -274,7 +257,8 @@ LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 
 void LambdaOp::build(
     OpBuilder &builder, OperationState &result, FunType lambdaType,
-    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)> bodyBuilder) {
+    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+        bodyBuilder) {
   result.addTypes(lambdaType);
 
   Region *lambdaRegion = result.addRegion();
@@ -588,23 +572,87 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// Transpose
+// Split
 //===----------------------------------------------------------------------===//
 
-/// reduce: {n m : nat} → {t : data} → (n.m.t) → (m.n.t)
-LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
+/// split: (n:nat) → {m:nat} → {t:data} → nm.t → m.n.t
+LogicalResult parseSplitOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   NatAttr n, m;
   DataTypeAttr t;
-  //  result.setOperandListToResizable();
 
-  // number of elements in Array
   if (parser.parseAttribute(n, "n", result.attributes))
     failure();
 
   if (parser.parseAttribute(m, "m", result.attributes))
     failure();
-  // elementType of Array
+
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(
+      FunType::get(builder.getContext(),
+                   ArrayType::get(builder.getContext(),
+                                  Nat::get(builder.getContext(),
+                                           n.getValue().getIntValue() *
+                                               m.getValue().getIntValue()),
+                                  t.getValue()),
+                   ArrayType::get(builder.getContext(), m.getValue(),
+                                  ArrayType::get(builder.getContext(),
+                                                 n.getValue(), t.getValue()))));
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Join
+//===----------------------------------------------------------------------===//
+
+/// join: {n m:nat} → {t:data} → n.m.t → nm.t
+LogicalResult parseJoinOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  NatAttr n, m;
+  DataTypeAttr t;
+
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(m, "m", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(
+      FunType::get(builder.getContext(),
+                   ArrayType::get(builder.getContext(), n.getValue(),
+                                  ArrayType::get(builder.getContext(),
+                                                 m.getValue(), t.getValue())),
+                   ArrayType::get(builder.getContext(),
+                                  Nat::get(builder.getContext(),
+                                           n.getValue().getIntValue() *
+                                               m.getValue().getIntValue()),
+                                  t.getValue())));
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Transpose
+//===----------------------------------------------------------------------===//
+
+/// transpose: {n m:nat} → {t:data} → n.m.t → m.n.t
+LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  NatAttr n, m;
+  DataTypeAttr t;
+
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(m, "m", result.attributes))
+    failure();
+
   if (parser.parseAttribute(t, "t", result.attributes))
     failure();
 
@@ -616,6 +664,81 @@ LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
                    ArrayType::get(builder.getContext(), m.getValue(),
                                   ArrayType::get(builder.getContext(),
                                                  n.getValue(), t.getValue()))));
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Slide
+//===----------------------------------------------------------------------===//
+
+/// slide: {n:nat} → (sz sp:nat) → {t:data} → (sp*n+sz−sp).t → n.sz.t
+LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  NatAttr n, sz, sp;
+  DataTypeAttr t;
+
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(sz, "sz", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(sp, "sp", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(FunType::get(
+      builder.getContext(),
+      ArrayType::get(
+          builder.getContext(),
+          Nat::get(builder.getContext(),
+                   sp.getValue().getIntValue() * n.getValue().getIntValue() +
+                       sz.getValue().getIntValue() -
+                       sp.getValue().getIntValue()),
+          t.getValue()),
+      ArrayType::get(
+          builder.getContext(), n.getValue(),
+          ArrayType::get(builder.getContext(), sz.getValue(), t.getValue()))));
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// PadCst
+//===----------------------------------------------------------------------===//
+
+/// padcst: {n:nat} → (l q:nat) → {t:data} → t → n.t → (l+n+q).t
+LogicalResult parsePadCstOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  NatAttr n, l, q;
+  DataTypeAttr t;
+
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(l, "l", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(q, "q", result.attributes))
+    failure();
+
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(FunType::get(
+      builder.getContext(), t.getValue(),
+      FunType::get(
+          builder.getContext(),
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()),
+          ArrayType::get(
+              builder.getContext(),
+              Nat::get(builder.getContext(), l.getValue().getIntValue() +
+                                                 n.getValue().getIntValue() +
+                                                 q.getValue().getIntValue()),
+              t.getValue()))));
 
   return success();
 }

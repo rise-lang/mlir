@@ -239,10 +239,38 @@ def SndOp : Rise_Op<"snd"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def SplitOp : Rise_Op<"split"> {
+  let summary = "split";
+  let arguments = (ins NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let results = (outs FunType : $splitFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def JoinOp : Rise_Op<"join"> {
+  let summary = "join";
+  let arguments = (ins NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let results = (outs FunType : $joinFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def TransposeOp : Rise_Op<"transpose"> {
   let summary = "transpose";
   let arguments = (ins NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
   let results = (outs FunType : $tranposeFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def SlideOp : Rise_Op<"slide"> {
+  let summary = "slide";
+  let arguments = (ins NatAttr : $n, NatAttr : $sz, NatAttr : $sp, DataTypeAttr : $t);
+  let results = (outs FunType : $slideFun);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def PadCstOp : Rise_Op<"pad"> {
+  let summary = "pad";
+  let arguments = (ins NatAttr : $n, NatAttr : $l, NatAttr : $q, DataTypeAttr : $t);
+  let results = (outs FunType : $padFun);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
