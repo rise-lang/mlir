@@ -142,9 +142,10 @@ void EmbedOp::build(
     OpBuilder &builder, OperationState &result, Type wrapped, ValueRange exposedValues,
     function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)> bodyBuilder) {
   result.addTypes(wrapped);
+  result.addOperands(exposedValues);
 
   Region *embedRegion = result.addRegion();
-  Block *body = new Block;
+  Block *body = new Block();
 
   for (Value val : exposedValues) {
     assert(val.getType().isa<ScalarType>() && "Only scalar Types can be exposed with rise.embed!");
@@ -277,7 +278,7 @@ void LambdaOp::build(
   result.addTypes(lambdaType);
 
   Region *lambdaRegion = result.addRegion();
-  Block *body = new Block;
+  Block *body = new Block();
 
   body->addArgument(lambdaType.getInput());
   while (lambdaType.getOutput().isa<FunType>()) {

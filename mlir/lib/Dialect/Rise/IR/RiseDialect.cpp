@@ -184,9 +184,7 @@ void RiseDialect::printAttribute(Attribute attribute,
                                  DialectAsmPrinter &printer) const {
   raw_ostream &os = printer.getStream();
   if (DataTypeAttr dataTypeAttr = attribute.dyn_cast<DataTypeAttr>()) {
-    printer << "data<";
     printTypeInternal(dataTypeAttr.getValue(), printer.getStream(), printer);
-    printer << ">";
   } else if (NatAttr natAttr = attribute.dyn_cast<NatAttr>()) {
     printer << "nat<";
     printer << natAttr.getValue().getIntValue();
