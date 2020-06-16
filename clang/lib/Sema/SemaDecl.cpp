@@ -138,6 +138,7 @@ bool Sema::isSimpleTypeSpecifier(tok::TokenKind Kind) const {
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
+  case tok::kw___bf16:
   case tok::kw__Float16:
   case tok::kw___float128:
   case tok::kw_wchar_t:
@@ -7100,6 +7101,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
 
   case CSK_constexpr:
     NewVD->setConstexpr(true);
+    MaybeAddCUDAConstantAttr(NewVD);
     // C++1z [dcl.spec.constexpr]p1:
     //   A static data member declared with the constexpr specifier is
     //   implicitly an inline variable.
