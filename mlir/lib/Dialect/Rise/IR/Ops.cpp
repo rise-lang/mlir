@@ -707,11 +707,11 @@ LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
-// PadCst
+// Pad
 //===----------------------------------------------------------------------===//
 
-/// padcst: {n:nat} → (l q:nat) → {t:data} → t → n.t → (l+n+q).t
-LogicalResult parsePadCstOp(OpAsmParser &parser, OperationState &result) {
+/// pad: {n:nat} → (l q:nat) → {t:data} → t → n.t → (l+n+q).t
+LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   NatAttr n, l, q;
   DataTypeAttr t;

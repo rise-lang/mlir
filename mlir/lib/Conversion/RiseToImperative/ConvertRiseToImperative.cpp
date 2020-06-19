@@ -33,6 +33,7 @@ struct ConvertRiseToImperativePass
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
+
 struct RiseToImperativePattern : public OpRewritePattern<FuncOp> {
   using OpRewritePattern<FuncOp>::OpRewritePattern;
   LogicalResult match(FuncOp funcOp) const override;
@@ -102,7 +103,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
         isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<OutOp>(inst) ||
-        isa<LiteralOp>(inst) || isa<TransposeOp>(inst)) {
+        isa<LiteralOp>(inst) || isa<TransposeOp>(inst) || isa<SplitOp>(inst) ||
+        isa<JoinOp>(inst) || isa<SlideOp>(inst) || isa<PadOp>(inst)) {
       if (inst->getParentOfType<LambdaOp>()) {
       } else {
         leftoverOps.push_back(inst);
@@ -130,6 +132,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     }
     return;
   });
+
+  funcOp.dump();
 
   // Codegen:
   bool doCodegen = true;
@@ -492,6 +496,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     }
 
     if (contArray.getType().isa<ArrayType>()) {
+
       xi = rewriter.create<IdxOp>(
           loc, contArray.getType().cast<ArrayType>().getElementType(),
           contArray, loopInductionVar);
@@ -650,6 +655,57 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
         sndOp.getLoc(), FloatType::getF32(rewriter.getContext()), contTuple);
     auto assignment = rewriter.create<AssignOp>(appliedFun->getLoc(),
                                                 sndIntermOp.getResult(), out);
+    return;
+  } else if (SplitOp splitOp = dyn_cast<SplitOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of Split";
+    Nat n = splitOp.n();
+    Nat m = splitOp.m();
+    Type t = splitOp.t();
+
+    ArrayType splitAccType =
+        ArrayType::get(
+            rewriter.getContext(),
+            Nat::get(rewriter.getContext(), n.getIntValue() * m.getIntValue()),
+            t);
+
+    auto splitAccInterm = rewriter.create<SplitAccIntermediateOp>(
+        splitOp.getLoc(), splitAccType, out,
+        splitOp.getAttrOfType<NatAttr>("n"),
+        splitOp.getAttrOfType<NatAttr>("m"),
+        splitOp.getAttrOfType<DataTypeAttr>("t"));
+
+    if (isa<ApplyOp>(apply.getOperand(1).getDefiningOp())) {
+      AccT(dyn_cast<ApplyOp>(apply.getOperand(1).getDefiningOp()),
+           splitAccInterm.getResult(), rewriter);
+    } else {
+      emitError(appliedFun->getLoc())
+          << "input to Split has to be result of ApplyOp"; // Is this actually a
+                                                           // requirement?
+    }
+    return;
+  } else if (JoinOp joinOp = dyn_cast<JoinOp>(appliedFun)) {
+    emitRemark(appliedFun->getLoc()) << "AccT of Join";
+    Nat n = joinOp.n();
+    Nat m = joinOp.m();
+    Type t = joinOp.t();
+
+    ArrayType joinAccType =
+        ArrayType::get(rewriter.getContext(), n,
+                       ArrayType::get(rewriter.getContext(), m, t));
+
+    auto joinAccInterm = rewriter.create<JoinAccIntermediateOp>(
+        joinOp.getLoc(), joinAccType, out, joinOp.getAttrOfType<NatAttr>("n"),
+        joinOp.getAttrOfType<NatAttr>("m"),
+        joinOp.getAttrOfType<DataTypeAttr>("t"));
+
+    if (isa<ApplyOp>(apply.getOperand(1).getDefiningOp())) {
+      AccT(dyn_cast<ApplyOp>(apply.getOperand(1).getDefiningOp()),
+           joinAccInterm.getResult(), rewriter);
+    } else {
+      emitError(appliedFun->getLoc())
+          << "input to Join has to be result of ApplyOp"; // Is this actually a
+      // requirement?
+    }
     return;
   } else if (isa<LambdaOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Lambda";
@@ -844,14 +900,63 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         auto sndInterm = rewriter.create<SndIntermediateOp>(
             snd.getLoc(), FloatType::getF32(rewriter.getContext()), tupleCont);
         return sndInterm;
+      } else if (SplitOp splitOp =
+                     dyn_cast<SplitOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied split";
+        auto arrayCont =
+            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+
+        auto splitInterm = rewriter.create<SplitIntermediateOp>(
+            splitOp.getLoc(), apply.getType(), arrayCont,
+            splitOp.getAttrOfType<NatAttr>("n"),
+            splitOp.getAttrOfType<NatAttr>("m"),
+            splitOp.getAttrOfType<DataTypeAttr>("t"));
+        return splitInterm;
+      } else if (JoinOp joinOp =
+                     dyn_cast<JoinOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied join";
+        auto arrayCont =
+            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+        auto joinInterm = rewriter.create<JoinIntermediateOp>(
+            joinOp.getLoc(), apply.getType(), arrayCont,
+            joinOp.getAttrOfType<NatAttr>("n"),
+            joinOp.getAttrOfType<NatAttr>("m"),
+            joinOp.getAttrOfType<DataTypeAttr>("t"));
+        return joinInterm;
       } else if (TransposeOp transposeOp =
                      dyn_cast<TransposeOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied transpose";
         auto arrayCont =
             ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
         auto transposeInterm = rewriter.create<TransposeIntermediateOp>(
-            transposeOp.getLoc(), apply.getType(), arrayCont);
+            transposeOp.getLoc(), apply.getType(), arrayCont,
+            transposeOp.getAttrOfType<NatAttr>("n"),
+            transposeOp.getAttrOfType<NatAttr>("m"),
+            transposeOp.getAttrOfType<DataTypeAttr>("t"));
         return transposeInterm;
+      } else if (SlideOp slideOp =
+                     dyn_cast<SlideOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied Slide";
+        auto arrayCont =
+            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+        auto slideInterm = rewriter.create<SlideIntermediateOp>(
+            slideOp.getLoc(), apply.getType(), arrayCont,
+            slideOp.getAttrOfType<NatAttr>("n"),
+            slideOp.getAttrOfType<NatAttr>("sz"),
+            slideOp.getAttrOfType<NatAttr>("sp"),
+            slideOp.getAttrOfType<DataTypeAttr>("t"));
+        return slideInterm;
+      } else if (PadOp padOp = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied Pad";
+        auto arrayCont =
+            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+        auto padInterm = rewriter.create<PadIntermediateOp>(
+            padOp.getLoc(), apply.getType(), arrayCont,
+            padOp.getAttrOfType<NatAttr>("n"),
+            padOp.getAttrOfType<NatAttr>("l"),
+            padOp.getAttrOfType<NatAttr>("q"),
+            padOp.getAttrOfType<DataTypeAttr>("t"));
+        return padInterm;
       } else if (MapSeqOp mapOp =
                      dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied MapSeq";
@@ -982,6 +1087,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
   if (storeLocation.isa<OpResult>()) {
     if (IdxOp idx = dyn_cast<IdxOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for idx";
+      idx.getParentOfType<FuncOp>().dump();
 
       path.push_back(idx.arg1());
 
@@ -990,6 +1096,40 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
                    dyn_cast<CastOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for cast";
       return codeGenStore(castOp.getOperand(), val, path, rewriter);
+    } else if (JoinAccIntermediateOp joinAccOp =
+                   dyn_cast<JoinAccIntermediateOp>(
+                       storeLocation.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "CodegenStore for joinAcc";
+      auto i = mpark::get<Value>(path.pop_back_val());
+      auto j = mpark::get<Value>(path.pop_back_val());
+
+      auto cstM = rewriter.create<ConstantIndexOp>(joinAccOp.getLoc(), joinAccOp.m().getIntValue()).getResult();
+      auto i_times_m = rewriter.create<MulIOp>(joinAccOp.getLoc(), i, cstM).getResult();
+      auto newIndex = rewriter.create<AddIOp>(joinAccOp.getLoc(), i_times_m, j).getResult();
+
+      path.push_back(newIndex);
+      return codeGenStore(joinAccOp.getOperand(), val, path, rewriter);
+    } else if (SplitAccIntermediateOp splitAccOp =
+                   dyn_cast<SplitAccIntermediateOp>(
+                       storeLocation.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "CodegenStore for splitAcc";
+      auto loc = splitAccOp.getLoc();
+      auto lhs = mpark::get<Value>(path.pop_back_val());
+      auto rhs = rewriter.create<ConstantIndexOp>(loc, splitAccOp.m().getIntValue()).getResult();
+
+      // modulo op taken from AffineToStandard
+      Value remainder = rewriter.create<SignedRemIOp>(loc, lhs, rhs);
+      Value zeroCst = rewriter.create<ConstantIndexOp>(loc, 0);
+      Value isRemainderNegative =
+          rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, remainder, zeroCst);
+      Value correctedRemainder = rewriter.create<AddIOp>(loc, remainder, rhs);
+      Value result = rewriter.create<SelectOp>(loc, isRemainderNegative,
+                                              correctedRemainder, remainder);
+      Value divResult = rewriter.create<UnsignedDivIOp>(loc, lhs, rhs);
+
+      path.push_back(result);
+      path.push_back(divResult);
+      return codeGenStore(splitAccOp.getOperand(), val, path, rewriter);
     } else if (EmbedOp embedOp =
                    dyn_cast<EmbedOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for embed";
@@ -1071,12 +1211,6 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       return embedReturn.getOperand(0);
 
-      // TODO: find out if we can erase the embedOp herre somehow
-      std::cout << "vor erase!" << std::flush;
-      //      rewriter.eraseOp(embedOp);
-
-      std::cout << "nach erase!" << std::flush;
-
     } else if (IdxOp idx = dyn_cast<IdxOp>(val.getDefiningOp())) {
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
@@ -1139,6 +1273,41 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
                isa<AffineLoadOp>(val.getDefiningOp())) {
       emitRemark(val.getLoc()) << "Codegen for Load";
       return val;
+    } else if (SplitIntermediateOp splitIntermediateOp =
+                   dyn_cast<SplitIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Split";
+
+      auto i = mpark::get<Value>(path.pop_back_val());
+      auto j = mpark::get<Value>(path.pop_back_val());
+
+      auto cstN = rewriter.create<ConstantIndexOp>(splitIntermediateOp.getLoc(), splitIntermediateOp.n().getIntValue()).getResult();
+      auto i_times_n = rewriter.create<MulIOp>(splitIntermediateOp.getLoc(), i, cstN).getResult();
+      auto newIndex = rewriter.create<AddIOp>(splitIntermediateOp.getLoc(), i_times_n, j).getResult();
+      path.push_back(newIndex);
+
+      return codeGen(splitIntermediateOp.value(), path, rewriter);
+    } else if (JoinIntermediateOp joinIntermediateOp =
+                   dyn_cast<JoinIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Join";
+
+      auto loc = joinIntermediateOp.getLoc();
+      auto lhs = mpark::get<Value>(path.pop_back_val());
+      auto rhs = rewriter.create<ConstantIndexOp>(loc, joinIntermediateOp.n().getIntValue()).getResult();
+
+      // modulo op taken from AffineToStandard
+      Value remainder = rewriter.create<SignedRemIOp>(loc, lhs, rhs);
+      Value zeroCst = rewriter.create<ConstantIndexOp>(loc, 0);
+      Value isRemainderNegative =
+          rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, remainder, zeroCst);
+      Value correctedRemainder = rewriter.create<AddIOp>(loc, remainder, rhs);
+      Value result = rewriter.create<SelectOp>(loc, isRemainderNegative,
+                                               correctedRemainder, remainder);
+      Value divResult = rewriter.create<SignedDivIOp>(loc, lhs, rhs);
+
+      path.push_back(result);
+      path.push_back(divResult);
+
+      return codeGen(joinIntermediateOp.value(), path, rewriter);
     } else if (TransposeIntermediateOp transposeIntermediateOp =
                    dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
       emitRemark(val.getLoc()) << "Codegen for TransposeIntermediate";
