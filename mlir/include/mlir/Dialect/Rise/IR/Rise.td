@@ -90,7 +90,7 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let results = (outs FunType : $lambdaType);
   let skipDefaultBuilders = 1;
   let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
-                            "FunType lambdaType, function_ref<void(OpBuilder "
+                            "FunType lambdaType, function_ref<Value(OpBuilder "
                             "&, Location, MutableArrayRef<BlockArgument>)> "
                             "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
@@ -262,14 +262,22 @@ def TransposeOp : Rise_Op<"transpose"> {
 
 def SlideOp : Rise_Op<"slide"> {
   let summary = "slide";
-  let arguments = (ins NatAttr : $n, NatAttr : $sz, NatAttr : $sp, DataTypeAttr : $t);
+  let arguments = (ins NatAttr
+                   : $n, NatAttr
+                   : $sz, NatAttr
+                   : $sp, DataTypeAttr
+                   : $t);
   let results = (outs FunType : $slideFun);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def PadOp : Rise_Op<"pad"> {
   let summary = "pad";
-  let arguments = (ins NatAttr : $n, NatAttr : $l, NatAttr : $q, DataTypeAttr : $t);
+  let arguments = (ins NatAttr
+                   : $n, NatAttr
+                   : $l, NatAttr
+                   : $q, DataTypeAttr
+                   : $t);
   let results = (outs FunType : $padFun);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
@@ -324,43 +332,73 @@ def SndIntermediateOp : Rise_Op<"codegen.snd"> {
 
 def SplitIntermediateOp : Rise_Op<"codegen.split"> {
   let summary = "rise split_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 
 def SplitAccIntermediateOp : Rise_Op<"codegen.splitAcc"> {
   let summary = "rise splitAcc_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 
 def JoinIntermediateOp : Rise_Op<"codegen.join"> {
   let summary = "rise join_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 
 def JoinAccIntermediateOp : Rise_Op<"codegen.joinAcc"> {
-let summary = "rise joinAcc_interm";
-let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
-let results = (outs AnyType : $output);
+  let summary = "rise joinAcc_interm";
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
+  let results = (outs AnyType : $output);
 }
 
 def TransposeIntermediateOp : Rise_Op<"codegen.transpose"> {
   let summary = "rise snd_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 
 def SlideIntermediateOp : Rise_Op<"codegen.slide"> {
   let summary = "rise slide_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $sz, NatAttr : $sp, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $sz, NatAttr
+                   : $sp, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 
 def PadIntermediateOp : Rise_Op<"codegen.pad"> {
   let summary = "rise pad_interm";
-  let arguments = (ins AnyType : $value, NatAttr : $n, NatAttr : $l, NatAttr : $q, DataTypeAttr : $t);
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $l, NatAttr
+                   : $q, DataTypeAttr
+                   : $t);
   let results = (outs AnyType : $output);
 }
 

@@ -2,9 +2,10 @@
 
 func @print_memref_f32(memref<*xf32>)
 
-func @rise_fun(%outArg: memref<4xf32>, %in: memref<4xf32>) {
+func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
     // This way we dont have to handle moving the block arguments anymore.
-    %array = rise.in %in : !rise.array<4, scalar<f32>>
+    %array = rise.in %in : !rise.array<6, scalar<f32>>
+
     %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %result = rise.embed(%summand) {
             %doubled = addf %summand, %summand : f32
@@ -12,7 +13,7 @@ func @rise_fun(%outArg: memref<4xf32>, %in: memref<4xf32>) {
         }
         rise.return %result : !rise.scalar<f32>
     }
-    %map = rise.mapSeq {to = "loop"} #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+    %map = rise.mapSeq {to = "loop"} #rise.nat<6> #rise.scalar<f32> #rise.scalar<f32>
     %doubledArray = rise.apply %map, %doubleFun, %array
     rise.out %outArg <- %doubledArray
     return
@@ -20,18 +21,18 @@ func @rise_fun(%outArg: memref<4xf32>, %in: memref<4xf32>) {
 
 func @array_times_2() {
     //prepare output Array
-    %outputArray = alloc() : memref<4xf32>
+    %outputArray = alloc() : memref<6xf32>
 
-    %inputArray = alloc() : memref<4xf32>
+    %inputArray = alloc() : memref<6xf32>
     %cst = constant 5.0 : f32
-    linalg.fill(%inputArray, %cst) : memref<4xf32>, f32
+    linalg.fill(%inputArray, %cst) : memref<6xf32>, f32
 
-    call @rise_fun(%outputArray, %inputArray) : (memref<4xf32>, memref<4xf32>) -> ()
+    call @rise_fun(%outputArray, %inputArray) : (memref<6xf32>, memref<6xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<4xf32> to memref<*xf32>
+    %print_me = memref_cast %outputArray : memref<6xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }
-// ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
-// ARRAY_TIMES_2: [10, 10, 10, 10]
+// ARRAY_TIMES_2: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [6] strides = [1] data =
+// ARRAY_TIMES_2: [10, 10, 10, 10, 10, 10]
 

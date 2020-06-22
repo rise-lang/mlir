@@ -257,7 +257,7 @@ LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
 
 void LambdaOp::build(
     OpBuilder &builder, OperationState &result, FunType lambdaType,
-    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+    function_ref<Value(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
         bodyBuilder) {
   result.addTypes(lambdaType);
 
@@ -274,7 +274,9 @@ void LambdaOp::build(
   if (bodyBuilder) {
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPointToStart(body);
-    bodyBuilder(builder, result.location, body->getArguments());
+    Value returnValue = bodyBuilder(builder, result.location, body->getArguments());
+    builder.create<ReturnOp>(returnValue.getLoc(), returnValue.getType(), returnValue);
+    //    ensureTerminator()
   }
 }
 

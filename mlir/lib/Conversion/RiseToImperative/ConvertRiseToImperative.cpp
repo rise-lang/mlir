@@ -133,7 +133,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     return;
   });
 
-  funcOp.dump();
 
   // Codegen:
   bool doCodegen = true;
@@ -172,7 +171,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     rewriter.eraseOp(op);
   }
 
-  funcOp.dump();
   return;
 }
 
@@ -496,7 +494,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     }
 
     if (contArray.getType().isa<ArrayType>()) {
-
       xi = rewriter.create<IdxOp>(
           loc, contArray.getType().cast<ArrayType>().getElementType(),
           contArray, loopInductionVar);
@@ -716,6 +713,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     for (int i = apply.getNumOperands() - 1; i > 0; i--) {
       args.push_back(apply.getOperand(i));
     }
+
     Substitute(lambda, args);
 
     // Find return in Lambda Region to start new AccT
@@ -727,6 +725,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
         break;
       }
     }
+
+//    assert(returnOp.getOperand(0) && "ReturnOp in Lambda missing!");
+
     AccT(returnOp, out, rewriter);
     return;
   } else if (isa<AddOp>(appliedFun)) {
@@ -1087,7 +1088,6 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
   if (storeLocation.isa<OpResult>()) {
     if (IdxOp idx = dyn_cast<IdxOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for idx";
-      idx.getParentOfType<FuncOp>().dump();
 
       path.push_back(idx.arg1());
 
@@ -1308,9 +1308,21 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       path.push_back(divResult);
 
       return codeGen(joinIntermediateOp.value(), path, rewriter);
+    } else if (SlideIntermediateOp slideIntermediateOp = dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Slide";
+      Value i = mpark::get<Value>(path.pop_back_val());
+      Value j = mpark::get<Value>(path.pop_back_val());
+
+      Value s2 = rewriter.create<ConstantIndexOp>(slideIntermediateOp.getLoc(), slideIntermediateOp.sp().getIntValue()).getResult();
+      Value i_times_s2 = rewriter.create<MulIOp>(slideIntermediateOp.getLoc(), i, s2).getResult();
+      Value newIndex = rewriter.create<AddIOp>(slideIntermediateOp.getLoc(), i_times_s2, j).getResult();
+
+      path.push_back(newIndex);
+
+      return codeGen(slideIntermediateOp.value(), path, rewriter);
     } else if (TransposeIntermediateOp transposeIntermediateOp =
                    dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
-      emitRemark(val.getLoc()) << "Codegen for TransposeIntermediate";
+      emitRemark(val.getLoc()) << "Codegen for Transpose";
       auto n = path.pop_back_val();
       auto m = path.pop_back_val();
 
@@ -1360,12 +1372,11 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
-  // handle problem originating from translation of reduce (accessing element)
-  int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
-  if (indexValues.size() != rank) {
-    indexValues.erase(indexValues.begin());
-  }
-
+//  // handle problem originating from translation of reduce (accessing element)
+//  int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
+//  if (indexValues.size() != rank) {
+//    indexValues.erase(indexValues.begin());
+//  }
   if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
     return rewriter
         .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)

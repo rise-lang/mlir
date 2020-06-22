@@ -25,7 +25,8 @@ Value mlir::edsc::op::in(Value in, Type type) {
 
 Value mlir::edsc::op::literal(DataType t, StringRef literal) {
   MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<LiteralOp>(t, LiteralAttr::get(context, t, literal.str()));
+  return ValueBuilder<LiteralOp>(t,
+                                 LiteralAttr::get(context, t, literal.str()));
 }
 
 Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
@@ -111,6 +112,29 @@ Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t, Value array) {
       ValueRange{array});
 }
 
+Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType slideType = FunType::get(
+      context,
+      ArrayType::get(context,
+                     Nat::get(context, sp.getIntValue() * n.getIntValue() +
+                                           sz.getIntValue() - sp.getIntValue()),
+                     t),
+      ArrayType::get(context, n, ArrayType::get(context, sz, t)));
+
+  return ValueBuilder<SlideOp>(
+      slideType, NatAttr::get(context, n), NatAttr::get(context, sz),
+      NatAttr::get(context, sp), DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t, Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value slideOp = slide(n, sz, sp, t);
+  return ValueBuilder<ApplyOp>(
+      ArrayType::get(context, n, ArrayType::get(context, sz, t)), slideOp,
+      ValueRange{array});
+}
+
 Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
   FunType mapType =
@@ -131,30 +155,38 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
                                ValueRange{lambda, array});
 }
 
-// TODO: maybe change the builder to automatically introduce a return for the last Value created in bodybuilder
-Value mlir::edsc::op::lambda(FunType lambdaType, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-  return ValueBuilder<LambdaOp>(lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc, MutableArrayRef<BlockArgument> args){
-    if(bodyBuilder) {
-      ScopedContext nestedContext(nestedBuilder, nestedLoc);
-      OpBuilder::InsertionGuard guard(nestedBuilder);
-      bodyBuilder(args);
-    }
-  });
+// TODO: maybe change the builder to automatically introduce a return for the
+// last Value created in bodybuilder - replace void with Value
+Value mlir::edsc::op::lambda(
+    FunType lambdaType,
+    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+          OpBuilder::InsertionGuard guard(nestedBuilder);
+          return bodyBuilder(args);
+      });
 }
 
 // TODO maybe a builder like:
 // I mean something that we can access blockargs better, not 100% sure how
-//Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+// Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1,
+// function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
 
-
-Value mlir::edsc::op::embed(Type result, ValueRange exposedValues, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-  return ValueBuilder<EmbedOp>(result, exposedValues, [&](OpBuilder &nestedBuilder, Location nestedLoc, MutableArrayRef<BlockArgument> args){
-    if(bodyBuilder) {
-      ScopedContext nestedContext(nestedBuilder, nestedLoc);
-      OpBuilder::InsertionGuard guard(nestedBuilder);
-      bodyBuilder(args);
-    }
-  });
+Value mlir::edsc::op::embed(
+    Type result, ValueRange exposedValues,
+    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<EmbedOp>(
+      result, exposedValues,
+      [&](OpBuilder &nestedBuilder, Location nestedLoc,
+          MutableArrayRef<BlockArgument> args) {
+        if (bodyBuilder) {
+          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+          OpBuilder::InsertionGuard guard(nestedBuilder);
+          bodyBuilder(args);
+        }
+      });
 }
 
 void mlir::edsc::op::rise_return(Value returnValue) {
@@ -167,10 +199,11 @@ void mlir::edsc::op::out(Value writeTo, Value result) {
   return;
 }
 
+// TODO: This is what affineLoopBuilder looks like. The function is directly
+// passed in the arguments here. Way better than before.
 
-// TODO: This is what affineLoopBuilder looks like. The function is directly passed in the arguments here. Way better than before.
-
-//void mlir::edsc::op::lambdaBuilder(ValueRange lbs, ValueRange ubs, int64_t step,
+// void mlir::edsc::op::lambdaBuilder(ValueRange lbs, ValueRange ubs, int64_t
+// step,
 //                                   function_ref<void(Value)> bodyBuilder) {
 //  // Fetch the builder and location.
 //  assert(ScopedContext::getContext() && "EDSC ScopedContext not set up");
