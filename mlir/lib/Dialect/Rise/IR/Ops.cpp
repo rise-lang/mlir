@@ -138,10 +138,34 @@ LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
+// // Having this does not work together with the other builder!
+// void EmbedOp::build(
+//    OpBuilder &builder, OperationState &result, Type wrapped,
+//    ValueRange exposedValues,
+//    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+//        bodyBuilder) {
+//  result.addTypes(wrapped);
+//  result.addOperands(exposedValues);
+//
+//  Region *embedRegion = result.addRegion();
+//  Block *body = new Block();
+//
+//  for (Value val : exposedValues) {
+//    assert(val.getType().isa<ScalarType>() &&
+//           "Only scalar Types can be exposed with rise.embed!");
+//    body->addArgument(val.getType().dyn_cast<ScalarType>().getWrappedType());
+//  }
+//  embedRegion->push_back(body);
+//
+//  OpBuilder::InsertionGuard guard(builder);
+//  builder.setInsertionPointToStart(body);
+//  bodyBuilder(builder, result.location, body->getArguments());
+//}
+
 void EmbedOp::build(
     OpBuilder &builder, OperationState &result, Type wrapped,
     ValueRange exposedValues,
-    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+    function_ref<Value(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
         bodyBuilder) {
   result.addTypes(wrapped);
   result.addOperands(exposedValues);
@@ -155,11 +179,15 @@ void EmbedOp::build(
     body->addArgument(val.getType().dyn_cast<ScalarType>().getWrappedType());
   }
   embedRegion->push_back(body);
-
   if (bodyBuilder) {
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPointToStart(body);
-    bodyBuilder(builder, result.location, body->getArguments());
+    Value returnValue =
+        bodyBuilder(builder, result.location, body->getArguments());
+    builder.create<rise::ReturnOp>(returnValue.getLoc(),
+                                   ValueRange{returnValue});
+  } else {
+    builder.create<rise::ReturnOp>(result.location, ValueRange{});
   }
 }
 
@@ -274,9 +302,12 @@ void LambdaOp::build(
   if (bodyBuilder) {
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPointToStart(body);
-    Value returnValue = bodyBuilder(builder, result.location, body->getArguments());
-    builder.create<ReturnOp>(returnValue.getLoc(), returnValue.getType(), returnValue);
-    //    ensureTerminator()
+    Value returnValue =
+        bodyBuilder(builder, result.location, body->getArguments());
+    builder.create<rise::ReturnOp>(returnValue.getLoc(),
+                                   ValueRange{returnValue});
+  } else {
+    builder.create<rise::ReturnOp>(result.location, ValueRange{});
   }
 }
 

@@ -135,11 +135,19 @@ def EmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let results = (outs AnyType : $wrapped);
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<
-      "OpBuilder &builder, OperationState &result, "
-      "Type wrapped, ValueRange exposedValues, function_ref<void(OpBuilder "
-      "&, Location, MutableArrayRef<BlockArgument>)> "
-      "bodyBuilder = nullptr">];
+  let builders = [
+    //    OpBuilder<
+    //      "OpBuilder &builder, OperationState &result, "
+    //      "Type wrapped, ValueRange exposedValues, function_ref<void(OpBuilder
+    //      "
+    //      "&, Location, MutableArrayRef<BlockArgument>)> "
+    //      "bodyBuilder = nullptr">,
+    OpBuilder<
+        "OpBuilder &builder, OperationState &result, "
+        "Type wrapped, ValueRange exposedValues, function_ref<Value(OpBuilder "
+        "&, Location, MutableArrayRef<BlockArgument>)> "
+        "bodyBuilder = nullptr">
+  ];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

@@ -6,7 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Builders.h"
 
@@ -174,18 +173,32 @@ Value mlir::edsc::op::lambda(
 // Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1,
 // function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
 
+// // I want to have an embed which does not return a Value in its body. However the template instantiation here is ambiguous for some reason.
+//Value mlir::edsc::op::embed(
+//    Type result, ValueRange exposedValues,
+//    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+//  return ValueBuilder<EmbedOp>(
+//      result, exposedValues,
+//      [&](OpBuilder &nestedBuilder, Location nestedLoc,
+//          MutableArrayRef<BlockArgument> args) -> void {
+//          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+//          OpBuilder::InsertionGuard guard(nestedBuilder);
+//          bodyBuilder(args);
+//          return;
+//      });
+//}
+
 Value mlir::edsc::op::embed(
     Type result, ValueRange exposedValues,
-    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
   return ValueBuilder<EmbedOp>(
       result, exposedValues,
       [&](OpBuilder &nestedBuilder, Location nestedLoc,
-          MutableArrayRef<BlockArgument> args) {
-        if (bodyBuilder) {
+          MutableArrayRef<BlockArgument> args) -> Value {
+
           ScopedContext nestedContext(nestedBuilder, nestedLoc);
           OpBuilder::InsertionGuard guard(nestedBuilder);
-          bodyBuilder(args);
-        }
+          return bodyBuilder(args);
       });
 }
 
