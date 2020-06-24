@@ -17,6 +17,49 @@ using namespace mlir::rise;
 namespace mlir {
 namespace edsc {
 
+// Types
+FunType mlir::edsc::type::funtype(Type in, Type out) {
+  return FunType::get(ScopedContext::getContext(), in, out);
+}
+
+Nat mlir::edsc::type::nat(int val) {
+  return Nat::get(ScopedContext::getContext(), val);
+}
+
+ArrayType mlir::edsc::type::array(Nat size, Type elemType) {
+  return ArrayType::get(ScopedContext::getContext(), size, elemType);
+}
+
+ArrayType mlir::edsc::type::array(int size, Type elemType) {
+  return array(nat(size), elemType);
+}
+
+ArrayType mlir::edsc::type::array2D(Nat outerSize, Nat innerSize, Type elemType) {
+  return array(outerSize, array(innerSize, elemType));
+}
+
+ArrayType mlir::edsc::type::array2D(int outerSize, int innerSize, Type elemType) {
+    return array2D(nat(outerSize), nat(innerSize), elemType);
+}
+
+ArrayType mlir::edsc::type::array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType) {
+  return array2D(outerSize, midSize, array(innerSize, elemType));
+}
+
+ArrayType mlir::edsc::type::array3D(int outerSize, int midSize, int innerSize, Type elemType) {
+  return array2D(outerSize, midSize, array(nat(innerSize), elemType));
+}
+
+Tuple mlir::edsc::type::tuple(Type lhs, Type rhs) {
+  return Tuple::get(ScopedContext::getContext(), lhs, rhs);
+}
+
+ScalarType mlir::edsc::type::scalar(Type wrappedType) {
+  return ScalarType::get(ScopedContext::getContext(), wrappedType);
+}
+
+
+// Operations
 Value mlir::edsc::op::in(Value in, Type type) {
   assert(in.getType().isa<MemRefType>());
   return ValueBuilder<InOp>(type, in);
