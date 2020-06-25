@@ -58,6 +58,13 @@ ScalarType mlir::edsc::type::scalar(Type wrappedType) {
   return ScalarType::get(ScopedContext::getContext(), wrappedType);
 }
 
+ScalarType mlir::edsc::type::scalarF32() {
+  return scalar(FloatType::getF32(ScopedContext::getContext()));
+}
+
+ScalarType mlir::edsc::type::scalarF64() {
+  return scalar(FloatType::getF64(ScopedContext::getContext()));
+}
 
 // Operations
 Value mlir::edsc::op::in(Value in, Type type) {

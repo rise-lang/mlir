@@ -36,6 +36,8 @@ ArrayType array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType);
 ArrayType array3D(int outerSize, int midSize, int innerSize, Type elemType);
 Tuple tuple(Type lhs, Type rhs);
 ScalarType scalar(Type wrappedType);
+ScalarType scalarF32();
+ScalarType scalarF64();
 } // namespace type
 
 namespace op {
