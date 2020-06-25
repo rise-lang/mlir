@@ -26,31 +26,31 @@ Nat mlir::edsc::type::nat(int val) {
   return Nat::get(ScopedContext::getContext(), val);
 }
 
-ArrayType mlir::edsc::type::array(Nat size, Type elemType) {
+ArrayType mlir::edsc::type::array(Nat size, DataType elemType) {
   return ArrayType::get(ScopedContext::getContext(), size, elemType);
 }
 
-ArrayType mlir::edsc::type::array(int size, Type elemType) {
+ArrayType mlir::edsc::type::array(int size, DataType elemType) {
   return array(nat(size), elemType);
 }
 
-ArrayType mlir::edsc::type::array2D(Nat outerSize, Nat innerSize, Type elemType) {
+ArrayType mlir::edsc::type::array2D(Nat outerSize, Nat innerSize, DataType elemType) {
   return array(outerSize, array(innerSize, elemType));
 }
 
-ArrayType mlir::edsc::type::array2D(int outerSize, int innerSize, Type elemType) {
+ArrayType mlir::edsc::type::array2D(int outerSize, int innerSize, DataType elemType) {
     return array2D(nat(outerSize), nat(innerSize), elemType);
 }
 
-ArrayType mlir::edsc::type::array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType) {
+ArrayType mlir::edsc::type::array3D(Nat outerSize, Nat midSize, Nat innerSize, DataType elemType) {
   return array2D(outerSize, midSize, array(innerSize, elemType));
 }
 
-ArrayType mlir::edsc::type::array3D(int outerSize, int midSize, int innerSize, Type elemType) {
+ArrayType mlir::edsc::type::array3D(int outerSize, int midSize, int innerSize, DataType elemType) {
   return array2D(outerSize, midSize, array(nat(innerSize), elemType));
 }
 
-Tuple mlir::edsc::type::tuple(Type lhs, Type rhs) {
+Tuple mlir::edsc::type::tuple(DataType lhs, DataType rhs) {
   return Tuple::get(ScopedContext::getContext(), lhs, rhs);
 }
 

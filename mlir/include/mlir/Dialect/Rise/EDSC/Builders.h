@@ -28,13 +28,13 @@ namespace edsc {
 namespace type {
 FunType funtype(Type in, Type out);
 Nat nat(int val);
-ArrayType array(Nat size, Type elemType);
-ArrayType array(int size, Type elemType);
-ArrayType array2D(Nat outerSize, Nat innerSize, Type elemType);
-ArrayType array2D(int outerSize, int innerSize, Type elemType);
-ArrayType array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType);
-ArrayType array3D(int outerSize, int midSize, int innerSize, Type elemType);
-Tuple tuple(Type lhs, Type rhs);
+ArrayType array(Nat size, DataType elemType);
+ArrayType array(int size, DataType elemType);
+ArrayType array2D(Nat outerSize, Nat innerSize, DataType elemType);
+ArrayType array2D(int outerSize, int innerSize, DataType elemType);
+ArrayType array3D(Nat outerSize, Nat midSize, Nat innerSize, DataType elemType);
+ArrayType array3D(int outerSize, int midSize, int innerSize, DataType elemType);
+Tuple tuple(DataType lhs, DataType rhs);
 ScalarType scalar(Type wrappedType);
 ScalarType scalarF32();
 ScalarType scalarF64();

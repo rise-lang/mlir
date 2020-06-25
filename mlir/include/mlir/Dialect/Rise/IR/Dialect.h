@@ -42,6 +42,7 @@ public:
 
   /// Hook for custom parsing of types
   mlir::Type parseType(DialectAsmParser &parser) const override;
+  DataType parseDataType(DialectAsmParser &parser) const;
 
   /// Hook for custom printing of types
   void printType(mlir::Type type, DialectAsmPrinter &) const override;

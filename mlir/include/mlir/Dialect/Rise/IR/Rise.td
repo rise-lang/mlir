@@ -63,7 +63,7 @@ def RiseType : Type<Or<[FunType.predicate, DataTypeWrapper.predicate]>>;
 def DataTypeAttr
     : Attr<CPred<"$_self.isa<DataTypeAttr>()">, "datatype attribute"> {
   let storageType = [{DataTypeAttr}];
-  let returnType = [{Type}];
+  let returnType = [{DataType}];
 }
 def NatAttr : Attr<CPred<"$_self.isa<NatAttr>()">, "nat attribute"> {
   let storageType = [{NatAttr}];

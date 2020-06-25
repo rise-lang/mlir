@@ -46,7 +46,7 @@ struct RiseScalarStorage : public mlir::TypeStorage {
 
   bool operator==(const KeyTy &key) const { return key == KeyTy(wrappedType); }
 
-  static KeyTy getKey(DataType data) { return KeyTy(data); }
+  static KeyTy getKey(Type data) { return KeyTy(data); }
 
   static llvm::hash_code hashKey(const KeyTy &key) {
     return llvm::hash_value(key.getAsOpaquePointer());
@@ -141,11 +141,11 @@ struct RiseFunTypeStorage : public mlir::TypeStorage {
 
 /// This class holds the implementation of the Rise Tuple.
 struct RiseTupleTypeStorage : public mlir::TypeStorage {
-  RiseTupleTypeStorage(Type first, Type second)
+  RiseTupleTypeStorage(DataType first, DataType second)
       : first(first), second(second) {}
   /// This defines how we unique this type in the context: Rise Tuple types are
   /// unique by the types of the two contained elements: "first" and "second"
-  using KeyTy = std::pair<Type, Type>;
+  using KeyTy = std::pair<DataType, DataType>;
 
   static llvm::hash_code hashKey(const KeyTy &key) {
     return llvm::hash_combine(key.first, key.second);
@@ -155,7 +155,7 @@ struct RiseTupleTypeStorage : public mlir::TypeStorage {
     return key == KeyTy(first, second);
   }
 
-  static KeyTy getKey(Type first, Type second) {
+  static KeyTy getKey(DataType first, DataType second) {
     return KeyTy(first, second);
   }
 
@@ -165,21 +165,21 @@ struct RiseTupleTypeStorage : public mlir::TypeStorage {
         RiseTupleTypeStorage(key.first, key.second);
   }
 
-  Type getFirst() const { return first; }
-  Type getSecond() const { return second; }
+  DataType getFirst() const { return first; }
+  DataType getSecond() const { return second; }
 
 private:
-  Type first;
-  Type second;
+  DataType first;
+  DataType second;
 };
 
 /// This class holds the implementation of the Rise ArrayType.
 struct ArrayTypeStorage : public mlir::TypeStorage {
-  ArrayTypeStorage(Nat size, Type elementType)
+  ArrayTypeStorage(Nat size, DataType elementType)
       : size(size), elementType(elementType) {}
   /// This defines how we unique this type in the context: Array Types are
   /// unique by size and type of the elements
-  using KeyTy = std::pair<Nat, Type>;
+  using KeyTy = std::pair<Nat, DataType>;
 
   static llvm::hash_code hashKey(const KeyTy &key) {
     return llvm::hash_combine(key.first, key.second);
@@ -189,7 +189,7 @@ struct ArrayTypeStorage : public mlir::TypeStorage {
     return key == KeyTy(size, elementType);
   }
 
-  static KeyTy getKey(Nat size, Type elementType) {
+  static KeyTy getKey(Nat size, DataType elementType) {
     return KeyTy(size, elementType);
   }
 
@@ -200,11 +200,11 @@ struct ArrayTypeStorage : public mlir::TypeStorage {
   }
 
   Nat getSize() const { return size; }
-  Type getElementType() const { return elementType; }
+  DataType getElementType() const { return elementType; }
 
 private:
   Nat size;
-  Type elementType;
+  DataType elementType;
 };
 
 } // end namespace detail

@@ -656,7 +656,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     emitRemark(appliedFun->getLoc()) << "AccT of Split";
     Nat n = splitOp.n();
     Nat m = splitOp.m();
-    Type t = splitOp.t();
+    DataType t = splitOp.t();
 
     ArrayType splitAccType = ArrayType::get(
         rewriter.getContext(),
@@ -681,7 +681,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     emitRemark(appliedFun->getLoc()) << "AccT of Join";
     Nat n = joinOp.n();
     Nat m = joinOp.m();
-    Type t = joinOp.t();
+    DataType t = joinOp.t();
 
     ArrayType joinAccType = ArrayType::get(
         rewriter.getContext(), n, ArrayType::get(rewriter.getContext(), m, t));

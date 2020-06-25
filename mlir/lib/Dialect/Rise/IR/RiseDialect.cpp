@@ -53,8 +53,6 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
 /// Parse a type registered to this dialect
 mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
   if (succeeded(parser.parseOptionalKeyword("fun"))) {
-    // parsing of !rise.fun
-
     Type input;
     Type output;
     if (parser.parseLess())
@@ -66,31 +64,34 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
     if (parser.parseGreater())
       return nullptr;
     return FunType::get(parser.getBuilder().getContext(), input, output);
+  } else {
+    return parseDataType(parser);
+  }
+}
 
-  } else if (succeeded(parser.parseOptionalKeyword("tuple"))) {
-    // parsing of !rise.tuple
-
-    Type first;
-    Type second;
+DataType RiseDialect::parseDataType(DialectAsmParser &parser) const {
+  if (succeeded(parser.parseOptionalKeyword("tuple"))) {
+    DataType first;
+    DataType second;
     if (parser.parseLess())
       return nullptr;
-    first = parseType(parser);
+    first = parseDataType(parser);
     if (parser.parseComma())
       return nullptr;
-    second = parseType(parser);
+    second = parseDataType(parser);
     if (parser.parseGreater())
       return nullptr;
     return Tuple::get(parser.getBuilder().getContext(), first, second);
 
   } else if (succeeded(parser.parseOptionalKeyword("array"))) {
-    Type elementType;
+    DataType elementType;
     int elementCount;
     if (parser.parseLess())
       return nullptr;
     parser.parseInteger(elementCount);
     if (parser.parseComma())
       return nullptr;
-    elementType = parseType(parser);
+    elementType = parseDataType(parser);
     if (parser.parseGreater())
       return nullptr;
     return ArrayType::get(
@@ -107,12 +108,13 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
 
     // todo specify valid wrapped types
     return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
-  }
-  return nullptr;
+  } else
+    return nullptr;
 }
 
 // This enables printing types inside DataTypeAttrs without "!rise."
-void RiseDialect::printTypeInternal(Type type, raw_ostream &stream, DialectAsmPrinter &printer) const {
+void RiseDialect::printTypeInternal(Type type, raw_ostream &stream,
+                                    DialectAsmPrinter &printer) const {
   if (ScalarType scalarType = type.dyn_cast<ScalarType>()) {
     stream << "scalar<";
     printTypeInternal(scalarType.getWrappedType(), stream, printer);
@@ -173,7 +175,7 @@ mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
     return NatAttr::get(getContext(), Nat::get(getContext(), natValue));
   } else {
     // we have a DataType Attribute
-    Type type = parseType(parser);
+    DataType type = parseDataType(parser);
     return DataTypeAttr::get(getContext(), type);
   }
 

@@ -80,13 +80,13 @@ Type FunType::getOutput() { return getImpl()->output; }
 //===----------------------------------------------------------------------===//
 // TupleType
 //===----------------------------------------------------------------------===//
-Tuple rise::Tuple::get(mlir::MLIRContext *context, Type first,
-                       Type second) {
+Tuple rise::Tuple::get(mlir::MLIRContext *context, DataType first,
+                       DataType second) {
   return Base::get(context, RiseTypeKind::RISE_TUPLE, first, second);
 }
 
-Type rise::Tuple::getFirst() { return getImpl()->getFirst(); }
-Type rise::Tuple::getSecond() { return getImpl()->getSecond(); }
+DataType rise::Tuple::getFirst() { return getImpl()->getFirst(); }
+DataType rise::Tuple::getSecond() { return getImpl()->getSecond(); }
 
 //===----------------------------------------------------------------------===//
 // ArrayType
@@ -94,10 +94,10 @@ Type rise::Tuple::getSecond() { return getImpl()->getSecond(); }
 
 Nat ArrayType::getSize() { return getImpl()->getSize(); }
 
-Type ArrayType::getElementType() { return getImpl()->getElementType(); }
+DataType ArrayType::getElementType() { return getImpl()->getElementType(); }
 
 ArrayType ArrayType::get(mlir::MLIRContext *context, Nat size,
-                         Type elementType) {
+                         DataType elementType) {
   return Base::get(context, RiseTypeKind::RISE_ARRAY, size, elementType);
 }
 

@@ -42,10 +42,10 @@ std::string LiteralAttr::getValue() const { return getImpl()->value; }
 // DataTypeAttr
 //===----------------------------------------------------------------------===//
 
-DataTypeAttr DataTypeAttr::get(MLIRContext *context, Type value) {
+DataTypeAttr DataTypeAttr::get(MLIRContext *context, DataType value) {
   return Base::get(context, RiseAttributeKind::DATATYPE_ATTR, value);
 }
-Type DataTypeAttr::getValue() const { return getImpl()->value; }
+DataType DataTypeAttr::getValue() const { return getImpl()->value; }
 
 //===----------------------------------------------------------------------===//
 // NatAttr

@@ -155,13 +155,13 @@ public:
 
   /// This method is used to get an instance of ArrayType.
   static ArrayType get(mlir::MLIRContext *context, Nat size,
-                       Type elementType);
+                       DataType elementType);
 
   /// Support method to enable LLVM-style RTTI type casting.
   static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_ARRAY; }
 
   Nat getSize();
-  Type getElementType();
+  DataType getElementType();
 };
 
 class Tuple : public mlir::Type::TypeBase<Tuple, DataType,
@@ -175,10 +175,10 @@ public:
   static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_TUPLE; }
 
   /// This method is used to get an instance of Tuple.
-  static Tuple get(mlir::MLIRContext *context, Type first, Type second);
+  static Tuple get(mlir::MLIRContext *context, DataType first, DataType second);
 
-  Type getFirst();
-  Type getSecond();
+  DataType getFirst();
+  DataType getSecond();
 };
 
 class FunType
