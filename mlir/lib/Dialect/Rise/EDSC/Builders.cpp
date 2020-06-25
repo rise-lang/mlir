@@ -6,7 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Builders.h"
 
@@ -18,6 +17,49 @@ using namespace mlir::rise;
 namespace mlir {
 namespace edsc {
 
+// Types
+FunType mlir::edsc::type::funtype(Type in, Type out) {
+  return FunType::get(ScopedContext::getContext(), in, out);
+}
+
+Nat mlir::edsc::type::nat(int val) {
+  return Nat::get(ScopedContext::getContext(), val);
+}
+
+ArrayType mlir::edsc::type::array(Nat size, Type elemType) {
+  return ArrayType::get(ScopedContext::getContext(), size, elemType);
+}
+
+ArrayType mlir::edsc::type::array(int size, Type elemType) {
+  return array(nat(size), elemType);
+}
+
+ArrayType mlir::edsc::type::array2D(Nat outerSize, Nat innerSize, Type elemType) {
+  return array(outerSize, array(innerSize, elemType));
+}
+
+ArrayType mlir::edsc::type::array2D(int outerSize, int innerSize, Type elemType) {
+    return array2D(nat(outerSize), nat(innerSize), elemType);
+}
+
+ArrayType mlir::edsc::type::array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType) {
+  return array2D(outerSize, midSize, array(innerSize, elemType));
+}
+
+ArrayType mlir::edsc::type::array3D(int outerSize, int midSize, int innerSize, Type elemType) {
+  return array2D(outerSize, midSize, array(nat(innerSize), elemType));
+}
+
+Tuple mlir::edsc::type::tuple(Type lhs, Type rhs) {
+  return Tuple::get(ScopedContext::getContext(), lhs, rhs);
+}
+
+ScalarType mlir::edsc::type::scalar(Type wrappedType) {
+  return ScalarType::get(ScopedContext::getContext(), wrappedType);
+}
+
+
+// Operations
 Value mlir::edsc::op::in(Value in, Type type) {
   assert(in.getType().isa<MemRefType>());
   return ValueBuilder<InOp>(type, in);
@@ -174,18 +216,32 @@ Value mlir::edsc::op::lambda(
 // Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1,
 // function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
 
+// // I want to have an embed which does not return a Value in its body. However the template instantiation here is ambiguous for some reason.
+//Value mlir::edsc::op::embed(
+//    Type result, ValueRange exposedValues,
+//    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+//  return ValueBuilder<EmbedOp>(
+//      result, exposedValues,
+//      [&](OpBuilder &nestedBuilder, Location nestedLoc,
+//          MutableArrayRef<BlockArgument> args) -> void {
+//          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+//          OpBuilder::InsertionGuard guard(nestedBuilder);
+//          bodyBuilder(args);
+//          return;
+//      });
+//}
+
 Value mlir::edsc::op::embed(
     Type result, ValueRange exposedValues,
-    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
   return ValueBuilder<EmbedOp>(
       result, exposedValues,
       [&](OpBuilder &nestedBuilder, Location nestedLoc,
-          MutableArrayRef<BlockArgument> args) {
-        if (bodyBuilder) {
+          MutableArrayRef<BlockArgument> args) -> Value {
+
           ScopedContext nestedContext(nestedBuilder, nestedLoc);
           OpBuilder::InsertionGuard guard(nestedBuilder);
-          bodyBuilder(args);
-        }
+          return bodyBuilder(args);
       });
 }
 

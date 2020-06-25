@@ -25,25 +25,18 @@ using namespace mlir::rise;
 namespace mlir {
 namespace edsc {
 
-// TODO: something like Lambdabuilder, which can nest the creationcode for inside
-//class AffineLoopNestBuilder {
-//public:
-//  /// This entry point accommodates the fact that AffineForOp implicitly uses
-//  /// multiple `lbs` and `ubs` with one single `iv` and `step` to encode `max`
-//  /// and and `min` constraints respectively.
-//  AffineLoopNestBuilder(Value *iv, ArrayRef<Value> lbs, ArrayRef<Value> ubs,
-//                        int64_t step);
-//  AffineLoopNestBuilder(MutableArrayRef<Value> ivs, ArrayRef<Value> lbs,
-//                        ArrayRef<Value> ubs, ArrayRef<int64_t> steps);
-//
-//  void operator()(function_ref<void(void)> fun = nullptr);
-//
-//private:
-//  SmallVector<LoopBuilder, 4> loops;
-//};
-
-//class LambdaBuilder :
-
+namespace type {
+FunType funtype(Type in, Type out);
+Nat nat(int val);
+ArrayType array(Nat size, Type elemType);
+ArrayType array(int size, Type elemType);
+ArrayType array2D(Nat outerSize, Nat innerSize, Type elemType);
+ArrayType array2D(int outerSize, int innerSize, Type elemType);
+ArrayType array3D(Nat outerSize, Nat midSize, Nat innerSize, Type elemType);
+ArrayType array3D(int outerSize, int midSize, int innerSize, Type elemType);
+Tuple tuple(Type lhs, Type rhs);
+ScalarType scalar(Type wrappedType);
+} // namespace type
 
 namespace op {
 
@@ -61,7 +54,8 @@ Value transpose(Nat n, Nat m, DataType t, Value array);
 Value slide(Nat n, Nat sz, Nat sp, DataType t);
 Value slide(Nat n, Nat sz, Nat sp, DataType t, Value array);
 Value lambda(FunType lambdaType, function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder);
-Value embed(Type result, ValueRange exposedValues, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
+//Value embed(Type result, ValueRange exposedValues, function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
+Value embed(Type result, ValueRange exposedValues, function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda, Value array);
 Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
@@ -71,7 +65,6 @@ void rise_return(Value returnValue);
 void out(Value writeTo, Value result);
 
 } // namespace op
-
 
 } // namespace edsc
 } // namespace mlir
