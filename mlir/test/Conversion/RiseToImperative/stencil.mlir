@@ -2,13 +2,13 @@
 
 func @print_memref_f32(memref<*xf32>)
 
-func @rise_fun(%outArg: memref<7xf32>, %in: memref<9xf32>) {
+func @rise_fun(%outArg: memref<11xf32>, %in: memref<9xf32>) {
     %array = rise.in %in : !rise.array<9, scalar<f32>>
     %padVal = rise.literal #rise.lit<5.0>
-//    %pad = rise.pad #rise.nat<9> #rise.nat<1> #rise.nat<1> #rise.scalar<f32>
-//    %padded = rise.apply %pad, %padVal, %array
-    %slide = rise.slide #rise.nat<7> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
-    %slided = rise.apply %slide, %array
+    %pad = rise.pad #rise.nat<9> #rise.nat<1> #rise.nat<3> #rise.scalar<f32>
+    %padded = rise.apply %pad, %padVal, %array
+    %slide = rise.slide #rise.nat<11> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
+    %slided = rise.apply %slide, %padded
 
     %reduceWindow = rise.lambda (%window : !rise.array<3, scalar<f32>>) -> !rise.scalar<f32> {
         %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
@@ -23,7 +23,7 @@ func @rise_fun(%outArg: memref<7xf32>, %in: memref<9xf32>) {
         %result = rise.apply %reduce, %reductionAdd, %initializer, %window
         rise.return %result : !rise.scalar<f32>
     }
-    %map = rise.mapSeq {to = "affine"}  #rise.nat<7> #rise.array<3, scalar<f32>> #rise.scalar<f32>
+    %map = rise.mapSeq {to = "affine"}  #rise.nat<11> #rise.array<3, scalar<f32>> #rise.scalar<f32>
     %result = rise.apply %map, %reduceWindow, %slided
 
     rise.out %outArg <- %result
@@ -33,7 +33,7 @@ func @rise_fun(%outArg: memref<7xf32>, %in: memref<9xf32>) {
 func @stencil() {
     //prepare output Array
     //prepare output Array
-    %outputArray = alloc() : memref<7xf32>
+    %outputArray = alloc() : memref<11xf32>
     %inputArray = alloc() : memref<9xf32>
 
     %memrefcst1 = alloc() : memref<f32>
@@ -55,14 +55,14 @@ func @stencil() {
         store %interm, %inputArray[%arg0] : memref<9xf32>
     }
 
-    call @rise_fun(%outputArray, %inputArray) : (memref<7xf32>, memref<9xf32>) -> ()
+    call @rise_fun(%outputArray, %inputArray) : (memref<11xf32>, memref<9xf32>) -> ()
 
     %print_me_in = memref_cast %inputArray : memref<9xf32> to memref<*xf32>
-    %print_me_out = memref_cast %outputArray : memref<7xf32> to memref<*xf32>
+    %print_me_out = memref_cast %outputArray : memref<11xf32> to memref<*xf32>
 //    call @print_memref_f32(%print_me_in): (memref<*xf32>) -> ()
     call @print_memref_f32(%print_me_out): (memref<*xf32>) -> ()
     return
 }
-// STENCIL: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [7] strides = [1] data =
-// STENCIL: [6, 9, 12, 15, 18, 21, 24]
+// STENCIL: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [11] strides = [1] data =
+// STENCIL: [4, 6, 8, 12, 15, 18, 21, 24, 26, 27, 27]
 

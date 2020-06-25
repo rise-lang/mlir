@@ -133,7 +133,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     return;
   });
 
-
+  funcOp.dump();
   // Codegen:
   bool doCodegen = true;
   SmallVector<Operation *, 10> erasureList = {};
@@ -144,6 +144,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
+  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -284,22 +285,20 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
         indexedAccum = accum;
       }
 
-      EmbedOp embedOp = rewriter.create<EmbedOp>(
-          appliedFun->getLoc(),
-          ScalarType::get(rewriter.getContext(),
-                          FloatType::getF32(rewriter.getContext())),
-          ValueRange());
+      //      EmbedOp embedOp = rewriter.create<EmbedOp>(
+      //          appliedFun->getLoc(),
+      //          ScalarType::get(rewriter.getContext(),
+      //                          FloatType::getF32(rewriter.getContext())),
+      //          ValueRange());
       //      Block *embedBlock = new Block();
       //      embedOp.region().push_front(embedBlock);
-      rewriter.setInsertionPointToStart(&embedOp.region().front());
+      //      rewriter.setInsertionPointToStart(&embedOp.region().front());
 
       auto contInit = ConT(initializer, rewriter.getInsertionPoint(), rewriter);
 
-      rewriter.create<rise::ReturnOp>(initializer.getLoc(), contInit);
-
-      rewriter.setInsertionPointAfter(embedOp);
-      auto initAccum = rewriter.create<AssignOp>(
-          appliedFun->getLoc(), embedOp.getResult(), indexedAccum);
+      //      rewriter.setInsertionPointAfter(embedOp);
+      auto initAccum = rewriter.create<AssignOp>(appliedFun->getLoc(), contInit,
+                                                 indexedAccum);
     }
     // zero constant for indexing
 
@@ -659,11 +658,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     Nat m = splitOp.m();
     Type t = splitOp.t();
 
-    ArrayType splitAccType =
-        ArrayType::get(
-            rewriter.getContext(),
-            Nat::get(rewriter.getContext(), n.getIntValue() * m.getIntValue()),
-            t);
+    ArrayType splitAccType = ArrayType::get(
+        rewriter.getContext(),
+        Nat::get(rewriter.getContext(), n.getIntValue() * m.getIntValue()), t);
 
     auto splitAccInterm = rewriter.create<SplitAccIntermediateOp>(
         splitOp.getLoc(), splitAccType, out,
@@ -686,9 +683,8 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     Nat m = joinOp.m();
     Type t = joinOp.t();
 
-    ArrayType joinAccType =
-        ArrayType::get(rewriter.getContext(), n,
-                       ArrayType::get(rewriter.getContext(), m, t));
+    ArrayType joinAccType = ArrayType::get(
+        rewriter.getContext(), n, ArrayType::get(rewriter.getContext(), m, t));
 
     auto joinAccInterm = rewriter.create<JoinAccIntermediateOp>(
         joinOp.getLoc(), joinAccType, out, joinOp.getAttrOfType<NatAttr>("n"),
@@ -726,7 +722,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
       }
     }
 
-//    assert(returnOp.getOperand(0) && "ReturnOp in Lambda missing!");
+    //    assert(returnOp.getOperand(0) && "ReturnOp in Lambda missing!");
 
     AccT(returnOp, out, rewriter);
     return;
@@ -792,12 +788,20 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
                 .getType()
                 .isa<ScalarType>()) { // TODO: use contained type for generating
                                       // this
+          EmbedOp embedOp = rewriter.create<EmbedOp>(
+              loc,
+              ScalarType::get(rewriter.getContext(),
+                              FloatType::getF32(rewriter.getContext())),
+              ValueRange());
+          rewriter.setInsertionPointToStart(&embedOp.region().front());
+
           auto fillOp = rewriter.create<ConstantFloatOp>(
               loc, llvm::APFloat(std::stof(literalValue)),
               FloatType::getF32(rewriter.getContext()));
+          rewriter.create<rise::ReturnOp>(loc, fillOp.getResult());
 
           rewriter.restoreInsertionPoint(oldInsertPoint);
-          return fillOp.getResult();
+          return embedOp.getResult();
         } else if (ArrayType arrayType =
                        op.literalAttr().getType().dyn_cast<ArrayType>()) {
           SmallVector<int64_t, 4> shape = {};
@@ -949,13 +953,15 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         return slideInterm;
       } else if (PadOp padOp = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied Pad";
-        auto arrayCont =
+        auto padValCont =
             ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+        auto arrayCont =
+            ConT(apply.getOperand(2), rewriter.getInsertionPoint(), rewriter);
         auto padInterm = rewriter.create<PadIntermediateOp>(
-            padOp.getLoc(), apply.getType(), arrayCont,
+            padOp.getLoc(), apply.getType(), padValCont, arrayCont,
             padOp.getAttrOfType<NatAttr>("n"),
             padOp.getAttrOfType<NatAttr>("l"),
-            padOp.getAttrOfType<NatAttr>("q"),
+            padOp.getAttrOfType<NatAttr>("r"),
             padOp.getAttrOfType<DataTypeAttr>("t"));
         return padInterm;
       } else if (MapSeqOp mapOp =
@@ -1103,9 +1109,14 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       auto i = mpark::get<Value>(path.pop_back_val());
       auto j = mpark::get<Value>(path.pop_back_val());
 
-      auto cstM = rewriter.create<ConstantIndexOp>(joinAccOp.getLoc(), joinAccOp.m().getIntValue()).getResult();
-      auto i_times_m = rewriter.create<MulIOp>(joinAccOp.getLoc(), i, cstM).getResult();
-      auto newIndex = rewriter.create<AddIOp>(joinAccOp.getLoc(), i_times_m, j).getResult();
+      auto cstM = rewriter
+                      .create<ConstantIndexOp>(joinAccOp.getLoc(),
+                                               joinAccOp.m().getIntValue())
+                      .getResult();
+      auto i_times_m =
+          rewriter.create<MulIOp>(joinAccOp.getLoc(), i, cstM).getResult();
+      auto newIndex =
+          rewriter.create<AddIOp>(joinAccOp.getLoc(), i_times_m, j).getResult();
 
       path.push_back(newIndex);
       return codeGenStore(joinAccOp.getOperand(), val, path, rewriter);
@@ -1115,7 +1126,9 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
       emitRemark(val.getLoc()) << "CodegenStore for splitAcc";
       auto loc = splitAccOp.getLoc();
       auto lhs = mpark::get<Value>(path.pop_back_val());
-      auto rhs = rewriter.create<ConstantIndexOp>(loc, splitAccOp.m().getIntValue()).getResult();
+      auto rhs =
+          rewriter.create<ConstantIndexOp>(loc, splitAccOp.n().getIntValue())
+              .getResult();
 
       // modulo op taken from AffineToStandard
       Value remainder = rewriter.create<SignedRemIOp>(loc, lhs, rhs);
@@ -1124,7 +1137,7 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
           rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, remainder, zeroCst);
       Value correctedRemainder = rewriter.create<AddIOp>(loc, remainder, rhs);
       Value result = rewriter.create<SelectOp>(loc, isRemainderNegative,
-                                              correctedRemainder, remainder);
+                                               correctedRemainder, remainder);
       Value divResult = rewriter.create<UnsignedDivIOp>(loc, lhs, rhs);
 
       path.push_back(result);
@@ -1249,7 +1262,6 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       path.pop_back();
       path.push_back(tmp);
 
-      //      std::cout << "fst? : " << *fst << "\n" << std::flush;
       if (*fst) {
         return codeGen(zipIntermOp.lhs(), path, rewriter);
       } else {
@@ -1280,9 +1292,17 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       auto i = mpark::get<Value>(path.pop_back_val());
       auto j = mpark::get<Value>(path.pop_back_val());
 
-      auto cstN = rewriter.create<ConstantIndexOp>(splitIntermediateOp.getLoc(), splitIntermediateOp.n().getIntValue()).getResult();
-      auto i_times_n = rewriter.create<MulIOp>(splitIntermediateOp.getLoc(), i, cstN).getResult();
-      auto newIndex = rewriter.create<AddIOp>(splitIntermediateOp.getLoc(), i_times_n, j).getResult();
+      auto cstN =
+          rewriter
+              .create<ConstantIndexOp>(splitIntermediateOp.getLoc(),
+                                       splitIntermediateOp.n().getIntValue())
+              .getResult();
+      auto i_times_n =
+          rewriter.create<MulIOp>(splitIntermediateOp.getLoc(), i, cstN)
+              .getResult();
+      auto newIndex =
+          rewriter.create<AddIOp>(splitIntermediateOp.getLoc(), i_times_n, j)
+              .getResult();
       path.push_back(newIndex);
 
       return codeGen(splitIntermediateOp.value(), path, rewriter);
@@ -1292,7 +1312,10 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       auto loc = joinIntermediateOp.getLoc();
       auto lhs = mpark::get<Value>(path.pop_back_val());
-      auto rhs = rewriter.create<ConstantIndexOp>(loc, joinIntermediateOp.n().getIntValue()).getResult();
+      auto rhs = rewriter
+                     .create<ConstantIndexOp>(
+                         loc, joinIntermediateOp.m().getIntValue())
+                     .getResult();
 
       // modulo op taken from AffineToStandard
       Value remainder = rewriter.create<SignedRemIOp>(loc, lhs, rhs);
@@ -1308,18 +1331,6 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       path.push_back(divResult);
 
       return codeGen(joinIntermediateOp.value(), path, rewriter);
-    } else if (SlideIntermediateOp slideIntermediateOp = dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
-      emitRemark(val.getLoc()) << "Codegen for Slide";
-      Value i = mpark::get<Value>(path.pop_back_val());
-      Value j = mpark::get<Value>(path.pop_back_val());
-
-      Value s2 = rewriter.create<ConstantIndexOp>(slideIntermediateOp.getLoc(), slideIntermediateOp.sp().getIntValue()).getResult();
-      Value i_times_s2 = rewriter.create<MulIOp>(slideIntermediateOp.getLoc(), i, s2).getResult();
-      Value newIndex = rewriter.create<AddIOp>(slideIntermediateOp.getLoc(), i_times_s2, j).getResult();
-
-      path.push_back(newIndex);
-
-      return codeGen(slideIntermediateOp.value(), path, rewriter);
     } else if (TransposeIntermediateOp transposeIntermediateOp =
                    dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
       emitRemark(val.getLoc()) << "Codegen for Transpose";
@@ -1330,6 +1341,79 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       path.push_back(m);
 
       return codeGen(transposeIntermediateOp.getOperand(), path, rewriter);
+    } else if (SlideIntermediateOp slideIntermediateOp =
+                   dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Slide";
+      Value i = mpark::get<Value>(path.pop_back_val());
+      Value j = mpark::get<Value>(path.pop_back_val());
+
+      Value s2 =
+          rewriter
+              .create<ConstantIndexOp>(slideIntermediateOp.getLoc(),
+                                       slideIntermediateOp.sp().getIntValue())
+              .getResult();
+      Value i_times_s2 =
+          rewriter.create<MulIOp>(slideIntermediateOp.getLoc(), i, s2)
+              .getResult();
+      Value newIndex =
+          rewriter.create<AddIOp>(slideIntermediateOp.getLoc(), i_times_s2, j)
+              .getResult();
+
+      path.push_back(newIndex);
+
+      return codeGen(slideIntermediateOp.value(), path, rewriter);
+    } else if (PadIntermediateOp padIntermediateOp =
+                   dyn_cast<PadIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(val.getLoc()) << "Codegen for Pad";
+      Location loc = padIntermediateOp.getLoc();
+
+      Value i = mpark::get<Value>(path.pop_back_val());
+
+      // I will do padclamp first
+      //      Value padVal = codeGen(padIntermediateOp.padvalue(),
+      //      path,rewriter);
+
+      Value l =
+          rewriter
+              .create<ConstantIndexOp>(loc, padIntermediateOp.l().getIntValue())
+              .getResult();
+      Value r =
+          rewriter
+              .create<ConstantIndexOp>(loc, padIntermediateOp.r().getIntValue())
+              .getResult();
+      Value n =
+          rewriter
+              .create<ConstantIndexOp>(loc, padIntermediateOp.n().getIntValue())
+              .getResult();
+
+      Value cst0 = rewriter.create<ConstantIndexOp>(loc, 0).getResult();
+      Value cst1 = rewriter.create<ConstantIndexOp>(loc, 1).getResult();
+
+      Value n_minus_1 = rewriter.create<SubIOp>(loc, n, cst1).getResult();
+//      Value n_minus_r_minus_1 = rewriter.create<SubIOp>(loc, n_minus_r, cst1).getResult();
+
+      Value l_plus_n = rewriter.create<AddIOp>(loc, l, n).getResult();
+
+      Value index = rewriter.create<SubIOp>(loc, i, l);
+
+      // Conditions whether index is in bounds.
+      // We can just base the conditions on i, not on i+l as done in shine_rise.
+      Value isIndexSmallerLb =
+          rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, i, l);
+      Value isIndexSmallerRb =
+          rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, i, l_plus_n);
+
+      // (i < l) ? 0 : (i < l+n) ? index : n-1
+      Value thenelseVal =
+          rewriter.create<SelectOp>(loc, isIndexSmallerRb, index, n_minus_1);
+      Value ifthenVal =
+          rewriter.create<SelectOp>(loc, isIndexSmallerLb, cst0, thenelseVal);
+
+      path.push_back(ifthenVal);
+
+      // TODO: bronching!
+
+      return codeGen(padIntermediateOp.array(), path, rewriter);
     } else if (InOp inOp = dyn_cast<InOp>(val.getDefiningOp())) {
       emitRemark(val.getLoc())
           << "Codegen for In, generating read operation for operand";
@@ -1372,11 +1456,11 @@ Value mlir::rise::generateWriteAccess(SmallVector<OutputPathType, 10> path,
       indexValues.push_back(*val);
     }
   }
-//  // handle problem originating from translation of reduce (accessing element)
-//  int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
-//  if (indexValues.size() != rank) {
-//    indexValues.erase(indexValues.begin());
-//  }
+  //  // handle problem originating from translation of reduce (accessing
+  //  element) int rank = accessVal.getType().dyn_cast<MemRefType>().getRank();
+  //  if (indexValues.size() != rank) {
+  //    indexValues.erase(indexValues.begin());
+  //  }
   if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
     return rewriter
         .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)

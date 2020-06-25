@@ -276,7 +276,7 @@ def PadOp : Rise_Op<"pad"> {
   let arguments = (ins NatAttr
                    : $n, NatAttr
                    : $l, NatAttr
-                   : $q, DataTypeAttr
+                   : $r, DataTypeAttr
                    : $t);
   let results = (outs FunType : $padFun);
   let parser = [{ return parse$cppClass(parser, result); }];
@@ -394,10 +394,11 @@ def SlideIntermediateOp : Rise_Op<"codegen.slide"> {
 def PadIntermediateOp : Rise_Op<"codegen.pad"> {
   let summary = "rise pad_interm";
   let arguments = (ins AnyType
-                   : $value, NatAttr
+                   : $padvalue, AnyType
+                   : $array, NatAttr
                    : $n, NatAttr
                    : $l, NatAttr
-                   : $q, DataTypeAttr
+                   : $r, DataTypeAttr
                    : $t);
   let results = (outs AnyType : $output);
 }

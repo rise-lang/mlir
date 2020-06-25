@@ -712,10 +712,10 @@ LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
 // Pad
 //===----------------------------------------------------------------------===//
 
-/// pad: {n:nat} → (l q:nat) → {t:data} → t → n.t → (l+n+q).t
+/// pad: {n:nat} → (l r:nat) → {t:data} → t → n.t → (l+n+r).t
 LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
-  NatAttr n, l, q;
+  NatAttr n, l, r;
   DataTypeAttr t;
 
   if (parser.parseAttribute(n, "n", result.attributes))
@@ -724,7 +724,7 @@ LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseAttribute(l, "l", result.attributes))
     failure();
 
-  if (parser.parseAttribute(q, "q", result.attributes))
+  if (parser.parseAttribute(r, "r", result.attributes))
     failure();
 
   if (parser.parseAttribute(t, "t", result.attributes))
@@ -739,7 +739,7 @@ LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
               builder.getContext(),
               Nat::get(builder.getContext(), l.getValue().getIntValue() +
                                                  n.getValue().getIntValue() +
-                                                 q.getValue().getIntValue()),
+                                                 r.getValue().getIntValue()),
               t.getValue()))));
 
   return success();
