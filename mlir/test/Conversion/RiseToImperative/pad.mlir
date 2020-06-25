@@ -56,6 +56,6 @@ func @stencil() {
     call @print_memref_f32(%print_me_out): (memref<*xf32>) -> ()
     return
 }
-// STENCIL: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [14] strides = [1] data =
-// STENCIL: [2, 2, 2, 4, 6, 8, 10, 12, 14, 16, 18, 18, 18, 18]
+// PAD: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [14] strides = [1] data =
+// PAD: [2, 2, 2, 4, 6, 8, 10, 12, 14, 16, 18, 18, 18, 18]
 

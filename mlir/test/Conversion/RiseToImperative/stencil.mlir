@@ -64,5 +64,5 @@ func @stencil() {
     return
 }
 // STENCIL: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [11] strides = [1] data =
-// STENCIL: [4, 6, 8, 12, 15, 18, 21, 24, 26, 27, 27]
+// STENCIL: [4, 6, 9, 12, 15, 18, 21, 24, 26, 27, 27]
 
