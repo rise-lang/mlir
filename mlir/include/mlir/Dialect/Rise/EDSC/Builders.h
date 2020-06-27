@@ -42,10 +42,12 @@ ScalarType scalarF64();
 } // namespace type
 
 namespace abstraction {
-Value sumLambda(ScalarType summandType);
-Value multAndSumUpLambda(ScalarType summandType);
 Value slide2d(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
               Value array2DVal);
+
+Value sumLambda(ScalarType summandType);
+Value multAndSumUpLambda(ScalarType summandType);
+
 
 } // namespace abstraction
 
@@ -78,6 +80,12 @@ Value fst(DataType s, DataType t);
 Value fst(DataType s, DataType t, Value tuple);
 Value snd(DataType s, DataType t);
 Value snd(DataType s, DataType t, Value tuple);
+Value split(Nat n, Nat m, DataType t);
+Value split(Nat n, Nat m, DataType t, Value array);
+Value split(Nat n, Value inArray);
+Value join(Nat n, Nat m, DataType t);
+Value join(Nat n, Nat m, DataType t, Value array);
+Value join(Value inArray);
 Value transpose(Nat n, Nat m, DataType t);
 Value transpose(Nat n, Nat m, DataType t, Value array);
 Value slide(Nat n, Nat sz, Nat sp, DataType t);

@@ -187,6 +187,47 @@ Value mlir::edsc::op::snd(Value tuple) {
   return snd(tupleType.getFirst(), tupleType.getSecond(), tuple);
 }
 
+Value mlir::edsc::op::split(Nat n, Nat m, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<SplitOp>(
+      funtype(array(nat(n.getIntValue() * m.getIntValue()), t),
+              array(m, array(n, t))),
+      NatAttr::get(context, n), NatAttr::get(context, m),
+      DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::split(Nat n, Nat m, DataType t, Value inArray) {
+  Value splitOp = split(n, m, t);
+  return ValueBuilder<ApplyOp>(array(m, array(n, t)), splitOp, inArray);
+}
+
+Value mlir::edsc::op::split(Nat n, Value inArray) {
+//  Value splitOp = split(n, m, t);
+//  return ValueBuilder<ApplyOp>(array(m, array(n, t)), splitOp, in_array);
+// TODO: do
+    return nullptr;
+}
+
+Value mlir::edsc::op::join(Nat n, Nat m, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<SplitOp>(
+      funtype(array(m, array(n, t)), array(nat(n.getIntValue() * m.getIntValue()), t)),
+      NatAttr::get(context, n), NatAttr::get(context, m),
+      DataTypeAttr::get(context, t));
+}
+
+//// Do the join!
+//Value mlir::edsc::op::join(Nat n, Nat m, DataType t, Value inArray) {
+//  ArrayType in
+//
+//  Value joinOp = join(n, m, t);
+//  return ValueBuilder<ApplyOp>(array(nat(m.getIntValue() * n.getIntValue()), t), joinOp, inArray);
+//}
+
+
+
+
+
 Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
   FunType transposeType = FunType::get(
@@ -417,11 +458,14 @@ Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
 
 Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
                                        Nat spInner, Value array2DVal) {
+
+  // shape:
   ArrayType arrayType = array2DVal.getType().dyn_cast<ArrayType>();
   ArrayType innerArrayType = arrayType.getElementType().dyn_cast<ArrayType>();
   int newInnerArraySize = (innerArrayType.getSize().getIntValue() +
                            spInner.getIntValue() - szInner.getIntValue()) /
                           spInner.getIntValue();
+
   std::cout << "innernewsizeL" << newInnerArraySize << std::flush;
   Value afterFirstSlide = mapSeq(
       "loop", innerArrayType,
@@ -438,9 +482,12 @@ Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
   ArrayType afterSecondSlideElementElementType =
       afterSecondSlideElementType.getElementType().dyn_cast<ArrayType>();
 
-  Value transposed = mapSeq("loop", afterSecondSlideElementType, array(afterSecondSlideElementElementType.getSize(), array(afterSecondSlideElementType.getSize(), afterSecondSlideElementElementType.getElementType())), [&](auto args){
-    return transpose(args[0]);
-  }, afterSecondSlide);
+  Value transposed = mapSeq(
+      "loop", afterSecondSlideElementType,
+      array(afterSecondSlideElementElementType.getSize(),
+            array(afterSecondSlideElementType.getSize(),
+                  afterSecondSlideElementElementType.getElementType())),
+      [&](auto args) { return transpose(args[0]); }, afterSecondSlide);
 
   return transposed;
 }
