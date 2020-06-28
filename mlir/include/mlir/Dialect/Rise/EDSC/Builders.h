@@ -48,7 +48,6 @@ Value slide2d(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
 Value sumLambda(ScalarType summandType);
 Value multAndSumUpLambda(ScalarType summandType);
 
-
 } // namespace abstraction
 
 namespace op {
@@ -64,13 +63,17 @@ Value transpose(Value array);
 Value mapSeq(StringRef lowerTo, DataType s, DataType t, Value lambda,
              Value array);
 Value mapSeq(StringRef lowerTo, DataType s, DataType t,
-             lambdaBodyBuilder bodyBuilder,
-             Value array);
-//Value reduceSeq(Value lambda, Value initializer, Value array);
-Value reduceSeq(StringRef lowerTo, Value lambda, Value initializer,
-                Value array);
-Value reduceSeq(StringRef lowerTo, DataType s, DataType t, lambdaBodyBuilder bodyBuilder, Value initializer,
-                Value array);
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value mapSeq(StringRef lowerTo, DataType t,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+
+// Value reduceSeq(Value lambda, Value initializer, Value array);
+Value reduceSeq(StringRef lowerTo, DataType t,
+                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder, Value initializer, Value array);
+Value reduceSeq(StringRef lowerTo, DataType t,
+                Value lambda, Value initializer, Value array);
+
+
 
 Value in(Value in, Type type);
 Value literal(DataType t, StringRef literal);
@@ -92,20 +95,37 @@ Value slide(Nat n, Nat sz, Nat sp, DataType t);
 Value slide(Nat n, Nat sz, Nat sp, DataType t, Value array);
 Value padClamp(Nat n, Nat l, Nat r, DataType t);
 Value padClamp(Nat n, Nat l, Nat r, DataType t, Value array);
+// clang-format off
 Value lambda(FunType lambdaType,
              lambdaBodyBuilder bodyBuilder);
+Value lambda1(FunType lambdaType,
+             function_ref<Value(BlockArgument)> bodyBuilder);
+Value lambda2(FunType lambdaType,
+             function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda3(FunType lambdaType,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda4(FunType lambdaType,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda5(FunType lambdaType,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda6(FunType lambdaType,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+// clang-format on
+
 // TODO: Lambda with named args
-//Value mlir::edsc::op::lambda(
+// Value mlir::edsc::op::lambda(
 //    FunType lambdaType,
 //    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
 //
-//Value mlir::edsc::op::lambda(
+// Value mlir::edsc::op::lambda(
 //    FunType lambdaType,
-//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
+//    bodyBuilder);
 //
-//Value mlir::edsc::op::lambda(
+// Value mlir::edsc::op::lambda(
 //    FunType lambdaType,
-//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
+//    BlockArgument)> bodyBuilder);
 // Value embed(Type result, ValueRange exposedValues,
 // function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
 Value embed(Type result, ValueRange exposedValues,

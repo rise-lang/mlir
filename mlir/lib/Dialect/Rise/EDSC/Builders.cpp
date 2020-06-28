@@ -86,45 +86,6 @@ Value mlir::edsc::op::literal(DataType t, StringRef literal) {
                                  LiteralAttr::get(context, t, literal.str()));
 }
 
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
-                                DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  FunType reduceType = FunType::get(
-      context, FunType::get(context, s, FunType::get(context, t, t)),
-      FunType::get(context, t,
-                   FunType::get(context, ArrayType::get(context, n, s), t)));
-  return ValueBuilder<ReduceSeqOp>(
-      reduceType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
-      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
-}
-
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
-                                DataType t, Value lambda, Value initializer,
-                                Value array) {
-  Value reduceOp = reduceSeq(lowerTo, n, s, t);
-  return ValueBuilder<ApplyOp>(t, reduceOp,
-                               ValueRange{lambda, initializer, array});
-}
-
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Value lambda,
-                                Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(),
-                   arrayType.getElementType(), lambda, initializer, array);
-}
-
-Value mlir::edsc::op::reduceSeq(
-    StringRef lowerTo, DataType s, DataType t,
-    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder,
-    Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-
-  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(),
-                   arrayType.getElementType(),
-                   lambda(funtype(s, funtype(s, t)), bodyBuilder), initializer,
-                   array);
-}
-
 Value mlir::edsc::op::zip(Nat n, DataType s, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
   FunType zipType = FunType::get(
@@ -356,15 +317,63 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
   return mapSeq(lowerTo, arrayType.getSize(), s, t, lambda, array);
 }
 
-Value mlir::edsc::op::mapSeq(
-    StringRef lowerTo, DataType s, DataType t,
-    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder,
-    Value array) {
-  return mapSeq(lowerTo, s, t, lambda(funtype(s, t), bodyBuilder), array);
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  return mapSeq(lowerTo, s, t, lambda1(funtype(s, t), bodyBuilder), array);
 }
 
-// TODO: maybe change the builder to automatically introduce a return for the
-// last Value created in bodybuilder - replace void with Value
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+  return mapSeq(lowerTo, arrayType.getElementType(), t, bodyBuilder, array);
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
+                                DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType reduceType = FunType::get(
+      context, FunType::get(context, s, FunType::get(context, t, t)),
+      FunType::get(context, t,
+                   FunType::get(context, ArrayType::get(context, n, s), t)));
+  return ValueBuilder<ReduceSeqOp>(
+      reduceType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
+      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
+                                DataType t, Value lambda, Value initializer,
+                                Value array) {
+  Value reduceOp = reduceSeq(lowerTo, n, s, t);
+  return ValueBuilder<ApplyOp>(t, reduceOp,
+                               ValueRange{lambda, initializer, array});
+}
+
+// something fishy here! Type is not correct. It is scalar -> scalar instead of
+// tuple<scalar scalar> -> scalar
+Value mlir::edsc::op::reduceSeq(
+    StringRef lowerTo, DataType t,
+    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+    Value initializer, Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
+                   lambda2(funtype(t,
+                                   funtype(arrayType.getElementType(), t)),
+                           bodyBuilder),
+                   initializer, array);
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, DataType t, Value lambda,
+                                Value initializer, Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
+                   lambda, initializer, array);
+}
+
+// arbitrary number of args
 Value mlir::edsc::op::lambda(
     FunType lambdaType,
     function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
@@ -374,6 +383,90 @@ Value mlir::edsc::op::lambda(
         ScopedContext nestedContext(nestedBuilder, nestedLoc);
         OpBuilder::InsertionGuard guard(nestedBuilder);
         return bodyBuilder(args);
+      });
+}
+
+// one arg
+Value mlir::edsc::op::lambda1(FunType lambdaType,
+                              function_ref<Value(BlockArgument)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0]);
+      });
+}
+
+// two args
+Value mlir::edsc::op::lambda2(
+    FunType lambdaType,
+    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0], args[1]);
+      });
+}
+
+// three args
+Value mlir::edsc::op::lambda3(
+    FunType lambdaType,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
+        bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0], args[1], args[2]);
+      });
+}
+
+// four args
+Value mlir::edsc::op::lambda4(FunType lambdaType,
+                              function_ref<Value(BlockArgument, BlockArgument,
+                                                 BlockArgument, BlockArgument)>
+                                  bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0], args[1], args[2], args[3]);
+      });
+}
+
+// five args
+Value mlir::edsc::op::lambda5(
+    FunType lambdaType,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
+                       BlockArgument, BlockArgument)>
+        bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0], args[1], args[2], args[3], args[4]);
+      });
+}
+
+// six args
+Value mlir::edsc::op::lambda6(
+    FunType lambdaType,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
+                       BlockArgument, BlockArgument, BlockArgument)>
+        bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0], args[1], args[2], args[3], args[4],
+                           args[5]);
       });
 }
 
@@ -476,7 +569,8 @@ Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
       "loop", innerArrayType,
       array(nat(newInnerArraySize),
             array(szInner, innerArrayType.getElementType())),
-      [&](auto args) { return slide(szInner, spInner, args[0]); }, array2DVal);
+      [&](Value innerArray) { return slide(szInner, spInner, innerArray); },
+      array2DVal);
 
   Value afterSecondSlide = slide(szOuter, spOuter, afterFirstSlide);
 
@@ -492,7 +586,7 @@ Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
       array(afterSecondSlideElementElementType.getSize(),
             array(afterSecondSlideElementType.getSize(),
                   afterSecondSlideElementElementType.getElementType())),
-      [&](auto args) { return transpose(args[0]); }, afterSecondSlide);
+      [&](auto args) { return transpose(args); }, afterSecondSlide);
 
   return transposed;
 }
