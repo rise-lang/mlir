@@ -330,6 +330,13 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
   return mapSeq(lowerTo, arrayType.getElementType(), t, bodyBuilder, array);
 }
 
+Value mlir::edsc::op::mapSeq(DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+  return mapSeq("loop", arrayType.getElementType(), t, bodyBuilder, array);
+}
+
 Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
                                 DataType t) {
   MLIRContext *context = ScopedContext::getContext();
@@ -359,8 +366,20 @@ Value mlir::edsc::op::reduceSeq(
   ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
 
   return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
-                   lambda2(funtype(t,
-                                   funtype(arrayType.getElementType(), t)),
+                   lambda2(funtype(arrayType.getElementType(),
+                                   funtype(t, t)),
+                           bodyBuilder),
+                   initializer, array);
+}
+Value mlir::edsc::op::reduceSeq(
+    DataType t,
+    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+    Value initializer, Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq("loop", arrayType.getSize(), arrayType.getElementType(), t,
+                   lambda2(funtype(arrayType.getElementType(),
+                                   funtype(t, t)),
                            bodyBuilder),
                    initializer, array);
 }
@@ -370,6 +389,14 @@ Value mlir::edsc::op::reduceSeq(StringRef lowerTo, DataType t, Value lambda,
   ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
 
   return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
+                   lambda, initializer, array);
+}
+
+Value mlir::edsc::op::reduceSeq(DataType t, Value lambda,
+                                Value initializer, Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq("loop", arrayType.getSize(), arrayType.getElementType(), t,
                    lambda, initializer, array);
 }
 
@@ -497,11 +524,51 @@ Value mlir::edsc::op::embed(
   return ValueBuilder<EmbedOp>(
       result, exposedValues,
       [&](OpBuilder &nestedBuilder, Location nestedLoc,
-          MutableArrayRef<BlockArgument> args) -> Value {
+          MutableArrayRef<BlockArgument> args) {
         ScopedContext nestedContext(nestedBuilder, nestedLoc);
         OpBuilder::InsertionGuard guard(nestedBuilder);
         return bodyBuilder(args);
       });
+}
+
+Value mlir::edsc::op::embed1(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument)> bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+        return bodyBuilder(args[0]);
+      });
+}
+
+Value mlir::edsc::op::embed2(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+    return bodyBuilder(args[0], args[1]);
+  });
+}
+
+Value mlir::edsc::op::embed3(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+    return bodyBuilder(args[0], args[1], args[2]);
+  });
+}
+
+Value mlir::edsc::op::embed4(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+    return bodyBuilder(args[0], args[1], args[2], args[3]);
+  });
+}
+
+Value mlir::edsc::op::embed5(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+    return bodyBuilder(args[0], args[1], args[2], args[3], args[4]);
+  });
 }
 
 void mlir::edsc::op::rise_return(Value returnValue) {

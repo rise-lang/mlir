@@ -66,13 +66,20 @@ Value mapSeq(StringRef lowerTo, DataType s, DataType t,
              function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 Value mapSeq(StringRef lowerTo, DataType t,
              function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value mapSeq(StringRef lowerTo, DataType t,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value mapSeq(DataType t,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 
 // Value reduceSeq(Value lambda, Value initializer, Value array);
 Value reduceSeq(StringRef lowerTo, DataType t,
                 function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder, Value initializer, Value array);
 Value reduceSeq(StringRef lowerTo, DataType t,
                 Value lambda, Value initializer, Value array);
-
+Value reduceSeq(DataType t,
+                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder, Value initializer, Value array);
+Value reduceSeq(DataType t,
+                Value lambda, Value initializer, Value array);
 
 
 Value in(Value in, Type type);
@@ -128,8 +135,20 @@ Value lambda6(FunType lambdaType,
 //    BlockArgument)> bodyBuilder);
 // Value embed(Type result, ValueRange exposedValues,
 // function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
+
 Value embed(Type result, ValueRange exposedValues,
             function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder);
+Value embed1(Type result, ValueRange exposedValues,
+            function_ref<Value(BlockArgument)> bodyBuilder);
+Value embed2(Type result, ValueRange exposedValues,
+             function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
+Value embed3(Type result, ValueRange exposedValues,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value embed4(Type result, ValueRange exposedValues,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value embed5(Type result, ValueRange exposedValues,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda,
              Value array);
