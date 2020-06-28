@@ -191,6 +191,18 @@ def MapParOp : Rise_Op<"mapPar"> {
   let results = (outs FunType : $mapParFun);
 }
 
+def MapOp : Rise_Op<"map"> {
+  let summary = "mapPar";
+  let description =
+    "This operation returns a function which expects a function from s to t "
+    "and an array of length n. The function is to be applied to all elements "
+    "of the array in parallel.";
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
+  let parser = [{ return parse$cppClass(parser, result); }];
+
+  let results = (outs FunType : $mapFun);
+}
+
 def ReduceSeqOp : Rise_Op<"reduceSeq"> {
   let summary = "reduceSeq";
   let description =

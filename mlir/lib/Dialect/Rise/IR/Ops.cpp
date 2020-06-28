@@ -531,6 +531,36 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
+/// map: {n : nat} → {s t : data} → (s → t ) → n.s → n.t
+LogicalResult parseMapOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+
+  NatAttr n;
+  DataTypeAttr s, t;
+  //  result.setOperandListToResizable();
+
+  // length of array
+  if (parser.parseAttribute(n, "n", result.attributes))
+    failure();
+
+  // input array element type
+  if (parser.parseAttribute(s, "s", result.attributes))
+    failure();
+
+  // output array element type
+  if (parser.parseAttribute(t, "t", result.attributes))
+    failure();
+
+  result.addTypes(FunType::get(
+      builder.getContext(),
+      FunType::get(builder.getContext(), s.getValue(), t.getValue()),
+      FunType::get(
+          builder.getContext(),
+          ArrayType::get(builder.getContext(), n.getValue(), s.getValue()),
+          ArrayType::get(builder.getContext(), n.getValue(), t.getValue()))));
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // Reduce
 //===----------------------------------------------------------------------===//

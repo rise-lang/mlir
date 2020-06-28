@@ -630,6 +630,9 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
+  } else if (MapOp mapOp = dyn_cast<MapOp>(appliedFun)) {
+
+
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Fst";
 
@@ -764,6 +767,7 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else {
     emitRemark(appliedFun->getLoc())
         << "Can't lower the application of op: " << appliedFun->getName();
+    appliedFun->getParentOfType<FuncOp>().dump();
   }
 }
 
@@ -987,7 +991,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
                                         tmpArray.getResult());
 
         rewriter.setInsertionPointAfter(embedOp);
-
+        // TODO: This is not correct I think!
         AccT(apply, embedOp.getResult(), rewriter);
 
         return embedOp.getResult();

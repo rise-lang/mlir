@@ -202,31 +202,36 @@ Value mlir::edsc::op::split(Nat n, Nat m, DataType t, Value inArray) {
 }
 
 Value mlir::edsc::op::split(Nat n, Value inArray) {
-//  Value splitOp = split(n, m, t);
-//  return ValueBuilder<ApplyOp>(array(m, array(n, t)), splitOp, in_array);
-// TODO: do
-    return nullptr;
+  ArrayType inArrayType = inArray.getType().dyn_cast<ArrayType>();
+
+  return split(n, nat(inArrayType.getSize().getIntValue() / n.getIntValue()),
+               inArrayType.getElementType(), inArray);
 }
 
 Value mlir::edsc::op::join(Nat n, Nat m, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<SplitOp>(
-      funtype(array(m, array(n, t)), array(nat(n.getIntValue() * m.getIntValue()), t)),
+  return ValueBuilder<JoinOp>(
+      funtype(array(m, array(n, t)),
+              array(nat(n.getIntValue() * m.getIntValue()), t)),
       NatAttr::get(context, n), NatAttr::get(context, m),
       DataTypeAttr::get(context, t));
 }
 
 //// Do the join!
-//Value mlir::edsc::op::join(Nat n, Nat m, DataType t, Value inArray) {
-//  ArrayType in
-//
-//  Value joinOp = join(n, m, t);
-//  return ValueBuilder<ApplyOp>(array(nat(m.getIntValue() * n.getIntValue()), t), joinOp, inArray);
-//}
+Value mlir::edsc::op::join(Nat n, Nat m, DataType t, Value inArray) {
+  Value joinOp = join(n, m, t);
+  return ValueBuilder<ApplyOp>(array(nat(m.getIntValue() * n.getIntValue()), t),
+                               joinOp, inArray);
+}
 
+Value mlir::edsc::op::join(Value inArray) {
+  ArrayType inArrayType = inArray.getType().dyn_cast<ArrayType>();
+  ArrayType nestedArrayType =
+      inArrayType.getElementType().dyn_cast<ArrayType>();
 
-
-
+  return join(nestedArrayType.getSize(), inArrayType.getSize(),
+              nestedArrayType.getElementType(), inArray);
+}
 
 Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
