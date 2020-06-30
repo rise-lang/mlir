@@ -55,13 +55,13 @@ mlir::Type RiseDialect::parseType(DialectAsmParser &parser) const {
   if (succeeded(parser.parseOptionalKeyword("fun"))) {
     Type input;
     Type output;
-    if (parser.parseLess())
+    if (!succeeded(parser.parseLess()))
       return nullptr;
     input = parseType(parser);
-    if (parser.parseArrow())
+    if (!succeeded(parser.parseArrow()))
       return nullptr;
     output = parseType(parser);
-    if (parser.parseGreater())
+    if (!succeeded(parser.parseGreater()))
       return nullptr;
     return FunType::get(parser.getBuilder().getContext(), input, output);
   } else {
@@ -73,40 +73,37 @@ DataType RiseDialect::parseDataType(DialectAsmParser &parser) const {
   if (succeeded(parser.parseOptionalKeyword("tuple"))) {
     DataType first;
     DataType second;
-    if (parser.parseLess())
+    if (!succeeded(parser.parseLess()))
       return nullptr;
     first = parseDataType(parser);
-    if (parser.parseComma())
+    if (!succeeded(parser.parseComma()))
       return nullptr;
     second = parseDataType(parser);
-    if (parser.parseGreater())
+    if (!succeeded(parser.parseGreater()))
       return nullptr;
     return Tuple::get(parser.getBuilder().getContext(), first, second);
 
   } else if (succeeded(parser.parseOptionalKeyword("array"))) {
     DataType elementType;
     int elementCount;
-    if (parser.parseLess())
-      return nullptr;
-    parser.parseInteger(elementCount);
-    if (parser.parseComma())
+    if (!succeeded(parser.parseLess()) ||
+        !succeeded(parser.parseInteger(elementCount)) ||
+        !succeeded(parser.parseComma()))
       return nullptr;
     elementType = parseDataType(parser);
-    if (parser.parseGreater())
+    if (!succeeded(parser.parseGreater()))
       return nullptr;
     return ArrayType::get(
         parser.getBuilder().getContext(),
         Nat::get(parser.getBuilder().getContext(), elementCount), elementType);
 
   } else if (succeeded(parser.parseOptionalKeyword("scalar"))) {
-    // parsing of !rise.scalar
-
     Type wrappedType;
-    if (parser.parseLess() || parser.parseType(wrappedType) ||
-        parser.parseGreater())
+    if (!succeeded(parser.parseLess()) ||
+        !succeeded(parser.parseType(wrappedType)) ||
+        !succeeded(parser.parseGreater()))
       return nullptr;
 
-    // todo specify valid wrapped types
     return ScalarType::get(parser.getBuilder().getContext(), wrappedType);
   } else
     return nullptr;
@@ -155,11 +152,11 @@ mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
   // TODO: implement parsing of different literals
 
   if (succeeded(parser.parseOptionalKeyword("lit"))) {
-    if (parser.parseLess())
+    if (!succeeded(parser.parseLess()))
       return nullptr;
     double literalValue;
     if (succeeded(parser.parseFloat(literalValue))) {
-      if (parser.parseGreater())
+      if (!succeeded(parser.parseGreater()))
         return nullptr;
       return LiteralAttr::get(
           getContext(),
@@ -167,10 +164,11 @@ mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
           std::to_string(literalValue));
     }
   } else if (succeeded(parser.parseOptionalKeyword("nat"))) {
-    if (parser.parseLess())
+    if (!succeeded(parser.parseLess()))
       return nullptr;
     int natValue;
-    if (parser.parseInteger(natValue) || parser.parseGreater())
+    if (!succeeded(parser.parseInteger(natValue)) ||
+        !succeeded(parser.parseGreater()))
       return nullptr;
     return NatAttr::get(getContext(), Nat::get(getContext(), natValue));
   } else {

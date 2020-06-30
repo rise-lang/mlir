@@ -2,7 +2,7 @@
 
 func @print_memref_f32(memref<*xf32>)
 
-// lets do A:10x2 * B:2x5 = C:10x5
+// A:10x2 * B:2x5 = C:10x5
 func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5xf32>) {
     %A = rise.in %inA : !rise.array<10, array<2, scalar<f32>>>
     %B = rise.in %inB : !rise.array<2, array<5, scalar<f32>>>
@@ -74,19 +74,14 @@ func @mm() {
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
             store %interm, %val[] : memref<f32>
-            // transposed here
             store %interm, %A[%arg0, %arg1] : memref<10x2xf32>
         }
     }
 
-//    %A = alloc() : memref<4x4xf32>
-//    %cst_0 = constant 5.000000e+00 : f32
-//    linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
     %cBrows = constant 2 : index
     %cBcols = constant 5 : index
     %B = alloc() : memref<2x5xf32>
-//    %cst_1 = constant 5.000000e+00 : f32
-//    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
+
     scf.for %arg0 = %c0 to %cBrows step %c1 {
         scf.for %arg1 = %c0 to %cBcols step %c1 {
             %val_loaded = load %val[] : memref<f32>

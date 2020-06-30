@@ -78,25 +78,18 @@ func @mm() {
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
             store %interm, %val[] : memref<f32>
-            // transposed here
             store %interm, %A[%arg1, %arg0] : memref<2048x2048xf32>
         }
     }
 
-//    %A = alloc() : memref<4x4xf32>
-//    %cst_0 = constant 5.000000e+00 : f32
-//    linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
-
     %B = alloc() : memref<2048x2048xf32>
-//    %cst_1 = constant 5.000000e+00 : f32
-//    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
-    scf.for %arg0 = %c0 to %c16 step %c1 {
+    scf.for %i = %c0 to %c16 step %c1 {
         scf.for %arg1 = %c0 to %c16 step %c1 {
             %val_loaded = load %val[] : memref<f32>
             %cst1_loaded = load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
             store %interm, %val[] : memref<f32>
-            store %interm, %B[%arg0, %arg1] : memref<2048x2048xf32>
+            store %interm, %B[%i, %arg1] : memref<2048x2048xf32>
         }
     }
 
@@ -104,7 +97,6 @@ func @mm() {
     call @rise_fun(%outputArray, %A, %B) : (memref<2048x2048xf32>, memref<2048x2048xf32>, memref<2048x2048xf32>) -> ()
     %t1 = call @rtclock() : () -> (f64)
     %ci1 = constant 17179869184 : i64 // Number of flops to compute
-
 
     %print_me = memref_cast %outputArray : memref<2048x2048xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()

@@ -3,7 +3,6 @@
 func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
-    // This way we dont have to handle moving the block arguments anymore.
         %array = rise.in %in : !rise.array<6, scalar<f32>>
 
         %split = rise.split #rise.nat<2> #rise.nat<3> #rise.scalar<f32>

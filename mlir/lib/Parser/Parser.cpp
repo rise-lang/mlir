@@ -24,6 +24,7 @@
 #include "mlir/IR/Module.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/StandardTypes.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/IR/Verifier.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
@@ -34,8 +35,7 @@
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 #include <algorithm>
-#include <iostream>
-#include <mlir/Dialect/Rise/IR/Types.h>
+
 using namespace mlir;
 using llvm::MemoryBuffer;
 using llvm::SMLoc;
@@ -2312,7 +2312,6 @@ ParseResult TensorLiteralParser::parseList(SmallVectorImpl<int64_t> &dims) {
   // Return the sublists' dimensions with 'size' prepended.
   dims.clear();
   dims.push_back(size);
-  std::cout << "size pushed back!: " << size << "\n" << std::flush;
   dims.append(newDims.begin(), newDims.end());
   return success();
 }
@@ -3399,7 +3398,7 @@ public:
 
   /// Given a reference to an SSA value, return a reference. This
   /// returns null on failure.
-  Value resolveSSAUseUnsafe(SSAUseInfo useInfo);
+  Value resolveSSAUse(SSAUseInfo useInfo);
 
   ParseResult parseSSADefOrUseAndType(
       const std::function<ParseResult(SSAUseInfo, Type)> &action);
@@ -3758,9 +3757,9 @@ Value OperationParser::resolveSSAUse(SSAUseInfo useInfo, Type type) {
   return result;
 }
 
-/// Given an unbound reference to an SSA value and its type, return the value
+/// Given an unbound reference to an SSA value, return the value
 /// it specifies.  This returns null on failure.
-Value OperationParser::resolveSSAUseUnsafe(SSAUseInfo useInfo) {
+Value OperationParser::resolveSSAUse(SSAUseInfo useInfo) {
   auto &entries = getSSAValueEntry(useInfo.name);
 
   // If we have already seen a value of this name, return it.
@@ -4491,11 +4490,11 @@ public:
   }
 
   /// Resolve an operand to an SSA value, emitting an error on failure.
-  ParseResult resolveOperandUnsafe(const OperandType &operand,
+  ParseResult resolveOperand(const OperandType &operand,
                                    SmallVectorImpl<Value> &result) override {
     OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
                                                operand.location};
-    if (auto value = parser.resolveSSAUseUnsafe(operandInfo)) {
+    if (auto value = parser.resolveSSAUse(operandInfo)) {
       result.push_back(value);
       return success();
     }

@@ -116,7 +116,7 @@ LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
     return failure();
 
   for (auto operand : operands)
-    parser.resolveOperandUnsafe(operand, result.operands);
+    parser.resolveOperand(operand, result.operands);
 
   for (auto val : result.operands) {
     argumentTypes.push_back(val.getType());
@@ -201,7 +201,7 @@ LogicalResult parseInOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOperand(operand))
     return failure();
 
-  parser.resolveOperandUnsafe(operand, result.operands);
+  parser.resolveOperand(operand, result.operands);
   // alternatively parse Memref and create one of our types for it.
 
   Type riseType;
@@ -223,7 +223,7 @@ LogicalResult parseOutOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOperand(outputOperand))
     return failure();
 
-  parser.resolveOperandUnsafe(outputOperand, result.operands);
+  parser.resolveOperand(outputOperand, result.operands);
 
   if (parser.parseLess() || parser.parseMinus())
     return failure();
@@ -231,7 +231,7 @@ LogicalResult parseOutOp(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOperand(resultOperand))
     return failure();
 
-  parser.resolveOperandUnsafe(resultOperand, result.operands);
+  parser.resolveOperand(resultOperand, result.operands);
 
   return success();
 }
@@ -315,6 +315,8 @@ void LambdaOp::build(
 // ApplyOp
 //===----------------------------------------------------------------------===//
 LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
+  // setting false here enables the requirement to explicitly give the type of
+  // the applied function
   bool simplified = true;
 
   auto &builder = parser.getBuilder();
@@ -334,16 +336,11 @@ LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
       return failure();
   }
 
-  // TODO: we dont want to have to explicitly give our type
-  /// resolve operand adds it to the operands of this operation.
-  /// I have not found another way to add it, yet
-  /// result.addOperands expects a mlir::Value, which has to contain the Type
-  /// of the Operand already, which I don't know here
   if (!simplified) {
     if (parser.resolveOperand(funOperand, funType, result.operands))
       failure();
   } else {
-    if (parser.resolveOperandUnsafe(funOperand, result.operands))
+    if (parser.resolveOperand(funOperand, result.operands))
       failure();
   }
   funType = result.operands.front().getType().dyn_cast<FunType>();

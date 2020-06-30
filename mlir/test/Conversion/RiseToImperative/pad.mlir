@@ -52,7 +52,7 @@ func @stencil() {
 
     %print_me_in = memref_cast %inputArray : memref<9xf32> to memref<*xf32>
     %print_me_out = memref_cast %outputArray : memref<14xf32> to memref<*xf32>
-//    call @print_memref_f32(%print_me_in): (memref<*xf32>) -> ()
+    call @print_memref_f32(%print_me_in): (memref<*xf32>) -> ()
     call @print_memref_f32(%print_me_out): (memref<*xf32>) -> ()
     return
 }
