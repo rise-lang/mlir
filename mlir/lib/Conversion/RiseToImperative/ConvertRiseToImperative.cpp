@@ -102,9 +102,10 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     if (!inst)
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
-        isa<MapParOp>(inst) || isa<ReduceSeqOp>(inst) || isa<OutOp>(inst) ||
-        isa<LiteralOp>(inst) || isa<TransposeOp>(inst) || isa<SplitOp>(inst) ||
-        isa<JoinOp>(inst) || isa<SlideOp>(inst) || isa<PadOp>(inst)) {
+        isa<MapParOp>(inst) || isa<MapOp>(inst) || isa<ReduceSeqOp>(inst) ||
+        isa<OutOp>(inst) || isa<LiteralOp>(inst) || isa<TransposeOp>(inst) ||
+        isa<SplitOp>(inst) || isa<JoinOp>(inst) || isa<SlideOp>(inst) ||
+        isa<PadOp>(inst)) {
       if (inst->getParentOfType<LambdaOp>()) {
       } else {
         leftoverOps.push_back(inst);
@@ -737,41 +738,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
 
     AccT(returnOp, out, rewriter);
     return;
-  } else if (isa<AddOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Add";
-
-    auto summand0 = apply.getOperand(1);
-    auto summand1 = apply.getOperand(2);
-
-    auto contSummand0 = ConT(summand0, rewriter.getInsertionPoint(), rewriter);
-    auto contSummand1 = ConT(summand1, rewriter.getInsertionPoint(), rewriter);
-
-    auto newAddOp = rewriter.create<BinaryOp>(
-        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        StringAttr::get("add", rewriter.getContext()), contSummand0,
-        contSummand1);
-    auto assignment = rewriter.create<AssignOp>(appliedFun->getLoc(),
-                                                newAddOp.getResult(), out);
-
-    return;
-  } else if (isa<MulOp>(appliedFun)) {
-    emitRemark(appliedFun->getLoc()) << "AccT of Mul";
-
-    auto factor0 = apply.getOperand(1);
-    auto factor1 = apply.getOperand(2);
-
-    auto contFactor0 = ConT(factor0, rewriter.getInsertionPoint(), rewriter);
-    auto contFactor1 = ConT(factor1, rewriter.getInsertionPoint(), rewriter);
-
-    auto newMulOp = rewriter.create<BinaryOp>(
-        appliedFun->getLoc(), FloatType::getF32(rewriter.getContext()),
-        StringAttr::get("mul", rewriter.getContext()), contFactor0,
-        contFactor1);
-
-    auto assignment = rewriter.create<AssignOp>(appliedFun->getLoc(),
-                                                newMulOp.getResult(), out);
-
-    return;
   } else {
     emitRemark(appliedFun->getLoc())
         << "Can't lower the application of op: " << appliedFun->getName();
@@ -855,8 +821,9 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
     } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
       emitRemark(contValue.getLoc()) << "ConT of Lambda";
 
-//      emitError(loc)
-//          << "We dont lower Lambdas using the function ConT right now.";
+      // not correct in general
+      //      emitError(loc)
+      //          << "We dont lower Lambdas using the function ConT right now.";
       // A Lambda has only one block
       Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
 
@@ -1034,15 +1001,24 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         auto s = mapOp.getAttrOfType<DataTypeAttr>("s");
         auto t = mapOp.getAttrOfType<DataTypeAttr>("t");
 
-        auto f = apply.getOperand(1);
+        LambdaOp f = dyn_cast<LambdaOp>(apply.getOperand(1).getDefiningOp());
         auto array = apply.getOperand(2);
         auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
-        auto contF = ConT(f, rewriter.getInsertionPoint(), rewriter);
-        // TODO: continue here: replace args of lambdas with the idx somehow.
-        //        what should the idx have as args? idx()
+
+        // The idx which is needed in the lambda can only be generated in the
+        // second part of the codegen
+        auto placeholder = rewriter.create<PlaceholderOp>(
+            mapOp.getLoc(), f.region().front().getArgument(0).getType());
+        Substitute(f, {placeholder});
+
+        rise::ReturnOp returnOp =
+            dyn_cast<rise::ReturnOp>(f.region().front().getTerminator());
+        auto contF = ConT(returnOp.getOperand(0), rewriter.getInsertionPoint(),
+                          rewriter);
 
         auto mapRead = rewriter.create<MapReadIntermediateOp>(
-            mapOp.getLoc(), apply.getType(), n, s, t, contF, contArray);
+            mapOp.getLoc(), apply.getType(), n, s, t, contF, placeholder,
+            contArray);
 
         return mapRead;
       } else {
@@ -1257,27 +1233,25 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       Value arg1 = idx.arg1();
       path.push_back(arg1);
       return codeGen(idx.arg0(), path, rewriter);
-    } else if (BinaryOp binOp = dyn_cast<BinaryOp>(val.getDefiningOp())) {
-      emitRemark(binOp.getLoc()) << "Codegen for binOp";
-
-      auto arg0 = codeGen(binOp.arg0(), {}, rewriter);
-      auto arg1 = codeGen(binOp.arg1(), {}, rewriter);
-      if (binOp.op().equals("add")) {
-        return rewriter.create<AddFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
-            .getResult();
-      } else if (binOp.op().equals("mul")) {
-        return rewriter.create<MulFOp>(val.getLoc(), arg0.getType(), arg0, arg1)
-            .getResult();
-      } else {
-        emitError(binOp.getLoc())
-            << "Cannot create code for binOp:" << binOp.op();
-        return binOp.getResult();
-      }
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
       emitRemark(alloc.getLoc()) << "Codegen for alloc";
 
       // call to reverse here.
       return generateWriteAccess(path, alloc.getResult(), rewriter);
+    } else if (MapReadIntermediateOp mapReadOp =
+                   dyn_cast<MapReadIntermediateOp>(val.getDefiningOp())) {
+      emitRemark(mapReadOp.getLoc()) << "Codegen for MapRead";
+
+      //      mapReadOp.array().getDefiningOp()->dump();
+      auto i = mpark::get<Value>(path.pop_back_val());
+      auto idx = rewriter.create<IdxOp>(
+          mapReadOp.getLoc(),
+          mapReadOp.array().getType().dyn_cast<ArrayType>().getElementType(),
+          mapReadOp.array(), i);
+
+      mapReadOp.placeholder().replaceAllUsesWith(idx.getResult());
+
+      return codeGen(mapReadOp.f(), path, rewriter);
     } else if (ZipIntermediateOp zipIntermOp =
                    dyn_cast<ZipIntermediateOp>(val.getDefiningOp())) {
       emitRemark(zipIntermOp.getLoc()) << "Codegen for zip";

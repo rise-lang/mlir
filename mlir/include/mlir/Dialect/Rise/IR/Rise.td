@@ -52,12 +52,7 @@ def ScalarType : Type<CPred<"$_self.isa<ScalarType>()">, "scalar type">;
 def DataType
     : Type<
           Or<[TupleType.predicate, ArrayType.predicate, ScalarType.predicate]>>;
-def NatOrDataType : Type<Or<[NatType.predicate, DataType.predicate]>>;
-
 def FunType : Type<CPred<"$_self.isa<FunType>()">, "fun type">;
-def DataTypeWrapper
-    : Type<CPred<"$_self.isa<DataTypeWrapper>()">, "data fun type">;
-def RiseType : Type<Or<[FunType.predicate, DataTypeWrapper.predicate]>>;
 
 /// Attribute predicates
 def DataTypeAttr
@@ -117,37 +112,38 @@ def ApplyOp : Rise_Op<"apply"> {
 
 def InOp : Rise_Op<"in"> {
   let summary = "rise in";
-  let description = "";
+  let description = "Expects a Memref and associates it with a Rise DataType.";
   let arguments = (ins AnyMemRef : $input);
-  let results = (outs AnyType : $output);
+  let results = (outs DataType : $output);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def OutOp : Rise_Op<"out"> {
   let summary = "rise out";
-  let arguments = (ins AnyType : $output, AnyType : $input);
+  let description =
+      "Specifies a Memref to write a rise Value to. This "
+      "operation is used as entry point for lowering a rise program.";
+  let arguments = (ins AnyMemRef : $output, AnyType : $input);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 def EmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let summary = "rise embed";
-  let arguments = (ins Variadic<ScalarType> : $exposedValues);  // This is not really used. We have region arguments, not "normal" arguments.
+  let description =
+      "This operation is used for explicitly embedding "
+      "operations of other dialects inside a rise translation "
+      "unit while bridging between the type systems. The arguments of type "
+      "!rise.scalar<wrappedType> given to this operation are exposed inside "
+      "its region with their corresponding wrappedTypes.";
+  let arguments = (ins Variadic<ScalarType> : $exposedValues);
   let results = (outs AnyType : $wrapped);
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;
-  let builders = [
-    //    OpBuilder<
-    //      "OpBuilder &builder, OperationState &result, "
-    //      "Type wrapped, ValueRange exposedValues, function_ref<void(OpBuilder
-    //      "
-    //      "&, Location, MutableArrayRef<BlockArgument>)> "
-    //      "bodyBuilder = nullptr">,
-    OpBuilder<
-        "OpBuilder &builder, OperationState &result, "
-        "Type wrapped, ValueRange exposedValues, function_ref<Value(OpBuilder "
-        "&, Location, MutableArrayRef<BlockArgument>)> "
-        "bodyBuilder = nullptr">
-  ];
+  let builders = [OpBuilder<
+      "OpBuilder &builder, OperationState &result, "
+      "Type wrapped, ValueRange exposedValues, function_ref<Value(OpBuilder "
+      "&, Location, MutableArrayRef<BlockArgument>)> "
+      "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -155,8 +151,7 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
   let summary = "rise terminator operation";
   let description =
       "This operation is used as a terminator for the region of a lambda and "
-      "embed. "
-      "We will experiment with using the standard return operation instead.";
+      "embed. ";
   let arguments = (ins Variadic<AnyType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
   let builders = [OpBuilder<"OpBuilder &b, OperationState &result",
@@ -169,10 +164,11 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
 
 def MapSeqOp : Rise_Op<"mapSeq"> {
   let summary = "mapSeq";
-  let description =
-      "This operation returns a function which expects a function from s to t "
-      "and an array of length n. The function is to be applied sequentially to "
-      "all elements of the array.";
+  let description = "The mapSeq operation represents the mapSeq pattern. ";
+
+  //      "This operation returns a function which expects a function from s to
+  //      t " "and an array of length n. The function is to be applied
+  //      sequentially to " "all elements of the array.";
   let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, OptionalAttr<StrAttr> : $to);
   let parser = [{ return parse$cppClass(parser, result); }];
 
@@ -194,9 +190,9 @@ def MapParOp : Rise_Op<"mapPar"> {
 def MapOp : Rise_Op<"map"> {
   let summary = "map";
   let description =
-    "This operation returns a function which expects a function from s to t "
-    "and an array of length n. The function is to be applied to all elements "
-    "of the array in parallel.";
+      "This operation returns a function which expects a function from s to t "
+      "and an array of length n. The function is to be applied to all elements "
+      "of the array in parallel.";
   let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t);
   let parser = [{ return parse$cppClass(parser, result); }];
 
@@ -261,6 +257,11 @@ def SndOp : Rise_Op<"snd"> {
 
 def SplitOp : Rise_Op<"split"> {
   let summary = "split";
+  let description =
+      "The split operation expects a natural number n, an array of length m."
+      "Its application to an array of size n*m returns a nested array of "
+      "length m/n where every element is an array of size n. The value of the "
+      "elements of the input array remains the same.";
   let arguments = (ins NatAttr : $n, NatAttr : $m, DataTypeAttr : $t);
   let results = (outs FunType : $splitFun);
   let parser = [{ return parse$cppClass(parser, result); }];
@@ -325,15 +326,20 @@ def CastOp : Rise_Op<"codegen.cast"> {
   let results = (outs DataType);
 }
 
-def BinaryOp : Rise_Op<"codegen.bin_op"> {
-  let summary = "rise bin_op";
-  let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
+def MapReadIntermediateOp : Rise_Op<"codegen.mapread"> {
+  let summary = "rise codegen.mapread";
+  let arguments = (ins NatAttr
+                   : $n, DataTypeAttr
+                   : $s, DataTypeAttr
+                   : $t, AnyType
+                   : $f, AnyType
+                   : $placeholder, AnyType
+                   : $array);
   let results = (outs AnyType : $output);
 }
 
-def MapReadIntermediateOp : Rise_Op<"codegen.mapread"> {
-  let summary = "rise mapread";
-  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, AnyType : $f, AnyType : $array);
+def PlaceholderOp : Rise_Op<"codegen.placeholder"> {
+  let summary = "rise codegen.placeholder";
   let results = (outs AnyType : $output);
 }
 
@@ -431,32 +437,6 @@ def PadIntermediateOp : Rise_Op<"codegen.pad"> {
 def AssignOp : Rise_Op<"codegen.assign"> {
   let summary = "rise assign";
   let arguments = (ins AnyType : $value, AnyType : $assignee);
-}
-
-//===----------------------------------------------------------------------===//
-// Arithmetic operations
-//===----------------------------------------------------------------------===//
-
-def AddOp : Rise_Op<"add"> {
-  let summary = "rise add operation";
-  let description =
-      "This operation returns a function which expects two arguments of type "
-      "t and returns their sum of type t. We will experiment with adopting "
-      "the standard arithmetics operations.";
-  let arguments = (ins DataTypeAttr : $t);
-  let results = (outs FunType : $addFun);
-  let parser = [{ return parse$cppClass(parser, result); }];
-}
-
-def MulOp : Rise_Op<"mul"> {
-  let summary = "rise mul operation";
-  let description =
-      "This operation returns a function which expects two arguments of type "
-      "t and returns their product of type t. We will experiment with adopting "
-      "the standard arithmetics operations.";
-  let arguments = (ins DataTypeAttr : $t);
-  let results = (outs FunType : $mulFun);
-  let parser = [{ return parse$cppClass(parser, result); }];
 }
 
 #endif // RISE_OPS
