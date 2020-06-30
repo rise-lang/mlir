@@ -25,121 +25,91 @@ using namespace mlir::rise;
 
 namespace mlir {
 namespace edsc {
-// arrayT
 namespace type {
-FunType funtype(Type in, Type out);
-Nat nat(int val);
-ArrayType array(Nat size, DataType elemType);
-ArrayType array(int size, DataType elemType);
-ArrayType array2D(Nat outerSize, Nat innerSize, DataType elemType);
-ArrayType array2D(int outerSize, int innerSize, DataType elemType);
-ArrayType array3D(Nat outerSize, Nat midSize, Nat innerSize, DataType elemType);
-ArrayType array3D(int outerSize, int midSize, int innerSize, DataType elemType);
-Tuple tuple(DataType lhs, DataType rhs);
-ScalarType scalar(Type wrappedType);
-ScalarType scalarF32();
-ScalarType scalarF64();
+
+FunType funType(Type in, Type out);
+Nat natType(int val);
+ArrayType arrayType(Nat size, DataType elemType);
+ArrayType arrayType(int size, DataType elemType);
+ArrayType array2DType(Nat outerSize, Nat innerSize, DataType elemType);
+ArrayType array2DType(int outerSize, int innerSize, DataType elemType);
+ArrayType array3DType(Nat outerSize, Nat midSize, Nat innerSize,
+                      DataType elemType);
+ArrayType array3DType(int outerSize, int midSize, int innerSize,
+                      DataType elemType);
+Tuple tupleType(DataType lhs, DataType rhs);
+ScalarType scalarType(Type wrappedType);
+ScalarType scalarF32Type();
+ScalarType scalarF64Type();
 } // namespace type
 
 namespace abstraction {
 Value slide2d(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
               Value array2DVal);
 
-Value sumLambda(ScalarType summandType);
-Value multAndSumUpLambda(ScalarType summandType);
+Value sumLambda(ScalarType summandType);          // return val1 + val2
+Value multAndSumUpLambda(ScalarType summandType); // return (val1 + val2) * val3
 
 } // namespace abstraction
 
 namespace op {
 using lambdaBodyBuilder = function_ref<Value(MutableArrayRef<BlockArgument>)>;
 
-// frontend edsc
-Value padClamp(Nat l, Nat r, Value array);
-Value slide(Nat sz, Nat sp, Value array);
-Value fst(Value tuple);
-Value snd(Value tuple);
-Value zip(Value lhs, Value rhs);
-Value transpose(Value array);
-Value mapSeq(StringRef lowerTo, DataType s, DataType t, Value lambda,
-             Value array);
-Value mapSeq(StringRef lowerTo, DataType s, DataType t,
-             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
-Value mapSeq(StringRef lowerTo, DataType t,
-             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
-Value mapSeq(StringRef lowerTo, DataType t,
-             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
-Value mapSeq(DataType t,
-             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+//===----------------------------------------------------------------------===//
+// Rise Frontend EDSC
+//===----------------------------------------------------------------------===//
 
-// Value reduceSeq(Value lambda, Value initializer, Value array);
-Value reduceSeq(StringRef lowerTo, DataType t,
-                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder, Value initializer, Value array);
-Value reduceSeq(StringRef lowerTo, DataType t,
-                Value lambda, Value initializer, Value array);
-Value reduceSeq(DataType t,
-                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder, Value initializer, Value array);
-Value reduceSeq(DataType t,
-                Value lambda, Value initializer, Value array);
+// Core Lambda-Calculus
+Value lambda(FunType lambdaType, lambdaBodyBuilder bodyBuilder);
+Value apply(DataType resultType, Value fun, ValueRange args);
 
-
+// Interoperability
 Value in(Value in, Type type);
-Value literal(DataType t, StringRef literal);
-Value zip(Nat n, DataType s, DataType t);
-Value zip(Nat n, DataType s, DataType t, Value lhs, Value rhs);
-Value fst(DataType s, DataType t);
-Value fst(DataType s, DataType t, Value tuple);
-Value snd(DataType s, DataType t);
-Value snd(DataType s, DataType t, Value tuple);
-Value split(Nat n, Nat m, DataType t);
-Value split(Nat n, Nat m, DataType t, Value array);
-Value split(Nat n, Value inArray);
-Value join(Nat n, Nat m, DataType t);
-Value join(Nat n, Nat m, DataType t, Value array);
-Value join(Value inArray);
-Value transpose(Nat n, Nat m, DataType t);
-Value transpose(Nat n, Nat m, DataType t, Value array);
-Value slide(Nat n, Nat sz, Nat sp, DataType t);
-Value slide(Nat n, Nat sz, Nat sp, DataType t, Value array);
-Value padClamp(Nat n, Nat l, Nat r, DataType t);
-Value padClamp(Nat n, Nat l, Nat r, DataType t, Value array);
-// clang-format off
-Value lambda(FunType lambdaType,
-             lambdaBodyBuilder bodyBuilder);
-Value lambda1(FunType lambdaType,
-             function_ref<Value(BlockArgument)> bodyBuilder);
-Value lambda2(FunType lambdaType,
-             function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
-Value lambda3(FunType lambdaType,
-             function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
-Value lambda4(FunType lambdaType,
-             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
-Value lambda5(FunType lambdaType,
-             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
-Value lambda6(FunType lambdaType,
-             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
-// clang-format on
-
-// TODO: Lambda with named args
-// Value mlir::edsc::op::lambda(
-//    FunType lambdaType,
-//    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
-//
-// Value mlir::edsc::op::lambda(
-//    FunType lambdaType,
-//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
-//    bodyBuilder);
-//
-// Value mlir::edsc::op::lambda(
-//    FunType lambdaType,
-//    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
-//    BlockArgument)> bodyBuilder);
-// Value embed(Type result, ValueRange exposedValues,
-// function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder);
-
+void out(Value writeTo, Value result);
 Value embed(Type result, ValueRange exposedValues,
             function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder);
+void rise_return(Value returnValue);
+
+// Patterns
+Value mapSeq(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
+             Value array);
+Value mapSeq(StringRef lowerTo, DataType resultElemType,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value map(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
+          Value array);
+Value reduceSeq(DataType resulType,
+                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+                Value initializer, Value array);
+Value zip(Value lhs, Value rhs);
+// Value tuple(Value lhs, Value rhs);
+Value fst(Value tuple);
+Value snd(Value tuple);
+Value split(Nat n, Value array);
+Value join(Value array);
+Value transpose(Value array);
+Value slide(Nat windowSize, Nat step, Value array);
+Value padClamp(Nat l, Nat r, Value array);
+Value literal(DataType t, StringRef literal);
+
+//===----------------------------------------------------------------------===//
+// Rise other convenience EDSC
+//===----------------------------------------------------------------------===//
+
+// clang-format off
+Value lambda1(FunType lambdaType,
+              function_ref<Value(BlockArgument)> bodyBuilder);
+Value lambda2(FunType lambdaType,
+              function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda3(FunType lambdaType,
+              function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda4(FunType lambdaType,
+              function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda5(FunType lambdaType,
+              function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+Value lambda6(FunType lambdaType,
+              function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
 Value embed1(Type result, ValueRange exposedValues,
-            function_ref<Value(BlockArgument)> bodyBuilder);
+             function_ref<Value(BlockArgument)> bodyBuilder);
 Value embed2(Type result, ValueRange exposedValues,
              function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder);
 Value embed3(Type result, ValueRange exposedValues,
@@ -148,16 +118,46 @@ Value embed4(Type result, ValueRange exposedValues,
              function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
 Value embed5(Type result, ValueRange exposedValues,
              function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
-
+Value embed6(Type result, ValueRange exposedValues,
+             function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder);
+// clang-format on
+Value mapSeq(StringRef lowerTo, DataType s, DataType t, Value lambda,
+             Value array);
+Value mapSeq(StringRef lowerTo, DataType s, DataType t,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value mapSeq(StringRef lowerTo, DataType t,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda,
              Value array);
+Value map(DataType t, Value lambda, Value array);
+Value map(Nat n, DataType s, DataType t, Value lambda);
+Value map(Nat n, DataType s, DataType t, Value lambda, Value array);
+Value reduceSeq(StringRef lowerTo, DataType t,
+                function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+                Value initializer, Value array);
+Value reduceSeq(StringRef lowerTo, DataType t, Value lambda, Value initializer,
+                Value array);
+Value reduceSeq(DataType t, Value lambda, Value initializer, Value array);
 Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value reduceSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda,
                 Value initializer, Value array);
-
-void rise_return(Value returnValue);
-void out(Value writeTo, Value result);
+Value zip(Nat n, DataType s, DataType t);
+Value zip(Nat n, DataType s, DataType t, Value lhs, Value rhs);
+Value fst(DataType s, DataType t);
+Value fst(DataType s, DataType t, Value tuple);
+Value snd(DataType s, DataType t);
+Value snd(DataType s, DataType t, Value tuple);
+Value split(Nat n, Nat m, DataType t);
+Value split(Nat n, Nat m, DataType t, Value array);
+Value join(Nat n, Nat m, DataType t);
+Value join(Nat n, Nat m, DataType t, Value array);
+Value transpose(Nat n, Nat m, DataType t);
+Value transpose(Nat n, Nat m, DataType t, Value array);
+Value slide(Nat n, Nat sz, Nat sp, DataType t);
+Value slide(Nat n, Nat sz, Nat sp, DataType t, Value array);
+Value padClamp(Nat n, Nat l, Nat r, DataType t);
+Value padClamp(Nat n, Nat l, Nat r, DataType t, Value array);
 
 } // namespace op
 

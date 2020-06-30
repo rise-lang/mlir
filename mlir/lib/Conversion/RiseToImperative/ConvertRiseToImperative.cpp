@@ -631,7 +631,15 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
     return;
   } else if (MapOp mapOp = dyn_cast<MapOp>(appliedFun)) {
+    //     For now we treat all maps as mapSeqs
+    auto n = appliedFun->getAttrOfType<NatAttr>("n");
+    auto s = appliedFun->getAttrOfType<DataTypeAttr>("s");
+    auto t = appliedFun->getAttrOfType<DataTypeAttr>("t");
 
+    auto f = apply.getOperand(1);
+    auto array = apply.getOperand(2);
+
+    auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
 
   } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
     emitRemark(appliedFun->getLoc()) << "AccT of Fst";
@@ -786,6 +794,7 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
                                      .getValue();
 
       emitRemark(contValue.getLoc()) << "Literal value: " << literalValue;
+      contValue.getDefiningOp()->getParentOfType<FuncOp>().dump();
 
       if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
         if (op.literalAttr()
@@ -846,21 +855,17 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
     } else if (isa<LambdaOp>(contValue.getDefiningOp())) {
       emitRemark(contValue.getLoc()) << "ConT of Lambda";
 
-      emitError(loc)
-          << "We dont lower Lambdas using the function ConT right now.";
+//      emitError(loc)
+//          << "We dont lower Lambdas using the function ConT right now.";
       // A Lambda has only one block
       Block &block = cast<LambdaOp>(contValue.getDefiningOp()).region().front();
-      // For now start at the back and just find the first apply
-      ApplyOp lastApply;
-      for (auto op = block.rbegin(); op != block.rend(); op++) {
-        if (isa<ApplyOp>(*op)) {
-          lastApply = cast<ApplyOp>(*op);
-          break;
-        }
-      }
+
+      // I think we have to substitute first.
 
       // Finding the return from the chunk of rise IR
       rise::ReturnOp returnOp = dyn_cast<rise::ReturnOp>(block.getTerminator());
+      return ConT(returnOp.getOperand(0), rewriter.getInsertionPoint(),
+                  rewriter);
 
     } else if (ApplyOp apply = dyn_cast<ApplyOp>(contValue.getDefiningOp())) {
 
@@ -1022,6 +1027,24 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         AccT(apply, embedOp.getResult(), rewriter);
 
         return embedOp.getResult();
+      } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
+        emitRemark(contValue.getLoc()) << "ConT of Applied Map";
+
+        auto n = mapOp.getAttrOfType<NatAttr>("n");
+        auto s = mapOp.getAttrOfType<DataTypeAttr>("s");
+        auto t = mapOp.getAttrOfType<DataTypeAttr>("t");
+
+        auto f = apply.getOperand(1);
+        auto array = apply.getOperand(2);
+        auto contArray = ConT(array, rewriter.getInsertionPoint(), rewriter);
+        auto contF = ConT(f, rewriter.getInsertionPoint(), rewriter);
+        // TODO: continue here: replace args of lambdas with the idx somehow.
+        //        what should the idx have as args? idx()
+
+        auto mapRead = rewriter.create<MapReadIntermediateOp>(
+            mapOp.getLoc(), apply.getType(), n, s, t, contF, contArray);
+
+        return mapRead;
       } else {
         emitError(apply.getLoc()) << "Cannot perform ConT for this apply!";
       }
@@ -1394,7 +1417,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       Value cst1 = rewriter.create<ConstantIndexOp>(loc, 1).getResult();
 
       Value n_minus_1 = rewriter.create<SubIOp>(loc, n, cst1).getResult();
-//      Value n_minus_r_minus_1 = rewriter.create<SubIOp>(loc, n_minus_r, cst1).getResult();
+      //      Value n_minus_r_minus_1 = rewriter.create<SubIOp>(loc, n_minus_r,
+      //      cst1).getResult();
 
       Value l_plus_n = rewriter.create<AddIOp>(loc, l, n).getResult();
 

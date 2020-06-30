@@ -192,7 +192,7 @@ def MapParOp : Rise_Op<"mapPar"> {
 }
 
 def MapOp : Rise_Op<"map"> {
-  let summary = "mapPar";
+  let summary = "map";
   let description =
     "This operation returns a function which expects a function from s to t "
     "and an array of length n. The function is to be applied to all elements "
@@ -329,7 +329,12 @@ def BinaryOp : Rise_Op<"codegen.bin_op"> {
   let summary = "rise bin_op";
   let arguments = (ins StrAttr : $op, AnyType : $arg0, AnyType : $arg1);
   let results = (outs AnyType : $output);
-  // let parser = [{ return parse$cppClass(parser, result); }];
+}
+
+def MapReadIntermediateOp : Rise_Op<"codegen.mapread"> {
+  let summary = "rise mapread";
+  let arguments = (ins NatAttr : $n, DataTypeAttr : $s, DataTypeAttr : $t, AnyType : $f, AnyType : $array);
+  let results = (outs AnyType : $output);
 }
 
 def ZipIntermediateOp : Rise_Op<"codegen.zip"> {

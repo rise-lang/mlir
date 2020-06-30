@@ -21,89 +21,150 @@ using namespace mlir::edsc::op;
 namespace mlir {
 namespace edsc {
 
-// Types
-FunType mlir::edsc::type::funtype(Type in, Type out) {
+//===----------------------------------------------------------------------===//
+// Rise Types
+//===----------------------------------------------------------------------===//
+
+FunType mlir::edsc::type::funType(Type in, Type out) {
   return FunType::get(ScopedContext::getContext(), in, out);
 }
 
-Nat mlir::edsc::type::nat(int val) {
+Nat mlir::edsc::type::natType(int val) {
   return Nat::get(ScopedContext::getContext(), val);
 }
 
-ArrayType mlir::edsc::type::array(Nat size, DataType elemType) {
+ArrayType mlir::edsc::type::arrayType(Nat size, DataType elemType) {
   return ArrayType::get(ScopedContext::getContext(), size, elemType);
 }
 
-ArrayType mlir::edsc::type::array(int size, DataType elemType) {
-  return array(nat(size), elemType);
+ArrayType mlir::edsc::type::arrayType(int size, DataType elemType) {
+  return arrayType(natType(size), elemType);
 }
 
-ArrayType mlir::edsc::type::array2D(Nat outerSize, Nat innerSize,
-                                    DataType elemType) {
-  return array(outerSize, array(innerSize, elemType));
+ArrayType mlir::edsc::type::array2DType(Nat outerSize, Nat innerSize,
+                                        DataType elemType) {
+  return arrayType(outerSize, arrayType(innerSize, elemType));
 }
 
-ArrayType mlir::edsc::type::array2D(int outerSize, int innerSize,
-                                    DataType elemType) {
-  return array2D(nat(outerSize), nat(innerSize), elemType);
+ArrayType mlir::edsc::type::array2DType(int outerSize, int innerSize,
+                                        DataType elemType) {
+  return array2DType(natType(outerSize), natType(innerSize), elemType);
 }
 
-ArrayType mlir::edsc::type::array3D(Nat outerSize, Nat midSize, Nat innerSize,
-                                    DataType elemType) {
-  return array2D(outerSize, midSize, array(innerSize, elemType));
+ArrayType mlir::edsc::type::array3DType(Nat outerSize, Nat midSize,
+                                        Nat innerSize, DataType elemType) {
+  return array2DType(outerSize, midSize, arrayType(innerSize, elemType));
 }
 
-ArrayType mlir::edsc::type::array3D(int outerSize, int midSize, int innerSize,
-                                    DataType elemType) {
-  return array2D(outerSize, midSize, array(nat(innerSize), elemType));
+ArrayType mlir::edsc::type::array3DType(int outerSize, int midSize,
+                                        int innerSize, DataType elemType) {
+  return array2DType(outerSize, midSize,
+                     arrayType(natType(innerSize), elemType));
 }
 
-Tuple mlir::edsc::type::tuple(DataType lhs, DataType rhs) {
+Tuple mlir::edsc::type::tupleType(DataType lhs, DataType rhs) {
   return Tuple::get(ScopedContext::getContext(), lhs, rhs);
 }
 
-ScalarType mlir::edsc::type::scalar(Type wrappedType) {
+ScalarType mlir::edsc::type::scalarType(Type wrappedType) {
   return ScalarType::get(ScopedContext::getContext(), wrappedType);
 }
 
-ScalarType mlir::edsc::type::scalarF32() {
-  return scalar(FloatType::getF32(ScopedContext::getContext()));
+ScalarType mlir::edsc::type::scalarF32Type() {
+  return scalarType(FloatType::getF32(ScopedContext::getContext()));
 }
 
-ScalarType mlir::edsc::type::scalarF64() {
-  return scalar(FloatType::getF64(ScopedContext::getContext()));
+ScalarType mlir::edsc::type::scalarF64Type() {
+  return scalarType(FloatType::getF64(ScopedContext::getContext()));
 }
 
-// Operations
+//===----------------------------------------------------------------------===//
+// Rise Operations: Core Lambda Calculus
+//===----------------------------------------------------------------------===//
+
+Value mlir::edsc::op::lambda(
+    FunType lambdaType,
+    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args);
+      });
+}
+
+Value mlir::edsc::op::apply(DataType resultType, Value fun, ValueRange args) {
+  return ValueBuilder<ApplyOp>(resultType, fun, args);
+}
+
+//===----------------------------------------------------------------------===//
+// Rise Operations: Interoperability
+//===----------------------------------------------------------------------===//
+
 Value mlir::edsc::op::in(Value in, Type type) {
   assert(in.getType().isa<MemRefType>());
   return ValueBuilder<InOp>(type, in);
 }
 
-Value mlir::edsc::op::literal(DataType t, StringRef literal) {
-  MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<LiteralOp>(t,
-                                 LiteralAttr::get(context, t, literal.str()));
+void mlir::edsc::op::out(Value writeTo, Value result) {
+  OperationBuilder<rise::OutOp>(writeTo, result);
+  return;
 }
 
-Value mlir::edsc::op::zip(Nat n, DataType s, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  FunType zipType = FunType::get(
-      context, ArrayType::get(context, n, s),
-      FunType::get(context, ArrayType::get(context, n, t),
-                   ArrayType::get(context, n, Tuple::get(context, s, t))));
-  return ValueBuilder<ZipOp>(zipType, NatAttr::get(context, n),
-                             DataTypeAttr::get(context, s),
-                             DataTypeAttr::get(context, t));
+Value mlir::edsc::op::embed(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
+  return ValueBuilder<EmbedOp>(result, exposedValues,
+                               [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                                   MutableArrayRef<BlockArgument> args) {
+                                 ScopedContext nestedContext(nestedBuilder,
+                                                             nestedLoc);
+                                 OpBuilder::InsertionGuard guard(nestedBuilder);
+                                 return bodyBuilder(args);
+                               });
 }
 
-Value mlir::edsc::op::zip(Nat n, DataType s, DataType t, Value lhs, Value rhs) {
-  MLIRContext *context = ScopedContext::getContext();
+void mlir::edsc::op::rise_return(Value returnValue) {
+  OperationBuilder<rise::ReturnOp>(ValueRange{returnValue});
+  return;
+}
 
-  Value zipOp = zip(n, s, t);
-  return ValueBuilder<ApplyOp>(
-      ArrayType::get(context, n, Tuple::get(context, s, t)), zipOp,
-      ValueRange{lhs, rhs});
+//===----------------------------------------------------------------------===//
+// Rise Operations: Patterns
+//===----------------------------------------------------------------------===//
+
+Value mlir::edsc::op::mapSeq(DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return mapSeq("loop", arrayT.getElementType(), t, bodyBuilder, array);
+}
+
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return mapSeq(lowerTo, arrayT.getElementType(), t, bodyBuilder, array);
+}
+
+Value mlir::edsc::op::map(DataType t,
+                          function_ref<Value(BlockArgument)> bodyBuilder,
+                          Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return map(arrayT.getSize(), arrayT.getElementType(), t,
+             lambda1(funType(arrayT.getElementType(), t), bodyBuilder), array);
+}
+
+Value mlir::edsc::op::reduceSeq(
+    DataType t, function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+    Value initializer, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq(
+      "loop", arrayT.getSize(), arrayT.getElementType(), t,
+      lambda2(funType(arrayT.getElementType(), funType(t, t)), bodyBuilder),
+      initializer, array);
 }
 
 Value mlir::edsc::op::zip(Value lhs, Value rhs) {
@@ -114,33 +175,9 @@ Value mlir::edsc::op::zip(Value lhs, Value rhs) {
              rhsType.getElementType(), lhs, rhs);
 }
 
-Value mlir::edsc::op::fst(DataType s, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<FstOp>(
-      FunType::get(context, Tuple::get(context, s, t), s),
-      DataTypeAttr::get(context, s), DataTypeAttr::get(context, t));
-}
-
-Value mlir::edsc::op::fst(DataType s, DataType t, Value tuple) {
-  Value fstOp = fst(s, t);
-  return ValueBuilder<ApplyOp>(s, fstOp, tuple);
-}
-
 Value mlir::edsc::op::fst(Value tuple) {
   Tuple tupleType = tuple.getType().dyn_cast<Tuple>();
   return fst(tupleType.getFirst(), tupleType.getSecond(), tuple);
-}
-
-Value mlir::edsc::op::snd(DataType s, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<SndOp>(
-      FunType::get(context, Tuple::get(context, s, t), t),
-      DataTypeAttr::get(context, s), DataTypeAttr::get(context, t));
-}
-
-Value mlir::edsc::op::snd(DataType s, DataType t, Value tuple) {
-  Value sndOp = snd(s, t);
-  return ValueBuilder<ApplyOp>(t, sndOp, tuple);
 }
 
 Value mlir::edsc::op::snd(Value tuple) {
@@ -148,41 +185,11 @@ Value mlir::edsc::op::snd(Value tuple) {
   return snd(tupleType.getFirst(), tupleType.getSecond(), tuple);
 }
 
-Value mlir::edsc::op::split(Nat n, Nat m, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<SplitOp>(
-      funtype(array(nat(n.getIntValue() * m.getIntValue()), t),
-              array(m, array(n, t))),
-      NatAttr::get(context, n), NatAttr::get(context, m),
-      DataTypeAttr::get(context, t));
-}
+Value mlir::edsc::op::split(Nat n, Value array) {
+  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
 
-Value mlir::edsc::op::split(Nat n, Nat m, DataType t, Value inArray) {
-  Value splitOp = split(n, m, t);
-  return ValueBuilder<ApplyOp>(array(m, array(n, t)), splitOp, inArray);
-}
-
-Value mlir::edsc::op::split(Nat n, Value inArray) {
-  ArrayType inArrayType = inArray.getType().dyn_cast<ArrayType>();
-
-  return split(n, nat(inArrayType.getSize().getIntValue() / n.getIntValue()),
-               inArrayType.getElementType(), inArray);
-}
-
-Value mlir::edsc::op::join(Nat n, Nat m, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  return ValueBuilder<JoinOp>(
-      funtype(array(m, array(n, t)),
-              array(nat(n.getIntValue() * m.getIntValue()), t)),
-      NatAttr::get(context, n), NatAttr::get(context, m),
-      DataTypeAttr::get(context, t));
-}
-
-//// Do the join!
-Value mlir::edsc::op::join(Nat n, Nat m, DataType t, Value inArray) {
-  Value joinOp = join(n, m, t);
-  return ValueBuilder<ApplyOp>(array(nat(m.getIntValue() * n.getIntValue()), t),
-                               joinOp, inArray);
+  return split(n, natType(arrayType.getSize().getIntValue() / n.getIntValue()),
+               arrayType.getElementType(), array);
 }
 
 Value mlir::edsc::op::join(Value inArray) {
@@ -192,25 +199,6 @@ Value mlir::edsc::op::join(Value inArray) {
 
   return join(nestedArrayType.getSize(), inArrayType.getSize(),
               nestedArrayType.getElementType(), inArray);
-}
-
-Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  FunType transposeType = FunType::get(
-      context, ArrayType::get(context, n, ArrayType::get(context, m, t)),
-      ArrayType::get(context, m, ArrayType::get(context, n, t)));
-
-  return ValueBuilder<TransposeOp>(transposeType, NatAttr::get(context, n),
-                                   NatAttr::get(context, m),
-                                   DataTypeAttr::get(context, t));
-}
-
-Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t, Value array) {
-  MLIRContext *context = ScopedContext::getContext();
-  Value transposeOp = transpose(n, m, t);
-  return ValueBuilder<ApplyOp>(
-      ArrayType::get(context, m, ArrayType::get(context, n, t)), transposeOp,
-      ValueRange{array});
 }
 
 Value mlir::edsc::op::transpose(Value array) {
@@ -223,195 +211,92 @@ Value mlir::edsc::op::transpose(Value array) {
                    innerArrayType.getElementType(), array);
 }
 
-Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t) {
+Value mlir::edsc::op::slide(Nat windowSize, Nat step, Value array) {
   MLIRContext *context = ScopedContext::getContext();
-  FunType slideType = FunType::get(
-      context,
-      ArrayType::get(context,
-                     Nat::get(context, sp.getIntValue() * n.getIntValue() +
-                                           sz.getIntValue() - sp.getIntValue()),
-                     t),
-      ArrayType::get(context, n, ArrayType::get(context, sz, t)));
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  int n =
+      (arrayT.getSize().getIntValue() + step.getIntValue() - windowSize.getIntValue()) /
+      step.getIntValue();
 
-  return ValueBuilder<SlideOp>(
-      slideType, NatAttr::get(context, n), NatAttr::get(context, sz),
-      NatAttr::get(context, sp), DataTypeAttr::get(context, t));
-}
-
-Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t, Value array) {
-  MLIRContext *context = ScopedContext::getContext();
-  Value slideOp = slide(n, sz, sp, t);
-  return ValueBuilder<ApplyOp>(
-      ArrayType::get(context, n, ArrayType::get(context, sz, t)), slideOp,
-      ValueRange{array});
-}
-
-Value mlir::edsc::op::slide(Nat sz, Nat sp, Value array) {
-  MLIRContext *context = ScopedContext::getContext();
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  int n = (arrayType.getSize().getIntValue() + sp.getIntValue() -
-           sz.getIntValue()) /
-          sp.getIntValue();
-
-  return slide(nat(n), sz, sp, arrayType.getElementType(), array);
-}
-
-Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  FunType padType = FunType::get(
-      context, t,
-      FunType::get(
-          context, ArrayType::get(context, n, t),
-          ArrayType::get(context,
-                         Nat::get(context, l.getIntValue() + n.getIntValue() +
-                                               r.getIntValue()),
-                         t)));
-  return ValueBuilder<PadOp>(padType, NatAttr::get(context, n),
-                             NatAttr::get(context, l), NatAttr::get(context, r),
-                             DataTypeAttr::get(context, t));
-}
-
-Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t, Value array) {
-  MLIRContext *context = ScopedContext::getContext();
-  Value cst0 = mlir::edsc::intrinsics::std_constant_float(
-      llvm::APFloat(7.0f), FloatType::getF32(context));
-
-  Value pad = padClamp(n, l, r, t);
-  return ValueBuilder<ApplyOp>(
-      ArrayType::get(context,
-                     Nat::get(context, l.getIntValue() + n.getIntValue() +
-                                           r.getIntValue()),
-                     t),
-      pad, ValueRange{cst0, array});
+  return slide(natType(n), windowSize, step, arrayT.getElementType(), array);
 }
 
 Value mlir::edsc::op::padClamp(Nat l, Nat r, Value array) {
   MLIRContext *context = ScopedContext::getContext();
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  return padClamp(arrayType.getSize(), l, r, arrayType.getElementType(), array);
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return padClamp(arrayT.getSize(), l, r, arrayT.getElementType(), array);
 }
 
-Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t) {
+Value mlir::edsc::op::literal(DataType t, StringRef literal) {
   MLIRContext *context = ScopedContext::getContext();
-  FunType mapType =
-      FunType::get(context, FunType::get(context, s, t),
-                   FunType::get(context, ArrayType::get(context, n, s),
-                                ArrayType::get(context, n, t)));
-
-  return ValueBuilder<MapSeqOp>(
-      mapType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
-      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
+  return ValueBuilder<LiteralOp>(t,
+                                 LiteralAttr::get(context, t, literal.str()));
 }
 
-Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
-                             Value lambda, Value array) {
-  MLIRContext *context = ScopedContext::getContext();
-  Value mapSeq = mlir::edsc::op::mapSeq(lowerTo, n, s, t);
-  return ValueBuilder<ApplyOp>(ArrayType::get(context, n, t), mapSeq,
-                               ValueRange{lambda, array});
+//===----------------------------------------------------------------------===//
+// Rise high-level abstractions
+//===----------------------------------------------------------------------===//
+
+Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
+                                       Nat spInner, Value array2DVal) {
+  ArrayType arrayT = array2DVal.getType().dyn_cast<ArrayType>();
+  ArrayType innerArrayType = arrayT.getElementType().dyn_cast<ArrayType>();
+  int newInnerArraySize = (innerArrayType.getSize().getIntValue() +
+                           spInner.getIntValue() - szInner.getIntValue()) /
+                          spInner.getIntValue();
+
+  Value afterFirstSlide = map(
+      arrayType(szInner, innerArrayType.getElementType()),
+      [&](Value innerArray) { return slide(szInner, spInner, innerArray); },
+      array2DVal);
+
+  Value afterSecondSlide = slide(szOuter, spOuter, afterFirstSlide);
+
+  ArrayType afterSecondSlideType =
+      afterSecondSlide.getType().dyn_cast<ArrayType>();
+  ArrayType afterSecondSlideElementType =
+      afterSecondSlideType.getElementType().dyn_cast<ArrayType>();
+  ArrayType afterSecondSlideElementElementType =
+      afterSecondSlideElementType.getElementType().dyn_cast<ArrayType>();
+
+  Value transposed = map(
+      arrayType(afterSecondSlideElementElementType.getSize(),
+                arrayType(afterSecondSlideElementType.getSize(),
+                          afterSecondSlideElementElementType.getElementType())),
+      [&](auto args) { return transpose(args); }, afterSecondSlide);
+
+  return transposed;
 }
 
-Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
-                             Value lambda, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  return mapSeq(lowerTo, arrayType.getSize(), s, t, lambda, array);
-}
-
-Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
-                             function_ref<Value(BlockArgument)> bodyBuilder,
-                             Value array) {
-  return mapSeq(lowerTo, s, t, lambda1(funtype(s, t), bodyBuilder), array);
-}
-
-Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
-                             function_ref<Value(BlockArgument)> bodyBuilder,
-                             Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  return mapSeq(lowerTo, arrayType.getElementType(), t, bodyBuilder, array);
-}
-
-Value mlir::edsc::op::mapSeq(DataType t,
-                             function_ref<Value(BlockArgument)> bodyBuilder,
-                             Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-  return mapSeq("loop", arrayType.getElementType(), t, bodyBuilder, array);
-}
-
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
-                                DataType t) {
-  MLIRContext *context = ScopedContext::getContext();
-  FunType reduceType = FunType::get(
-      context, FunType::get(context, s, FunType::get(context, t, t)),
-      FunType::get(context, t,
-                   FunType::get(context, ArrayType::get(context, n, s), t)));
-  return ValueBuilder<ReduceSeqOp>(
-      reduceType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
-      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
-}
-
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
-                                DataType t, Value lambda, Value initializer,
-                                Value array) {
-  Value reduceOp = reduceSeq(lowerTo, n, s, t);
-  return ValueBuilder<ApplyOp>(t, reduceOp,
-                               ValueRange{lambda, initializer, array});
-}
-
-// something fishy here! Type is not correct. It is scalar -> scalar instead of
-// tuple<scalar scalar> -> scalar
-Value mlir::edsc::op::reduceSeq(
-    StringRef lowerTo, DataType t,
-    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
-    Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-
-  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
-                   lambda2(funtype(arrayType.getElementType(),
-                                   funtype(t, t)),
-                           bodyBuilder),
-                   initializer, array);
-}
-Value mlir::edsc::op::reduceSeq(
-    DataType t,
-    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
-    Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-
-  return reduceSeq("loop", arrayType.getSize(), arrayType.getElementType(), t,
-                   lambda2(funtype(arrayType.getElementType(),
-                                   funtype(t, t)),
-                           bodyBuilder),
-                   initializer, array);
-}
-
-Value mlir::edsc::op::reduceSeq(StringRef lowerTo, DataType t, Value lambda,
-                                Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-
-  return reduceSeq(lowerTo, arrayType.getSize(), arrayType.getElementType(), t,
-                   lambda, initializer, array);
-}
-
-Value mlir::edsc::op::reduceSeq(DataType t, Value lambda,
-                                Value initializer, Value array) {
-  ArrayType arrayType = array.getType().dyn_cast<ArrayType>();
-
-  return reduceSeq("loop", arrayType.getSize(), arrayType.getElementType(), t,
-                   lambda, initializer, array);
-}
-
-// arbitrary number of args
-Value mlir::edsc::op::lambda(
-    FunType lambdaType,
-    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-  return ValueBuilder<LambdaOp>(
-      lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                      MutableArrayRef<BlockArgument> args) {
-        ScopedContext nestedContext(nestedBuilder, nestedLoc);
-        OpBuilder::InsertionGuard guard(nestedBuilder);
-        return bodyBuilder(args);
+Value mlir::edsc::abstraction::sumLambda(ScalarType summandType) {
+  return lambda(
+      funType(summandType, funType(summandType, summandType)), [&](auto args) {
+        return (
+            embed(summandType, ValueRange{args[0], args[1]}, [&](auto args) {
+              return (mlir::edsc::intrinsics::std_addf(args[0], args[1]));
+            }));
       });
 }
+
+Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
+  return lambda(
+      funType(tupleType(summandType, summandType),
+              funType(summandType, summandType)),
+      [&](auto args) {
+        return (embed(
+            summandType,
+            ValueRange{fst(summandType, summandType, args[0]),
+                       snd(summandType, summandType, args[0]), args[1]},
+            [&](auto args) {
+              return (mlir::edsc::intrinsics::std_mulf(
+                  args[0], mlir::edsc::intrinsics::std_addf(args[1], args[2])));
+            }));
+      });
+}
+
+//===----------------------------------------------------------------------===//
+// Rise other convenience EDSC
+//===----------------------------------------------------------------------===//
 
 // one arg
 Value mlir::edsc::op::lambda1(FunType lambdaType,
@@ -442,7 +327,7 @@ Value mlir::edsc::op::lambda2(
 Value mlir::edsc::op::lambda3(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
-        bodyBuilder) {
+    bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -456,7 +341,7 @@ Value mlir::edsc::op::lambda3(
 Value mlir::edsc::op::lambda4(FunType lambdaType,
                               function_ref<Value(BlockArgument, BlockArgument,
                                                  BlockArgument, BlockArgument)>
-                                  bodyBuilder) {
+                              bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -471,7 +356,7 @@ Value mlir::edsc::op::lambda5(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument)>
-        bodyBuilder) {
+    bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -486,7 +371,7 @@ Value mlir::edsc::op::lambda6(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument, BlockArgument)>
-        bodyBuilder) {
+    bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -497,48 +382,15 @@ Value mlir::edsc::op::lambda6(
       });
 }
 
-// TODO maybe a builder like:
-// I mean something that we can access blockargs better, not 100% sure how
-// Value mlir::edsc::op::lambda(Type resultType, Type inType1, Type inType1,
-// function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-
-// // I want to have an embed which does not return a Value in its body. However
-// the template instantiation here is ambiguous for some reason.
-// Value mlir::edsc::op::embed(
-//    Type result, ValueRange exposedValues,
-//    function_ref<void(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-//  return ValueBuilder<EmbedOp>(
-//      result, exposedValues,
-//      [&](OpBuilder &nestedBuilder, Location nestedLoc,
-//          MutableArrayRef<BlockArgument> args) -> void {
-//          ScopedContext nestedContext(nestedBuilder, nestedLoc);
-//          OpBuilder::InsertionGuard guard(nestedBuilder);
-//          bodyBuilder(args);
-//          return;
-//      });
-//}
-
-Value mlir::edsc::op::embed(
-    Type result, ValueRange exposedValues,
-    function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder) {
-  return ValueBuilder<EmbedOp>(
-      result, exposedValues,
-      [&](OpBuilder &nestedBuilder, Location nestedLoc,
-          MutableArrayRef<BlockArgument> args) {
-        ScopedContext nestedContext(nestedBuilder, nestedLoc);
-        OpBuilder::InsertionGuard guard(nestedBuilder);
-        return bodyBuilder(args);
-      });
-}
-
-Value mlir::edsc::op::embed1(
-    Type result, ValueRange exposedValues,
-    function_ref<Value(BlockArgument)> bodyBuilder) {
+// one arg
+Value mlir::edsc::op::embed1(Type result, ValueRange exposedValues,
+                             function_ref<Value(BlockArgument)> bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
-        return bodyBuilder(args[0]);
-      });
+    return bodyBuilder(args[0]);
+  });
 }
 
+// two args
 Value mlir::edsc::op::embed2(
     Type result, ValueRange exposedValues,
     function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder) {
@@ -547,119 +399,298 @@ Value mlir::edsc::op::embed2(
   });
 }
 
+// three args
 Value mlir::edsc::op::embed3(
     Type result, ValueRange exposedValues,
-    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
+    bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2]);
   });
 }
 
-Value mlir::edsc::op::embed4(
-    Type result, ValueRange exposedValues,
-    function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+// four args
+Value mlir::edsc::op::embed4(Type result, ValueRange exposedValues,
+                             function_ref<Value(BlockArgument, BlockArgument,
+                                                BlockArgument, BlockArgument)>
+                             bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2], args[3]);
   });
 }
 
+// five args
 Value mlir::edsc::op::embed5(
     Type result, ValueRange exposedValues,
-    function_ref<Value(BlockArgument, BlockArgument, BlockArgument, BlockArgument, BlockArgument)> bodyBuilder) {
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
+                       BlockArgument, BlockArgument)>
+    bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2], args[3], args[4]);
   });
 }
 
-void mlir::edsc::op::rise_return(Value returnValue) {
-  OperationBuilder<rise::ReturnOp>(ValueRange{returnValue});
-  return;
+// six args
+Value mlir::edsc::op::embed6(
+    Type result, ValueRange exposedValues,
+    function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
+                       BlockArgument, BlockArgument, BlockArgument)>
+    bodyBuilder) {
+  return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
+    return bodyBuilder(args[0], args[1], args[2], args[3], args[4], args[5]);
+  });
 }
 
-void mlir::edsc::op::out(Value writeTo, Value result) {
-  OperationBuilder<rise::OutOp>(writeTo, result);
-  return;
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType mapType =
+      FunType::get(context, FunType::get(context, s, t),
+                   FunType::get(context, ArrayType::get(context, n, s),
+                                ArrayType::get(context, n, t)));
+
+  return ValueBuilder<MapSeqOp>(
+      mapType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
+      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
 }
 
-// Abstractions
-
-// How do I include everything here correctly to have + of Values overloaded?
-Value mlir::edsc::abstraction::sumLambda(ScalarType summandType) {
-  return lambda(
-      funtype(summandType, funtype(summandType, summandType)), [&](auto args) {
-        return (
-            embed(summandType, ValueRange{args[0], args[1]}, [&](auto args) {
-              return (mlir::edsc::intrinsics::std_addf(args[0], args[1]));
-            }));
-      });
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
+                             Value lambda, Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value mapSeq = mlir::edsc::op::mapSeq(lowerTo, n, s, t);
+  return ValueBuilder<ApplyOp>(ArrayType::get(context, n, t), mapSeq,
+                               ValueRange{lambda, array});
 }
 
-Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
-  return lambda(
-      funtype(tuple(summandType, summandType),
-              funtype(summandType, summandType)),
-      [&](auto args) {
-        return (embed(
-            summandType,
-            ValueRange{fst(summandType, summandType, args[0]),
-                       snd(summandType, summandType, args[0]), args[1]},
-            [&](auto args) {
-              return (mlir::edsc::intrinsics::std_mulf(
-                  args[0], mlir::edsc::intrinsics::std_addf(args[1], args[2])));
-            }));
-      });
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
+                             Value lambda, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return mapSeq(lowerTo, arrayT.getSize(), s, t, lambda, array);
 }
 
-// ArrayType::get(context, n, ArrayType::get(context, sz, t))
-// Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat stOuter, Nat szInner,
-// Nat stInner, Value array2DVal) {
-//  ArrayType arrayType = array2DVal.getType().dyn_cast<ArrayType>();
-//  ArrayType innerArrayType = arrayType.getElementType().dyn_cast<ArrayType>();
-//
-//
-//  mapSeq("loop", lambda(funtype(arrayType.getElementType(), array2D())))
-//  return
-//}
-
-Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
-                                       Nat spInner, Value array2DVal) {
-
-  // shape:
-  ArrayType arrayType = array2DVal.getType().dyn_cast<ArrayType>();
-  ArrayType innerArrayType = arrayType.getElementType().dyn_cast<ArrayType>();
-  int newInnerArraySize = (innerArrayType.getSize().getIntValue() +
-                           spInner.getIntValue() - szInner.getIntValue()) /
-                          spInner.getIntValue();
-
-  std::cout << "innernewsizeL" << newInnerArraySize << std::flush;
-  Value afterFirstSlide = mapSeq(
-      "loop", innerArrayType,
-      array(nat(newInnerArraySize),
-            array(szInner, innerArrayType.getElementType())),
-      [&](Value innerArray) { return slide(szInner, spInner, innerArray); },
-      array2DVal);
-
-  Value afterSecondSlide = slide(szOuter, spOuter, afterFirstSlide);
-
-  ArrayType afterSecondSlideType =
-      afterSecondSlide.getType().dyn_cast<ArrayType>();
-  ArrayType afterSecondSlideElementType =
-      afterSecondSlideType.getElementType().dyn_cast<ArrayType>();
-  ArrayType afterSecondSlideElementElementType =
-      afterSecondSlideElementType.getElementType().dyn_cast<ArrayType>();
-
-  Value transposed = mapSeq(
-      "loop", afterSecondSlideElementType,
-      array(afterSecondSlideElementElementType.getSize(),
-            array(afterSecondSlideElementType.getSize(),
-                  afterSecondSlideElementElementType.getElementType())),
-      [&](auto args) { return transpose(args); }, afterSecondSlide);
-
-  return transposed;
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
+                             function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  return mapSeq(lowerTo, s, t, lambda1(funType(s, t), bodyBuilder), array);
 }
 
-// def slide2D(szOuter: Nat, stOuter: Nat, szInner: Nat, stInner: Nat): Expr =
-// map(slide(szInner)(stInner)) >> slide(szOuter)(stOuter) >> map(transpose)
+Value mlir::edsc::op::map(Nat n, DataType s, DataType t, Value lambda) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType mapType =
+      FunType::get(context, FunType::get(context, s, t),
+                   FunType::get(context, ArrayType::get(context, n, s),
+                                ArrayType::get(context, n, t)));
+  return ValueBuilder<MapOp>(mapType, NatAttr::get(context, n),
+                             DataTypeAttr::get(context, s),
+                             DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::map(Nat n, DataType s, DataType t, Value lambda,
+                          Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value mapOp = map(n, s, t, lambda);
+  return ValueBuilder<ApplyOp>(ArrayType::get(context, n, t), mapOp,
+                               ValueRange{lambda, array});
+}
+
+Value mlir::edsc::op::map(DataType t, Value lambda, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return map(arrayT.getSize(), arrayT.getElementType(), t, lambda, array);
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
+                                DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType reduceType = FunType::get(
+      context, FunType::get(context, s, FunType::get(context, t, t)),
+      FunType::get(context, t,
+                   FunType::get(context, ArrayType::get(context, n, s), t)));
+  return ValueBuilder<ReduceSeqOp>(
+      reduceType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
+      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
+                                DataType t, Value lambda, Value initializer,
+                                Value array) {
+  Value reduceOp = reduceSeq(lowerTo, n, s, t);
+  return ValueBuilder<ApplyOp>(t, reduceOp,
+                               ValueRange{lambda, initializer, array});
+}
+
+// something fishy here! Type is not correct. It is scalar -> scalar instead of
+// tuple<scalar scalar> -> scalar
+Value mlir::edsc::op::reduceSeq(
+    StringRef lowerTo, DataType t,
+    function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
+    Value initializer, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq(
+      lowerTo, arrayT.getSize(), arrayT.getElementType(), t,
+      lambda2(funType(arrayT.getElementType(), funType(t, t)), bodyBuilder),
+      initializer, array);
+}
+
+Value mlir::edsc::op::reduceSeq(StringRef lowerTo, DataType t, Value lambda,
+                                Value initializer, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq(lowerTo, arrayT.getSize(), arrayT.getElementType(), t,
+                   lambda, initializer, array);
+}
+
+Value mlir::edsc::op::reduceSeq(DataType t, Value lambda, Value initializer,
+                                Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+
+  return reduceSeq("loop", arrayT.getSize(), arrayT.getElementType(), t, lambda,
+                   initializer, array);
+}
+
+Value mlir::edsc::op::zip(Nat n, DataType s, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType zipType = FunType::get(
+      context, ArrayType::get(context, n, s),
+      FunType::get(context, ArrayType::get(context, n, t),
+                   ArrayType::get(context, n, Tuple::get(context, s, t))));
+  return ValueBuilder<ZipOp>(zipType, NatAttr::get(context, n),
+                             DataTypeAttr::get(context, s),
+                             DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::zip(Nat n, DataType s, DataType t, Value lhs, Value rhs) {
+  MLIRContext *context = ScopedContext::getContext();
+
+  Value zipOp = zip(n, s, t);
+  return apply(ArrayType::get(context, n, Tuple::get(context, s, t)), zipOp,
+               ValueRange{lhs, rhs});
+}
+
+Value mlir::edsc::op::fst(DataType s, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<FstOp>(
+      FunType::get(context, Tuple::get(context, s, t), s),
+      DataTypeAttr::get(context, s), DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::fst(DataType s, DataType t, Value tuple) {
+  Value fstOp = fst(s, t);
+  return ValueBuilder<ApplyOp>(s, fstOp, tuple);
+}
+
+Value mlir::edsc::op::snd(DataType s, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<SndOp>(
+      FunType::get(context, Tuple::get(context, s, t), t),
+      DataTypeAttr::get(context, s), DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::snd(DataType s, DataType t, Value tuple) {
+  Value sndOp = snd(s, t);
+  return ValueBuilder<ApplyOp>(t, sndOp, tuple);
+}
+
+Value mlir::edsc::op::split(Nat n, Nat m, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<SplitOp>(
+      funType(arrayType(natType(n.getIntValue() * m.getIntValue()), t),
+              arrayType(m, arrayType(n, t))),
+      NatAttr::get(context, n), NatAttr::get(context, m),
+      DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::split(Nat n, Nat m, DataType t, Value array) {
+  Value splitOp = split(n, m, t);
+  return ValueBuilder<ApplyOp>(arrayType(m, arrayType(n, t)), splitOp, array);
+}
+
+Value mlir::edsc::op::join(Nat n, Nat m, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<JoinOp>(
+      funType(arrayType(m, arrayType(n, t)),
+              arrayType(natType(n.getIntValue() * m.getIntValue()), t)),
+      NatAttr::get(context, n), NatAttr::get(context, m),
+      DataTypeAttr::get(context, t));
+}
+
+//// Do the join!
+Value mlir::edsc::op::join(Nat n, Nat m, DataType t, Value inArray) {
+  Value joinOp = join(n, m, t);
+  return ValueBuilder<ApplyOp>(
+      arrayType(natType(m.getIntValue() * n.getIntValue()), t), joinOp,
+      inArray);
+}
+
+Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType transposeType = FunType::get(
+      context, ArrayType::get(context, n, ArrayType::get(context, m, t)),
+      ArrayType::get(context, m, ArrayType::get(context, n, t)));
+
+  return ValueBuilder<TransposeOp>(transposeType, NatAttr::get(context, n),
+                                   NatAttr::get(context, m),
+                                   DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t, Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value transposeOp = transpose(n, m, t);
+  return ValueBuilder<ApplyOp>(
+      ArrayType::get(context, m, ArrayType::get(context, n, t)), transposeOp,
+      ValueRange{array});
+}
+
+Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType slideType = FunType::get(
+      context,
+      ArrayType::get(context,
+                     Nat::get(context, sp.getIntValue() * n.getIntValue() +
+                                           sz.getIntValue() - sp.getIntValue()),
+                     t),
+      ArrayType::get(context, n, ArrayType::get(context, sz, t)));
+
+  return ValueBuilder<SlideOp>(
+      slideType, NatAttr::get(context, n), NatAttr::get(context, sz),
+      NatAttr::get(context, sp), DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t, Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value slideOp = slide(n, sz, sp, t);
+  return ValueBuilder<ApplyOp>(
+      ArrayType::get(context, n, ArrayType::get(context, sz, t)), slideOp,
+      ValueRange{array});
+}
+
+Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t) {
+  MLIRContext *context = ScopedContext::getContext();
+  FunType padType = FunType::get(
+      context, t,
+      FunType::get(
+          context, ArrayType::get(context, n, t),
+          ArrayType::get(context,
+                         Nat::get(context, l.getIntValue() + n.getIntValue() +
+                                               r.getIntValue()),
+                         t)));
+  return ValueBuilder<PadOp>(padType, NatAttr::get(context, n),
+                             NatAttr::get(context, l), NatAttr::get(context, r),
+                             DataTypeAttr::get(context, t));
+}
+
+Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t, Value array) {
+  MLIRContext *context = ScopedContext::getContext();
+  Value cst0 = mlir::edsc::intrinsics::std_constant_float(
+      llvm::APFloat(7.0f), FloatType::getF32(context));
+
+  Value pad = padClamp(n, l, r, t);
+  return ValueBuilder<ApplyOp>(
+      ArrayType::get(context,
+                     Nat::get(context, l.getIntValue() + n.getIntValue() +
+                                           r.getIntValue()),
+                     t),
+      pad, ValueRange{cst0, array});
+}
 
 } // namespace edsc
 } // namespace mlir
