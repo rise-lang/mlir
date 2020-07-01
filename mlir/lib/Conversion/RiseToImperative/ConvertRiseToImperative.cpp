@@ -134,7 +134,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     return;
   });
 
-  funcOp.dump();
+//  funcOp.dump();
   // Codegen:
   bool doCodegen = true;
   SmallVector<Operation *, 10> erasureList = {};
@@ -145,7 +145,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
-  funcOp.dump();
+//  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
