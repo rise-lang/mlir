@@ -8,14 +8,10 @@
 
 // clang-format off
 // RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize | FileCheck %s --check-prefix=IMPERATIVE
-// TODO: find out how to execute the stuff. -split-input-file splits at the
-// functions. So mlir-cpu-runner will never get the entry point fun
 // RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=STENCIL_2D_TEST
 // RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e pad2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=PAD_2D_TEST
-
+//,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_libi_no_mkl.so
 // clang-format on
-
-
 
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -83,12 +79,24 @@ static FuncOp declareFunction(StringRef name, ArrayRef<Type> results = {},
 }
 
 // declare print_memref func only once
-TEST_FUNC(declare_print_memref) {
+TEST_FUNC(declare_functions) {
   auto printMemref = declareFunction(
       "print_memref_f32", {},
       {UnrankedMemRefType::get(FloatType::getF32(&globalContext()), 0)});
+//  auto printVal =
+//      declareFunction("print_f32", {}, {FloatType::getF32(&globalContext())});
+//  auto printBinOp = declareFunction("print_bin_op", {},
+//                                    {FloatType::getF32(&globalContext()),
+//                                     FloatType::getF32(&globalContext()),
+//                                     FloatType::getF32(&globalContext())});
+
   printMemref.print(llvm::outs());
+//  printVal.print(llvm::outs());
+//  printBinOp.print(llvm::outs());
+
   printMemref.erase();
+//  printVal.erase();
+//  printBinOp.erase();
 }
 
 TEST_FUNC(build_and_lower_matrix_multiplication) {
@@ -140,7 +148,6 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
   // IMPERATIVE:           }
   // IMPERATIVE:           return
   // IMPERATIVE:         }
-  // IMPERATIVE:       }
   // clang-format on
 
   f.print(llvm::outs());
@@ -165,7 +172,7 @@ TEST_FUNC(build_lower_and_execute_2Dstencil) {
   Value input = f.getArgument(0);
   Value output = f.getArgument(1);
 
-  mlir::edsc::highlevel::stencil2D(x_size, y_size, 4, 1, 3, 1, input, output);
+  mlir::edsc::highlevel::stencil2D(x_size, y_size, 5, 1, 3, 1, input, output);
   std_ret();
 
   // generate test
@@ -174,14 +181,17 @@ TEST_FUNC(build_lower_and_execute_2Dstencil) {
   ScopedContext test_scope(test_builder, testFun.getLoc());
   mlir::edsc::highlevel::generateTest(2, {x_size, y_size}, {x_size, y_size}, f);
   std_ret();
+// clang-format off
 
-  // STENCIL_2D_TEST:       {{\[\[}}9,   18,   30,   39,   45],
-  // STENCIL_2D_TEST:        [29,   38,   50,   59,   65],
-  // STENCIL_2D_TEST:        [69,   78,   90,   99,   105],
-  // STENCIL_2D_TEST:        [129,   138,   150,   159,   165],
-  // STENCIL_2D_TEST:        [189,   198,   210,   219,   225],
-  // STENCIL_2D_TEST:        [249,   258,   270,   279,   285],
-  // STENCIL_2D_TEST:        [309,   318,   330,   339,   345]]
+// STENCIL_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [7, 5] strides = [5, 1] data =
+// STENCIL_2D_TEST:       {{\[\[}}50,   60,   75,   90,   100],
+// STENCIL_2D_TEST:        [95,   105,   120,   135,   145],
+// STENCIL_2D_TEST:        [155,   165,   180,   195,   205],
+// STENCIL_2D_TEST:        [230,   240,   255,   270,   280],
+// STENCIL_2D_TEST:        [305,   315,   330,   345,   355],
+// STENCIL_2D_TEST:        [365,   375,   390,   405,   415],
+// STENCIL_2D_TEST:        [410,   420,   435,   450,   460]]
+// clang-format on
 
   f.print(llvm::outs());
   testFun.print(llvm::outs());
@@ -195,39 +205,68 @@ using namespace mlir::edsc::type;
 using namespace mlir::edsc::highlevel;
 using namespace mlir::edsc::abstraction;
 
-// TEST_FUNC(test_slide2d) {
-//  int64_t M = 12;
-//  int64_t N = 12;
-//
-//  auto f32Type = FloatType::getF32(&globalContext());
-//
-//  auto f =
-//      makeFunction("slide2D", {},
-//                   {MemRefType::get({M, N}, f32Type, {}, 0)});
-//
-//  OpBuilder builder(f.getBody());
-//  ScopedContext scope(builder, f.getLoc());
-//
-//  Value input = f.getArgument(0);
-//  Value inn = in(input, arrayType(M, arrayType(N,
-//  scalarF32Type())));
-//  slide2D(natType(3), natType(1), natType(5), natType(1),
-//  inn);
-//
-//
-//  std_ret();
-//
-//  f.print(llvm::outs());
-//  f.erase();
-//}
+TEST_FUNC(test_slide2d) {
+  int64_t M = 7;
+  int64_t N = 5;
+  int slideOuter = 5;
+  int slideInner = 3;
+  auto f32Type = FloatType::getF32(&globalContext());
 
- TEST_FUNC(test_pad2d) {
-  int64_t width = 6;
-  int64_t height = 12;
+  auto f = makeFunction("slide2D", {},
+                        {MemRefType::get({M, N}, f32Type, {}, 0),
+                         MemRefType::get({M-2, N-4, slideOuter, slideInner},
+                                         f32Type, {}, 0)});
+
+  OpBuilder builder(f.getBody());
+  ScopedContext scope(builder, f.getLoc());
+
+  Value input = f.getArgument(0);
+  Value output = f.getArgument(1);
+
+  Value inn = in(input, arrayType(M, arrayType(N, scalarF32Type())));
+  Value slizzled = slide2D(natType(slideOuter), natType(1), natType(slideInner), natType(1), inn);
+
+  Value mapped = mapSeq2D(
+      array2DType(slideOuter, slideInner, scalarF32Type()),
+      [&](Value arr2D) {
+        return mapSeq2D(
+            scalarF32Type(),
+            [&](Value elem) {
+              return embed1(scalarF32Type(), elem, [&](Value elem) {
+                Value cst = std_constant_float(llvm::APFloat(0.0f), f32Type);
+                return elem + cst;
+              });
+            },
+            arr2D);
+      },
+      slizzled);
+
+  out(output, mapped);
+
+  std_ret();
+
+  // generate test
+  auto testFun = makeFunction("slide2D_test", {}, {});
+  OpBuilder test_builder(testFun.getBody());
+  ScopedContext test_scope(test_builder, testFun.getLoc());
+  mlir::edsc::highlevel::generateTest(
+      2, {M, N}, {M - 2, N - 4, slideOuter, slideInner}, f);
+  std_ret();
+
+  testFun.print(llvm::outs());
+  f.print(llvm::outs());
+
+  testFun.erase();
+  f.erase();
+}
+
+TEST_FUNC(test_pad2d) {
+  int64_t width = 5;
+  int64_t height = 7;
   int padInnerl = 1;
-  int padInnerr = 0;
+  int padInnerr = 1;
   int padOuterl = 2;
-  int padOuterr = 3;
+  int padOuterr = 2;
   int64_t outWidth = padInnerl + width + padInnerr;
   int64_t outHeight = padOuterl + height + padOuterr;
 
@@ -269,42 +308,30 @@ using namespace mlir::edsc::abstraction;
   auto testFun = makeFunction("pad2D_test", {}, {});
   OpBuilder test_builder(testFun.getBody());
   ScopedContext test_scope(test_builder, testFun.getLoc());
-  mlir::edsc::highlevel::generateTest(2, {height, width}, {outHeight,
-  outWidth},
+  mlir::edsc::highlevel::generateTest(2, {height, width}, {outHeight, outWidth},
                                       f);
   std_ret();
 
-// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [12, 6] strides = [6, 1] data =
-// PAD_2D_TEST:       {{\[\[}}0,   1,   2,   3,   4,   5],
-// PAD_2D_TEST:        [6,   7,   8,   9,   10,   11],
-// PAD_2D_TEST:        [12,   13,   14,   15,   16,   17],
-// PAD_2D_TEST:        [18,   19,   20,   21,   22,   23],
-// PAD_2D_TEST:        [24,   25,   26,   27,   28,   29],
-// PAD_2D_TEST:        [30,   31,   32,   33,   34,   35],
-// PAD_2D_TEST:        [36,   37,   38,   39,   40,   41],
-// PAD_2D_TEST:        [42,   43,   44,   45,   46,   47],
-// PAD_2D_TEST:        [48,   49,   50,   51,   52,   53],
-// PAD_2D_TEST:        [54,   55,   56,   57,   58,   59],
-// PAD_2D_TEST:        [60,   61,   62,   63,   64,   65],
-// PAD_2D_TEST:        [66,   67,   68,   69,   70,   71]]
-// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [17, 7] strides = [7, 1] data =
-// PAD_2D_TEST:       {{\[\[}}0,   0,   1,   2,   3,   4,   5],
-// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   5],
-// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   5],
-// PAD_2D_TEST:        [6,   6,   7,   8,   9,   10,   11],
-// PAD_2D_TEST:        [12,   12,   13,   14,   15,   16,   17],
-// PAD_2D_TEST:        [18,   18,   19,   20,   21,   22,   23],
-// PAD_2D_TEST:        [24,   24,   25,   26,   27,   28,   29],
-// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   35],
-// PAD_2D_TEST:        [36,   36,   37,   38,   39,   40,   41],
-// PAD_2D_TEST:        [42,   42,   43,   44,   45,   46,   47],
-// PAD_2D_TEST:        [48,   48,   49,   50,   51,   52,   53],
-// PAD_2D_TEST:        [54,   54,   55,   56,   57,   58,   59],
-// PAD_2D_TEST:        [60,   60,   61,   62,   63,   64,   65],
-// PAD_2D_TEST:        [66,   66,   67,   68,   69,   70,   71],
-// PAD_2D_TEST:        [66,   66,   67,   68,   69,   70,   71],
-// PAD_2D_TEST:        [66,   66,   67,   68,   69,   70,   71],
-// PAD_2D_TEST:        [66,   66,   67,   68,   69,   70,   71]]
+// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [7, 5] strides = [5, 1] data =
+// PAD_2D_TEST:       {{\[\[}}0,   1,   2,   3,   4],
+// PAD_2D_TEST:        [5,   6,   7,   8,   9],
+// PAD_2D_TEST:        [10,   11,   12,   13,   14],
+// PAD_2D_TEST:        [15,   16,   17,   18,   19],
+// PAD_2D_TEST:        [20,   21,   22,   23,   24],
+// PAD_2D_TEST:        [25,   26,   27,   28,   29],
+// PAD_2D_TEST:        [30,   31,   32,   33,   34]]
+// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [11, 7] strides = [7, 1] data =
+// PAD_2D_TEST:       {{\[\[}}0,   0,   1,   2,   3,   4,   4],
+// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
+// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
+// PAD_2D_TEST:        [5,   5,   6,   7,   8,   9,   9],
+// PAD_2D_TEST:        [10,   10,   11,   12,   13,   14,   14],
+// PAD_2D_TEST:        [15,   15,   16,   17,   18,   19,   19],
+// PAD_2D_TEST:        [20,   20,   21,   22,   23,   24,   24],
+// PAD_2D_TEST:        [25,   25,   26,   27,   28,   29,   29],
+// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
+// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
+// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34]]
 
 
   f.print(llvm::outs());

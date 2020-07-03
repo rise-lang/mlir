@@ -1315,7 +1315,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       auto lhs = mpark::get<Value>(path.pop_back_val());
       auto rhs = rewriter
                      .create<ConstantIndexOp>(
-                         loc, joinIntermediateOp.m().getIntValue())
+                         loc, joinIntermediateOp.n().getIntValue())
                      .getResult();
 
       // modulo op taken from AffineToStandard

@@ -67,10 +67,10 @@ void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
   return;
 }
 
-void mlir::edsc::highlevel::stencil(int N, int windowSize, int step, Value input, Value output) {
+void mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
+                                    Value input, Value output) {
   Value A = in(input, arrayType(N, scalarF32Type()));
-  int newN =
-      (N + step - windowSize) / step;
+  int newN = (N + step - windowSize) / step;
   int padl = ceil((N - newN) / 2.0);
   int padr = ceil((N - newN) / 2.0);
 
@@ -89,16 +89,19 @@ void mlir::edsc::highlevel::stencil(int N, int windowSize, int step, Value input
 }
 
 void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
-                                      int outerStep, int innerWindowSize, int innerStep,
-                                      Value input, Value output) {
+                                      int outerStep, int innerWindowSize,
+                                      int innerStep, Value input,
+                                      Value output) {
   ArrayType nestedType = arrayType(N, scalarF32Type());
   ArrayType inputType = arrayType(M, nestedType);
   Value A = in(input, inputType);
 
   int nInner =
-      (inputType.getSize().getIntValue() + innerStep - innerWindowSize) / innerStep;
+      (inputType.getSize().getIntValue() + innerStep - innerWindowSize) /
+      innerStep;
   int nOuter =
-      (nestedType.getSize().getIntValue() + outerStep - outerWindowSize) / outerStep;
+      (nestedType.getSize().getIntValue() + outerStep - outerWindowSize) /
+      outerStep;
 
   // If padding has to be different for l and r we pad 1 more on the left.
   int padInnerl = ceil((M - nInner) / 2.0);
@@ -108,35 +111,37 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
 
   if (padInnerl != padInnerr)
     emitError(ScopedContext::getLocation())
-        << "Due to an even sliding window in inner dimension we pad 1 value more "
+        << "Due to an even sliding window in inner dimension we pad 1 value "
+           "more "
            "on the lhs than on the rhs!";
   if (padOuterl != padOuterr)
     emitError(ScopedContext::getLocation())
-        << "Due to an even sliding window in outer dimension we pad 1 value more "
+        << "Due to an even sliding window in outer dimension we pad 1 value "
+           "more "
            "on the left than on the right!";
 
-  Value A_padded =
-      pad2D(natType(padOuterl), natType(padOuterr), natType(padInnerl), natType(padInnerr), A);
-  Value slizzled = slide2D(natType(outerWindowSize), natType(outerStep),
-                           natType(innerWindowSize), natType(innerStep), A_padded);
+  Value A_padded = pad2D(natType(padOuterl), natType(padOuterr),natType(padInnerl), natType(padInnerr), A);
+  Value slizzled =
+      slide2D(natType(outerWindowSize), natType(outerStep),
+              natType(innerWindowSize), natType(innerStep), A_padded);
   ArrayType slidedType = slizzled.getType().dyn_cast<ArrayType>();
 
-  Value mapped = mapSeq(
-      "loop", arrayType(slidedType.getSize(), scalarF32Type()),
-      [&](auto nestedArray) {
-        return mapSeq(
-            "loop",
-            arrayType(outerWindowSize, arrayType(innerWindowSize, scalarF32Type())),
-            scalarF32Type(),
-            [&](auto slidingWindow) {
-              Value flattenedWindow = join(slidingWindow);
-              return reduceSeq(
-                  "loop", scalarF32Type(), sumLambda(scalarF32Type()),
-                  literal(scalarF32Type(), "0.000000"), flattenedWindow);
+  Value mapped = mapSeq2D(
+      scalarF32Type(),
+      [&](Value slidingWindow) {
+        Value flattenedWindow = join(slidingWindow);
+        return reduceSeq(
+            "loop", scalarF32Type(), [&](Value arg1, Value arg2){
+              return embed2(scalarF32Type(), {arg1, arg2},
+                            [&](Value arg1, Value arg2) {
+                              Value res = arg1 + arg2;
+//                              std_call("print_bin_op", ArrayRef<Type>(), ValueRange{arg1, arg2, res});
+                              return res;
+                            });
             },
-            nestedArray);
-      },
-      slizzled);
+            literal(scalarF32Type(), "0.000000"), flattenedWindow);
+      }, slizzled);
+
   out(output, mapped);
 }
 
@@ -145,7 +150,7 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes,
                                          FuncOp riseFun) {
   auto f32Type = FloatType::getF32(ScopedContext::getContext());
 
-  if (!((dims == inSizes.size()) && (dims == outSizes.size()))) {
+  if (!(dims == inSizes.size())) {
     emitError(ScopedContext::getLocation())
         << "Generating test failed. Dims has to match number of "
            "input and output sizes!";
