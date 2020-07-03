@@ -150,18 +150,34 @@ void RiseDialect::printType(mlir::Type type, DialectAsmPrinter &printer) const {
 mlir::Attribute RiseDialect::parseAttribute(DialectAsmParser &parser,
                                             Type type) const {
   // TODO: implement parsing of different literals
+  DataType literalType;
 
   if (succeeded(parser.parseOptionalKeyword("lit"))) {
     if (!succeeded(parser.parseLess()))
       return nullptr;
     double literalValue;
     if (succeeded(parser.parseFloat(literalValue))) {
-      if (!succeeded(parser.parseGreater()))
-        return nullptr;
+
+      if (!succeeded(parser.parseOptionalGreater())) {
+        if (!succeeded(parser.parseComma()))
+          return nullptr;
+
+        literalType = parseDataType(parser);
+
+        if (!succeeded(parser.parseGreater()))
+          return nullptr;
+
+        return LiteralAttr::get(
+            getContext(),
+            literalType,
+            std::to_string(literalValue));
+      }
       return LiteralAttr::get(
           getContext(),
           ScalarType::get(getContext(), FloatType::getF32(getContext())),
           std::to_string(literalValue));
+    } else {
+      return nullptr;
     }
   } else if (succeeded(parser.parseOptionalKeyword("nat"))) {
     if (!succeeded(parser.parseLess()))

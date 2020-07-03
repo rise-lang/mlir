@@ -9,6 +9,9 @@
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Affine/EDSC/Builders.h"
+#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
+
 #include <iostream>
 
 #include "mlir/IR/AffineExpr.h"
@@ -237,7 +240,21 @@ Value mlir::edsc::op::literal(DataType t, StringRef literal) {
 // Rise high-level abstractions
 //===----------------------------------------------------------------------===//
 
-Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
+Value mlir::edsc::abstraction::mapSeq2D(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
+               Value array2D) {
+    return mapSeq2D("loop", resultElemType, bodyBuilder, array2D);
+}
+
+Value mlir::edsc::abstraction::mapSeq2D(StringRef lowerTo, DataType resultElemType,
+               function_ref<Value(BlockArgument)> bodyBuilder, Value array2D) {
+  ArrayType arrayT = array2D.getType().dyn_cast<ArrayType>();
+  ArrayType nestedArrayT = arrayT.getElementType().dyn_cast<ArrayType>();
+  return mapSeq(lowerTo , arrayType(nestedArrayT.getSize(), resultElemType), [&](Value array) {
+        return mapSeq(lowerTo, resultElemType, bodyBuilder, array);
+      }, array2D);
+}
+
+Value mlir::edsc::abstraction::slide2D(Nat szOuter, Nat spOuter, Nat szInner,
                                        Nat spInner, Value array2DVal) {
   ArrayType arrayT = array2DVal.getType().dyn_cast<ArrayType>();
   ArrayType innerArrayType = arrayT.getElementType().dyn_cast<ArrayType>();
@@ -246,7 +263,7 @@ Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
                           spInner.getIntValue();
 
   Value afterFirstSlide = map(
-      arrayType(szInner, innerArrayType.getElementType()),
+      arrayType(newInnerArraySize, arrayType(szInner, innerArrayType.getElementType())),
       [&](Value innerArray) { return slide(szInner, spInner, innerArray); },
       array2DVal);
 
@@ -268,12 +285,29 @@ Value mlir::edsc::abstraction::slide2d(Nat szOuter, Nat spOuter, Nat szInner,
   return transposed;
 }
 
+Value mlir::edsc::abstraction::pad2D(Nat lOuter, Nat rOuter, Nat lInner, Nat rInner, Value array) {
+  ArrayType outerArrayType = array.getType().dyn_cast<ArrayType>();
+  ArrayType innerArrayType = outerArrayType.getElementType().dyn_cast<ArrayType>();
+
+  Value map_pad = map(arrayType(innerArrayType.getSize().getIntValue() + lInner.getIntValue() + rInner.getIntValue(), innerArrayType.getElementType()), [&](Value innerArray){
+                                   return padClamp(lInner, rInner, innerArray);
+                                 }, array);
+  return padClamp(lOuter, rOuter, map_pad);
+
+}
+
+//def padClamp2D(b: Nat): Expr = padClamp2D(b, b, b, b)
+//def padClamp2D(l: Nat, r: Nat): Expr = padClamp2D(l, r, l, r)
+//def padClamp2D(lOuter: Nat, rOuter: Nat, lInner: Nat, rInner: Nat): Expr =
+//  map(padClamp(lInner)(rInner)) >> padClamp(lOuter)(rOuter)
+
+using namespace mlir::edsc::op;
 Value mlir::edsc::abstraction::sumLambda(ScalarType summandType) {
   return lambda(
       funType(summandType, funType(summandType, summandType)), [&](auto args) {
         return (
             embed(summandType, ValueRange{args[0], args[1]}, [&](auto args) {
-              return (mlir::edsc::intrinsics::std_addf(args[0], args[1]));
+              return args[0] + args[1];
             }));
       });
 }
@@ -288,8 +322,8 @@ Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
             ValueRange{fst(summandType, summandType, args[0]),
                        snd(summandType, summandType, args[0]), args[1]},
             [&](auto args) {
-              return (mlir::edsc::intrinsics::std_mulf(
-                  args[0], mlir::edsc::intrinsics::std_addf(args[1], args[2])));
+              return
+                  args[0] * (args[1] + args[2]);
             }));
       });
 }

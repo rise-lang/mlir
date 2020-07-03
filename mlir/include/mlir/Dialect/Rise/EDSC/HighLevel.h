@@ -15,7 +15,9 @@
 #define MLIR_DIALECT_RISE_EDSC_HIGHLEVEL_H_
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include "mlir/Dialect/StandardOps/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/EDSC/Builders.h"
 #include "mlir/IR/Builders.h"
@@ -29,8 +31,10 @@ namespace highlevel {
 
 void matrix_multiplication(int M, int N, int K, Value A, Value B, Value C);
 void convolution();
-void stencil(int n, Value input, Value output);
-void stencil2D(int n, Value input, Value output);
+void stencil(int N, int windowSize, int step, Value input, Value output);
+void stencil2D(int M, int N, int outerWindowSize,
+                                      int outerStep, int innerWindowSize, int innerStep,
+                                      Value input, Value output);
 
 // utilities
 void generateTest(int dims, ArrayRef<int64_t> inSizes,

@@ -16,6 +16,8 @@
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include "mlir/Dialect/Affine/EDSC/Builders.h"
+#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/EDSC/Builders.h"
 #include "mlir/IR/Builders.h"
@@ -43,9 +45,14 @@ ScalarType scalarF32Type();
 ScalarType scalarF64Type();
 } // namespace type
 
-namespace abstraction {
-Value slide2d(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
+namespace abstraction{
+Value mapSeq2D(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
+             Value array2D);
+Value mapSeq2D(StringRef lowerTo, DataType resultElemType,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
+Value slide2D(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
               Value array2DVal);
+Value pad2D(Nat lOuter, Nat rOuter, Nat lInner, Nat rInner, Value array);
 
 Value sumLambda(ScalarType summandType);          // return val1 + val2
 Value multAndSumUpLambda(ScalarType summandType); // return (val1 + val2) * val3

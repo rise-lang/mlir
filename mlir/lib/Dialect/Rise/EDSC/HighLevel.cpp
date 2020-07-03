@@ -7,9 +7,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Rise/EDSC/HighLevel.h"
-#include "mlir/Dialect/Rise/EDSC/Builders.h"
+#include "mlir/Dialect/Affine/EDSC/Builders.h"
+#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/StandardOps/EDSC/Builders.h"
-#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/IR/AffineExpr.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/Function.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/IR/StandardTypes.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/DialectConversion.h"
 #include <mlir/Dialect/SCF/EDSC/Builders.h>
 
 namespace mlir {
@@ -49,8 +58,7 @@ void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
         return (embed3(elementType, ValueRange{fst(elementType, elementType, tuple),
                                                snd(elementType, elementType, tuple), acc},
                        [&](Value fst, Value snd, Value acc){
-                         return(std_mulf(
-                             acc, std_addf(fst, snd)));
+                         return acc * (fst + snd);
                        }));
       },literal(elementType, "0.000000"), zip(arowType.getSize(), elementType, elementType, arow, bcol)));
     }, transpose(BType.getSize(), BType_trans.getSize(), elementType, in_B)));
@@ -59,16 +67,18 @@ void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
   return;
 }
 
-void mlir::edsc::highlevel::stencil(int n, Value input, Value output) {
-  int slidingWindow = 3;
+void mlir::edsc::highlevel::stencil(int N, int windowSize, int step, Value input, Value output) {
+  Value A = in(input, arrayType(N, scalarF32Type()));
+  int newN =
+      (N + step - windowSize) / step;
+  int padl = ceil((N - newN) / 2.0);
+  int padr = ceil((N - newN) / 2.0);
 
-  Value A = in(input, arrayType(n, scalarF32Type()));
-
-  Value padded = padClamp(natType(1), natType(1), A);
-  Value windowed = slide(natType(slidingWindow), natType(1), padded);
+  Value padded = padClamp(natType(padl), natType(padr), A);
+  Value windowed = slide(natType(windowSize), natType(1), padded);
 
   Value mapped = mapSeq(
-      "loop", arrayType(slidingWindow, scalarF32Type()), scalarF32Type(),
+      "loop", scalarF32Type(),
       [&](Value window) {
         return (reduceSeq("loop", scalarF32Type(), sumLambda(scalarF32Type()),
                           literal(scalarF32Type(), "0.000000"), window));
@@ -78,21 +88,45 @@ void mlir::edsc::highlevel::stencil(int n, Value input, Value output) {
   out(output, mapped);
 }
 
-void mlir::edsc::highlevel::stencil2D(int n, Value input, Value output) {
-  int slidingWindow = 3;
+void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
+                                      int outerStep, int innerWindowSize, int innerStep,
+                                      Value input, Value output) {
+  ArrayType nestedType = arrayType(N, scalarF32Type());
+  ArrayType inputType = arrayType(M, nestedType);
+  Value A = in(input, inputType);
 
-  Value A = in(input, arrayType(n, arrayType(n, scalarF32Type())));
+  int nInner =
+      (inputType.getSize().getIntValue() + innerStep - innerWindowSize) / innerStep;
+  int nOuter =
+      (nestedType.getSize().getIntValue() + outerStep - outerWindowSize) / outerStep;
 
-  Value slizzled = slide2d(natType(3), natType(1), natType(5), natType(1), A);
-  ArrayType slidedType =
-      arrayType(n - 2, arrayType(natType(n - 4),
-                                 arrayType(3, arrayType(5, scalarF32Type()))));
+  // If padding has to be different for l and r we pad 1 more on the left.
+  int padInnerl = ceil((M - nInner) / 2.0);
+  int padInnerr = floor((M - nInner) / 2.0);
+  int padOuterl = ceil((N - nOuter) / 2.0);
+  int padOuterr = floor((N - nOuter) / 2.0);
+
+  if (padInnerl != padInnerr)
+    emitError(ScopedContext::getLocation())
+        << "Due to an even sliding window in inner dimension we pad 1 value more "
+           "on the lhs than on the rhs!";
+  if (padOuterl != padOuterr)
+    emitError(ScopedContext::getLocation())
+        << "Due to an even sliding window in outer dimension we pad 1 value more "
+           "on the left than on the right!";
+
+  Value A_padded =
+      pad2D(natType(padOuterl), natType(padOuterr), natType(padInnerl), natType(padInnerr), A);
+  Value slizzled = slide2D(natType(outerWindowSize), natType(outerStep),
+                           natType(innerWindowSize), natType(innerStep), A_padded);
+  ArrayType slidedType = slizzled.getType().dyn_cast<ArrayType>();
 
   Value mapped = mapSeq(
-      "loop", slidedType.getElementType(), arrayType(n - 4, scalarF32Type()),
+      "loop", arrayType(slidedType.getSize(), scalarF32Type()),
       [&](auto nestedArray) {
         return mapSeq(
-            "loop", arrayType(3, arrayType(5, scalarF32Type())),
+            "loop",
+            arrayType(outerWindowSize, arrayType(innerWindowSize, scalarF32Type())),
             scalarF32Type(),
             [&](auto slidingWindow) {
               Value flattenedWindow = join(slidingWindow);
@@ -103,32 +137,18 @@ void mlir::edsc::highlevel::stencil2D(int n, Value input, Value output) {
             nestedArray);
       },
       slizzled);
-
-  //  Value padded = padClamp(natType(1), natType(1), A);
-  //  Value windowed = slide(natType(slidingWindow), natType(1), padded);
-
-  //  Value mapped = mapSeq("loop", arrayType(slidingWindow, scalarF32Type()),
-  //  scalarF32Type(),  [&](auto args) {
-  //    return (reduceSeq("loop", sumLambda(scalarF32Type()),
-  //    literal(scalarF32Type(), "0.000000"), args[0]));
-  //  }, windowed);
-
-  //  Value mapped = mapSeq("loop", arrayType(slidingWindow, scalarF32Type()),
-  //  scalarF32Type(), lambda(funtype(arrayType(slidingWindow, scalarF32Type()),
-  //  scalarF32Type()), [&](auto args) {
-  //    return (reduceSeq("loop", sumLambda(scalarF32Type()),
-  //    literal(scalarF32Type(), "0.000000"), args[0]));
-  //  }), windowed);
-
   out(output, mapped);
 }
 
-void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes, ArrayRef<int64_t> outSizes, FuncOp riseFun) {
+void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes,
+                                         ArrayRef<int64_t> outSizes,
+                                         FuncOp riseFun) {
   auto f32Type = FloatType::getF32(ScopedContext::getContext());
 
   if (!((dims == inSizes.size()) && (dims == outSizes.size()))) {
-    emitError(ScopedContext::getLocation()) << "Generating test failed. Dims has to match number of "
-                      "input and output sizes!";
+    emitError(ScopedContext::getLocation())
+        << "Generating test failed. Dims has to match number of "
+           "input and output sizes!";
     return;
   }
 
@@ -149,13 +169,12 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes, Ar
   Value inMemref = std_alloc(inMemrefType);
   Value outMemref = std_alloc(outMemrefType);
 
-  TemplatedIndexedValue<std_load, std_store> in(inMemref);
-  TemplatedIndexedValue<std_load, std_store> out(outMemref);
+  StdIndexedValue in(inMemref);
+  StdIndexedValue out(outMemref);
 
   Value cst0f = std_constant_float(llvm::APFloat(0.0f), f32Type);
   Value cst1f = std_constant_float(llvm::APFloat(1.0f), f32Type);
-  TemplatedIndexedValue<std_load, std_store> initVal(
-      std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  StdIndexedValue initVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
   initVal = cst0f;
 
   // initializing the input with ascending values starting with 0
@@ -173,6 +192,9 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes, Ar
 
   if (riseFun) {
     std_call(riseFun, ValueRange{inMemref, outMemref});
+    Value castedIn =
+        std_memref_cast(inMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedIn});
     Value castedOut =
         std_memref_cast(outMemref, UnrankedMemRefType::get(f32Type, 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedOut});
