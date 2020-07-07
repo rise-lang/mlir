@@ -8,9 +8,15 @@
 
 // clang-format off
 // RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize | FileCheck %s --check-prefix=IMPERATIVE
-// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=STENCIL_2D_TEST
-// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e pad2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=PAD_2D_TEST
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=STENCIL_2D_TEST -dump-input-on-failure
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e pad2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=PAD_2D_TEST -dump-input-on-failure
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e zip2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=ZIP_2D_TEST -dump-input-on-failure
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e conv2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=CONV_2D_TEST -dump-input-on-failure
+
+//
+// Drop measurelib in folder where the other lib is.
 //,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_libi_no_mkl.so
+// echo $PATH | FileCheck %s --check-prefix=IMPERATIVE -dump-input-on-failure
 // clang-format on
 
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
@@ -60,6 +66,10 @@ static MLIRContext &globalContext() {
   context.allowUnregisteredDialects();
   return context;
 }
+using namespace mlir::edsc::op;
+using namespace mlir::edsc::type;
+using namespace mlir::edsc::highlevel;
+using namespace mlir::edsc::abstraction;
 
 static FuncOp makeFunction(StringRef name, ArrayRef<Type> results = {},
                            ArrayRef<Type> args = {}) {
@@ -83,20 +93,21 @@ TEST_FUNC(declare_functions) {
   auto printMemref = declareFunction(
       "print_memref_f32", {},
       {UnrankedMemRefType::get(FloatType::getF32(&globalContext()), 0)});
-//  auto printVal =
-//      declareFunction("print_f32", {}, {FloatType::getF32(&globalContext())});
-//  auto printBinOp = declareFunction("print_bin_op", {},
-//                                    {FloatType::getF32(&globalContext()),
-//                                     FloatType::getF32(&globalContext()),
-//                                     FloatType::getF32(&globalContext())});
+    auto printVal =
+        declareFunction("print_f32", {},
+        {FloatType::getF32(&globalContext())});
+    auto printBinOp = declareFunction("print_bin_op", {},
+                                      {FloatType::getF32(&globalContext()),
+                                       FloatType::getF32(&globalContext()),
+                                       FloatType::getF32(&globalContext())});
 
   printMemref.print(llvm::outs());
-//  printVal.print(llvm::outs());
-//  printBinOp.print(llvm::outs());
+    printVal.print(llvm::outs());
+    printBinOp.print(llvm::outs());
 
   printMemref.erase();
-//  printVal.erase();
-//  printBinOp.erase();
+    printVal.erase();
+    printBinOp.erase();
 }
 
 TEST_FUNC(build_and_lower_matrix_multiplication) {
@@ -154,7 +165,74 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
   f.erase();
 }
 
-// TODO: This one computes the wrong result
+TEST_FUNC(test_conv2) {
+  int64_t width = 9;
+  int64_t height = 9;
+  int64_t kernelWidth = 3;
+  int64_t kernelHeight = 3;
+  auto f32Type = FloatType::getF32(&globalContext());
+
+  auto f = makeFunction("conv2D", {},
+                        {MemRefType::get({height, width}, f32Type, {}, 0),
+                         MemRefType::get({kernelHeight, kernelWidth}, f32Type, {}, 0),
+                         MemRefType::get({height, width}, f32Type, {}, 0)});
+
+  OpBuilder builder(f.getBody());
+  ScopedContext scope(builder, f.getLoc());
+
+  Value inputArg = f.getArgument(0);
+  Value kernelArg = f.getArgument(1);
+  Value output = f.getArgument(2);
+
+  Value A = in(inputArg, arrayType(height, arrayType(width, scalarF32Type())));
+  Value kernel = in(kernelArg, arrayType(kernelHeight, arrayType(kernelWidth, scalarF32Type())));
+
+  Value result = conv2D(A, kernel);
+  out(output, result);
+  std_ret();
+
+  // generate test
+  auto testFun = makeFunction("conv2D_test", {}, {});
+  OpBuilder test_builder(testFun.getBody());
+  ScopedContext test_scope(test_builder, testFun.getLoc());
+  mlir::edsc::highlevel::generateTest(2, {height, width}, {kernelHeight, kernelWidth}, {height, width},
+                                      f);
+  std_ret();
+  // clang-format off
+  // CONV_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [9, 9] strides = [9, 1] data =
+  // CONV_2D_TEST:       {{\[\[}}1,   2,   3,   4,   5,   6,   7,   8,   9],
+  // CONV_2D_TEST:        [10,   11,   12,   13,   14,   15,   16,   17,   18],
+  // CONV_2D_TEST:        [19,   20,   21,   22,   23,   24,   25,   26,   27],
+  // CONV_2D_TEST:        [28,   29,   30,   31,   32,   33,   34,   35,   36],
+  // CONV_2D_TEST:        [37,   38,   39,   40,   41,   42,   43,   44,   45],
+  // CONV_2D_TEST:        [46,   47,   48,   49,   50,   51,   52,   53,   54],
+  // CONV_2D_TEST:        [55,   56,   57,   58,   59,   60,   61,   62,   63],
+  // CONV_2D_TEST:        [64,   65,   66,   67,   68,   69,   70,   71,   72],
+  // CONV_2D_TEST:        [73,   74,   75,   76,   77,   78,   79,   80,   81]]
+  // CONV_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // CONV_2D_TEST:       {{\[\[}}1,   1,   1],
+  // CONV_2D_TEST:        [1,   1,   1],
+  // CONV_2D_TEST:        [1,   1,   1]]
+  // CONV_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [9, 9] strides = [9, 1] data =
+  // CONV_2D_TEST:       {{\[\[}}39,   45,   54,   63,   72,   81,   90,   99,   105],
+  // CONV_2D_TEST:        [93,   99,   108,   117,   126,   135,   144,   153,   159],
+  // CONV_2D_TEST:        [174,   180,   189,   198,   207,   216,   225,   234,   240],
+  // CONV_2D_TEST:        [255,   261,   270,   279,   288,   297,   306,   315,   321],
+  // CONV_2D_TEST:        [336,   342,   351,   360,   369,   378,   387,   396,   402],
+  // CONV_2D_TEST:        [417,   423,   432,   441,   450,   459,   468,   477,   483],
+  // CONV_2D_TEST:        [498,   504,   513,   522,   531,   540,   549,   558,   564],
+  // CONV_2D_TEST:        [579,   585,   594,   603,   612,   621,   630,   639,   645],
+  // CONV_2D_TEST:        [633,   639,   648,   657,   666,   675,   684,   693,   699]]
+  // clang-format on
+
+
+  f.print(llvm::outs());
+  testFun.print(llvm::outs());
+
+  f.erase();
+  testFun.erase();
+}
+
 TEST_FUNC(build_lower_and_execute_2Dstencil) {
   // A:MxN * B:NxK = C:MxK
   int64_t x_size = 7;
@@ -181,7 +259,7 @@ TEST_FUNC(build_lower_and_execute_2Dstencil) {
   ScopedContext test_scope(test_builder, testFun.getLoc());
   mlir::edsc::highlevel::generateTest(2, {x_size, y_size}, {x_size, y_size}, f);
   std_ret();
-// clang-format off
+  // clang-format off
 
 // STENCIL_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [7, 5] strides = [5, 1] data =
 // STENCIL_2D_TEST:       {{\[\[}}50,   60,   75,   90,   100],
@@ -191,7 +269,7 @@ TEST_FUNC(build_lower_and_execute_2Dstencil) {
 // STENCIL_2D_TEST:        [305,   315,   330,   345,   355],
 // STENCIL_2D_TEST:        [365,   375,   390,   405,   415],
 // STENCIL_2D_TEST:        [410,   420,   435,   450,   460]]
-// clang-format on
+  // clang-format on
 
   f.print(llvm::outs());
   testFun.print(llvm::outs());
@@ -200,10 +278,7 @@ TEST_FUNC(build_lower_and_execute_2Dstencil) {
   testFun.erase();
 }
 
-using namespace mlir::edsc::op;
-using namespace mlir::edsc::type;
-using namespace mlir::edsc::highlevel;
-using namespace mlir::edsc::abstraction;
+
 
 TEST_FUNC(test_slide2d) {
   int64_t M = 7;
@@ -214,7 +289,7 @@ TEST_FUNC(test_slide2d) {
 
   auto f = makeFunction("slide2D", {},
                         {MemRefType::get({M, N}, f32Type, {}, 0),
-                         MemRefType::get({M-2, N-4, slideOuter, slideInner},
+                         MemRefType::get({M - 2, N - 4, slideOuter, slideInner},
                                          f32Type, {}, 0)});
 
   OpBuilder builder(f.getBody());
@@ -224,7 +299,8 @@ TEST_FUNC(test_slide2d) {
   Value output = f.getArgument(1);
 
   Value inn = in(input, arrayType(M, arrayType(N, scalarF32Type())));
-  Value slizzled = slide2D(natType(slideOuter), natType(1), natType(slideInner), natType(1), inn);
+  Value slizzled = slide2D(natType(slideOuter), natType(1), natType(slideInner),
+                           natType(1), inn);
 
   Value mapped = mapSeq2D(
       array2DType(slideOuter, slideInner, scalarF32Type()),
@@ -311,27 +387,89 @@ TEST_FUNC(test_pad2d) {
   mlir::edsc::highlevel::generateTest(2, {height, width}, {outHeight, outWidth},
                                       f);
   std_ret();
+  // clang-format off
+  // PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [7, 5] strides = [5, 1] data =
+  // PAD_2D_TEST:       {{\[\[}}0,   1,   2,   3,   4],
+  // PAD_2D_TEST:        [5,   6,   7,   8,   9],
+  // PAD_2D_TEST:        [10,   11,   12,   13,   14],
+  // PAD_2D_TEST:        [15,   16,   17,   18,   19],
+  // PAD_2D_TEST:        [20,   21,   22,   23,   24],
+  // PAD_2D_TEST:        [25,   26,   27,   28,   29],
+  // PAD_2D_TEST:        [30,   31,   32,   33,   34]]
+  // PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [11, 7] strides = [7, 1] data =
+  // PAD_2D_TEST:       {{\[\[}}0,   0,   1,   2,   3,   4,   4],
+  // PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
+  // PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
+  // PAD_2D_TEST:        [5,   5,   6,   7,   8,   9,   9],
+  // PAD_2D_TEST:        [10,   10,   11,   12,   13,   14,   14],
+  // PAD_2D_TEST:        [15,   15,   16,   17,   18,   19,   19],
+  // PAD_2D_TEST:        [20,   20,   21,   22,   23,   24,   24],
+  // PAD_2D_TEST:        [25,   25,   26,   27,   28,   29,   29],
+  // PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
+  // PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
+  // PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34]]
+  // clang-format on
 
-// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [7, 5] strides = [5, 1] data =
-// PAD_2D_TEST:       {{\[\[}}0,   1,   2,   3,   4],
-// PAD_2D_TEST:        [5,   6,   7,   8,   9],
-// PAD_2D_TEST:        [10,   11,   12,   13,   14],
-// PAD_2D_TEST:        [15,   16,   17,   18,   19],
-// PAD_2D_TEST:        [20,   21,   22,   23,   24],
-// PAD_2D_TEST:        [25,   26,   27,   28,   29],
-// PAD_2D_TEST:        [30,   31,   32,   33,   34]]
-// PAD_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [11, 7] strides = [7, 1] data =
-// PAD_2D_TEST:       {{\[\[}}0,   0,   1,   2,   3,   4,   4],
-// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
-// PAD_2D_TEST:        [0,   0,   1,   2,   3,   4,   4],
-// PAD_2D_TEST:        [5,   5,   6,   7,   8,   9,   9],
-// PAD_2D_TEST:        [10,   10,   11,   12,   13,   14,   14],
-// PAD_2D_TEST:        [15,   15,   16,   17,   18,   19,   19],
-// PAD_2D_TEST:        [20,   20,   21,   22,   23,   24,   24],
-// PAD_2D_TEST:        [25,   25,   26,   27,   28,   29,   29],
-// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
-// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34],
-// PAD_2D_TEST:        [30,   30,   31,   32,   33,   34,   34]]
+  f.print(llvm::outs());
+  testFun.print(llvm::outs());
+
+  f.erase();
+  testFun.erase();
+}
+
+TEST_FUNC(test_zip2D) {
+  int64_t width = 3;
+  int64_t height = 3;
+  auto f32Type = FloatType::getF32(&globalContext());
+
+  auto f = makeFunction("zip2D", {},
+                        {MemRefType::get({height, width}, f32Type, {}, 0),
+                         MemRefType::get({height, width}, f32Type, {}, 0),
+                         MemRefType::get({height, width}, f32Type, {}, 0)});
+
+  OpBuilder builder(f.getBody());
+  ScopedContext scope(builder, f.getLoc());
+
+  Value inputA = f.getArgument(0);
+  Value inputB = f.getArgument(1);
+  Value output = f.getArgument(2);
+
+  Value inA = in(inputA, arrayType(height, arrayType(width, scalarF32Type())));
+  Value inB = in(inputA, arrayType(height, arrayType(width, scalarF32Type())));
+
+  Value zipped = zip2D(inA, inB);
+  Value result = mapSeq2D(
+      scalarF32Type(),
+      [&](Value tuple) {
+        return embed2(scalarF32Type(), ValueRange{fst(tuple), snd(tuple)},
+                      [&](Value fst, Value snd) { return fst * snd; });
+      },
+      zipped);
+  out(output, result);
+  std_ret();
+
+  // generate test
+  auto testFun = makeFunction("zip2D_test", {}, {});
+  OpBuilder test_builder(testFun.getBody());
+  ScopedContext test_scope(test_builder, testFun.getLoc());
+  mlir::edsc::highlevel::generateTest(2, {height, width}, {height, width}, {height, width},
+                                      f);
+  std_ret();
+
+  // clang-format off
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}1,   2,   3],
+  // ZIP_2D_TEST:        [4,   5,   6],
+  // ZIP_2D_TEST:        [7,   8,   9]]
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}1,   1,   1],
+  // ZIP_2D_TEST:        [1,   1,   1],
+  // ZIP_2D_TEST:        [1,   1,   1]]
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}1,   4,   9],
+  // ZIP_2D_TEST:        [16,   25,   36],
+  // ZIP_2D_TEST:        [49,   64,   81]]
+  // clang-format on
 
 
   f.print(llvm::outs());

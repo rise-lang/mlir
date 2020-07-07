@@ -30,7 +30,7 @@ namespace edsc {
 namespace highlevel {
 
 void matrix_multiplication(int M, int N, int K, Value A, Value B, Value C);
-void convolution();
+Value conv2D(Value input, Value kernel);
 void stencil(int N, int windowSize, int step, Value input, Value output);
 void stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize, int innerStep,
@@ -39,7 +39,9 @@ void stencil2D(int M, int N, int outerWindowSize,
 // utilities
 void generateTest(int dims, ArrayRef<int64_t> inSizes,
                   ArrayRef<int64_t> outSizes, FuncOp riseFun = nullptr);
-
+void generateTest(int dims, ArrayRef<int64_t> inSizesA, ArrayRef<int64_t> inSizesB,
+                                         ArrayRef<int64_t> outSizes,
+                                         FuncOp riseFun = nullptr);
 } // namespace highlevel
 } // namespace edsc
 } // namespace mlir

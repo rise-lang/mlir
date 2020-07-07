@@ -88,6 +88,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
                                   outOp.getOperand(0))
                   .getResult();
 
+
   if (ApplyOp apply = dyn_cast<ApplyOp>(outOp.getOperand(1).getDefiningOp())) {
     AccT(apply, out, rewriter);
   } else {
@@ -113,6 +114,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     }
     return;
   });
+
   size_t unneededLeftoverOps = leftoverOps.size();
   for (size_t i = 0; i < unneededLeftoverOps; i++) {
     auto op = leftoverOps.pop_back_val();
@@ -134,7 +136,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     return;
   });
 
-//  funcOp.dump();
   // Codegen:
   bool doCodegen = true;
   SmallVector<Operation *, 10> erasureList = {};
@@ -145,7 +146,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   }
   emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
-//  funcOp.dump();
   //   cleanup:
   //   erase intermediate operations.
   //   We remove them back to front right now,
@@ -741,7 +741,6 @@ void mlir::rise::AccT(ApplyOp apply, Value out, PatternRewriter &rewriter) {
   } else {
     emitRemark(appliedFun->getLoc())
         << "Can't lower the application of op: " << appliedFun->getName();
-    appliedFun->getParentOfType<FuncOp>().dump();
   }
 }
 
@@ -760,7 +759,6 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
                                      .getValue();
 
       emitRemark(contValue.getLoc()) << "Literal value: " << literalValue;
-      contValue.getDefiningOp()->getParentOfType<FuncOp>().dump();
 
       if (LiteralOp op = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
         if (op.literalAttr()
@@ -929,12 +927,13 @@ mlir::Value mlir::rise::ConT(mlir::Value contValue,
         return slideInterm;
       } else if (PadOp padOp = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
         emitRemark(contValue.getLoc()) << "ConT of Applied Pad";
-        auto padValCont =
-            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
+        //        auto padValCont =
+        //            ConT(apply.getOperand(1), rewriter.getInsertionPoint(),
+        //            rewriter);
         auto arrayCont =
-            ConT(apply.getOperand(2), rewriter.getInsertionPoint(), rewriter);
+            ConT(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
         auto padInterm = rewriter.create<PadIntermediateOp>(
-            padOp.getLoc(), apply.getType(), padValCont, arrayCont,
+            padOp.getLoc(), apply.getType(), arrayCont,
             padOp.getAttrOfType<NatAttr>("n"),
             padOp.getAttrOfType<NatAttr>("l"),
             padOp.getAttrOfType<NatAttr>("r"),
@@ -1228,6 +1227,8 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       return embedReturn.getOperand(0);
 
     } else if (IdxOp idx = dyn_cast<IdxOp>(val.getDefiningOp())) {
+      // printPath(path, "idx");
+
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
       Value arg1 = idx.arg1();
@@ -1240,9 +1241,10 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       return generateWriteAccess(path, alloc.getResult(), rewriter);
     } else if (MapReadIntermediateOp mapReadOp =
                    dyn_cast<MapReadIntermediateOp>(val.getDefiningOp())) {
+      // printPath(path, "MapRead:");
+
       emitRemark(mapReadOp.getLoc()) << "Codegen for MapRead";
 
-      //      mapReadOp.array().getDefiningOp()->dump();
       auto i = mpark::get<Value>(path.pop_back_val());
       auto idx = rewriter.create<IdxOp>(
           mapReadOp.getLoc(),
@@ -1250,7 +1252,6 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
           mapReadOp.array(), i);
 
       mapReadOp.placeholder().replaceAllUsesWith(idx.getResult());
-
       return codeGen(mapReadOp.f(), path, rewriter);
     } else if (ZipIntermediateOp zipIntermOp =
                    dyn_cast<ZipIntermediateOp>(val.getDefiningOp())) {
@@ -1270,6 +1271,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       }
     } else if (FstIntermediateOp fstIntermOp =
                    dyn_cast<FstIntermediateOp>(val.getDefiningOp())) {
+      // printPath(path, "fst");
       emitRemark(fstIntermOp.getLoc()) << "Codegen for fst";
 
       path.push_back(true);
@@ -1277,6 +1279,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
     } else if (SndIntermediateOp sndIntermOp =
                    dyn_cast<SndIntermediateOp>(val.getDefiningOp())) {
+      // printPath(path, "snd");
       emitRemark(sndIntermOp.getLoc()) << "Codegen for snd";
 
       path.push_back(false);
@@ -1334,6 +1337,7 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       return codeGen(joinIntermediateOp.value(), path, rewriter);
     } else if (TransposeIntermediateOp transposeIntermediateOp =
                    dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
+      // printPath(path, "Transpose:");
       emitRemark(val.getLoc()) << "Codegen for Transpose";
       auto n = path.pop_back_val();
       auto m = path.pop_back_val();
@@ -1344,22 +1348,31 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
       return codeGen(transposeIntermediateOp.getOperand(), path, rewriter);
     } else if (SlideIntermediateOp slideIntermediateOp =
                    dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
+      // printPath(path, "Slide:");
+
       emitRemark(val.getLoc()) << "Codegen for Slide";
+
       Value i = mpark::get<Value>(path.pop_back_val());
       Value j = mpark::get<Value>(path.pop_back_val());
+
+      if (!j) {
+        emitError(slideIntermediateOp.getLoc())
+            << "Cannot do codegen for slide, path structure not correct!";
+      }
 
       Value s2 =
           rewriter
               .create<ConstantIndexOp>(slideIntermediateOp.getLoc(),
                                        slideIntermediateOp.sp().getIntValue())
               .getResult();
+
       Value i_times_s2 =
           rewriter.create<MulIOp>(slideIntermediateOp.getLoc(), i, s2)
               .getResult();
+
       Value newIndex =
           rewriter.create<AddIOp>(slideIntermediateOp.getLoc(), i_times_s2, j)
               .getResult();
-
       path.push_back(newIndex);
 
       return codeGen(slideIntermediateOp.value(), path, rewriter);
@@ -1504,32 +1517,27 @@ void mlir::rise::generateReadAccess(SmallVector<OutputPathType, 10> path,
 
 /// This is obviously not really working.
 /// For some Values it prints ints.
-void mlir::rise::printPath(SmallVector<OutputPathType, 10> input) {
+void mlir::rise::printPath(SmallVector<OutputPathType, 10> path, StringRef additionalInfo) {
   struct {
     void operator()(Value val) {
       if (val.isa<OpResult>()) {
         std::cout << "val: "
-                  << val.getDefiningOp()->getName().getStringRef().str() << " ";
+                  << val.getDefiningOp()->getName().getStringRef().str();
       } else {
-        std::cout << "blockArg, ";
+        std::cout << "blockArg";
       }
     }
-    void operator()(Value *val) {
-      if (val->isa<OpResult>()) {
-        std::cout << "val: "
-                  << val->getDefiningOp()->getName().getStringRef().str()
-                  << " ";
-      } else {
-        std::cout << "blockArg, ";
-      }
+    void operator()(int i) {
+      i ? std::cout <<"fst" : std::cout <<"snd";
     }
-    void operator()(int i) { std::cout << "int!" << i << ", "; }
-    void operator()(std::string const &) { std::cout << "string!"; }
-    void operator()(bool b) { std::cout << "bool: " << b << ", "; }
+//    void operator()(std::string const &) { std::cout << "string!"; }
+//    void operator()(bool b) { std::cout << "bool: " << b <; }
   } visitor;
-  std::cout << "path: {";
-  for (OutputPathType element : input) {
-    mpark::visit(visitor, input[0]);
+  std::cout << "path: " << additionalInfo.str() << " {";
+  for (int i = 0; i < path.size(); i++) {
+    mpark::visit(visitor, path[i]);
+    if (i < path.size()-1)
+      std::cout << ", ";
   }
   std::cout << "}\n" << std::flush;
 }

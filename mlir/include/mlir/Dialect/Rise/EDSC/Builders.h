@@ -53,6 +53,7 @@ Value mapSeq2D(StringRef lowerTo, DataType resultElemType,
 Value slide2D(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
               Value array2DVal);
 Value pad2D(Nat lOuter, Nat rOuter, Nat lInner, Nat rInner, Value array);
+Value zip2D(Value array2DA, Value array2DB);
 
 Value sumLambda(ScalarType summandType);          // return val1 + val2
 Value multAndSumUpLambda(ScalarType summandType); // return (val1 + val2) * val3

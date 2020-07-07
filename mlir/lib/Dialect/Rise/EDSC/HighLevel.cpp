@@ -31,6 +31,15 @@ using namespace mlir::edsc::type;
 using namespace mlir::edsc::abstraction;
 using namespace mlir::edsc::intrinsics;
 
+// void mlir::edsc::highlevel::makeRiseProgram(ArrayRef<Value> inputs, Value
+// output, function_ref<Value(BlockArgument)> bodyBuilder) {
+//  return;
+//}
+//
+// void mlir::edsc::highlevel::makeRiseTest(bool forwardDeclare = false) {
+//  // generate funcs and calls and everything
+//}
+
 // A:MxN * B:NxK = C:MxK
 void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
                                                   Value B, Value C) {
@@ -88,6 +97,56 @@ void mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
   out(output, mapped);
 }
 
+Value mlir::edsc::highlevel::conv2D(Value input, Value kernel) {
+  ArrayType inputHeight = input.getType().dyn_cast<ArrayType>();
+  ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
+  ArrayType kernelHeight = kernel.getType().dyn_cast<ArrayType>();
+  ArrayType kernelWidth = kernelHeight.getElementType().dyn_cast<ArrayType>();
+
+  int steplr = 1;
+  int steptb = 1;
+
+  int nWidth = (inputWidth.getSize().getIntValue() + steplr -
+                kernelWidth.getSize().getIntValue()) /
+               steplr;
+  int nHeight = (inputHeight.getSize().getIntValue() + steptb -
+                 kernelHeight.getSize().getIntValue()) /
+                steptb;
+
+  // If padding has to be different for l and r we pad 1 more on the left.
+  int padInnerl = ceil((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padInnerr = floor((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padOuterl = ceil((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+  int padOuterr = floor((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+
+  ScalarType elementType = scalarF32Type();
+  Value padded = pad2D(natType(padOuterl), natType(padOuterr),
+                       natType(padInnerl), natType(padInnerr), input);
+
+  Value slided = slide2D(kernelHeight.getSize(), natType(1),
+                         kernelWidth.getSize(), natType(1), padded);
+  return mapSeq2D(
+      elementType,
+      [&](Value slidingWindow) {
+        Value zipped = zip2D(slidingWindow, kernel);
+        Value joined = join(zipped);
+
+        return reduceSeq(
+            elementType,
+            [&](Value tuple, Value acc) {
+              return embed3(scalarF32Type(), {fst(tuple), snd(tuple), acc},
+                            [&](Value fst, Value snd, Value acc) {
+                              Value res = acc + fst * snd;
+//                              std_call("print_bin_op", ArrayRef<Type>(),
+//                                       ValueRange{fst, snd, res});
+                              return res;
+                            });
+            },
+            literal(scalarF32Type(), "0.000000"), joined);
+      },
+      slided);
+}
+
 void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize,
                                       int innerStep, Value input,
@@ -120,7 +179,8 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
            "more "
            "on the left than on the right!";
 
-  Value A_padded = pad2D(natType(padOuterl), natType(padOuterr),natType(padInnerl), natType(padInnerr), A);
+  Value A_padded = pad2D(natType(padOuterl), natType(padOuterr),
+                         natType(padInnerl), natType(padInnerr), A);
   Value slizzled =
       slide2D(natType(outerWindowSize), natType(outerStep),
               natType(innerWindowSize), natType(innerStep), A_padded);
@@ -131,16 +191,21 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
       [&](Value slidingWindow) {
         Value flattenedWindow = join(slidingWindow);
         return reduceSeq(
-            "loop", scalarF32Type(), [&](Value arg1, Value arg2){
+            "loop", scalarF32Type(),
+            [&](Value arg1, Value arg2) {
               return embed2(scalarF32Type(), {arg1, arg2},
                             [&](Value arg1, Value arg2) {
                               Value res = arg1 + arg2;
-//                              std_call("print_bin_op", ArrayRef<Type>(), ValueRange{arg1, arg2, res});
+                              //                              std_call("print_bin_op",
+                              //                              ArrayRef<Type>(),
+                              //                              ValueRange{arg1,
+                              //                              arg2, res});
                               return res;
                             });
             },
             literal(scalarF32Type(), "0.000000"), flattenedWindow);
-      }, slizzled);
+      },
+      slizzled);
 
   out(output, mapped);
 }
@@ -160,7 +225,6 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes,
   auto inMemrefType = MemRefType::get(inSizes, f32Type, {}, 0);
   auto outMemrefType = MemRefType::get(outSizes, f32Type, {}, 0);
 
-  //  Value[dims] lbs = std_constant_index(inSizes);
   SmallVector<Value, 4> lbs;
   SmallVector<Value, 4> ubs;
   SmallVector<Value, 4> steps;
@@ -200,6 +264,93 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes,
     Value castedIn =
         std_memref_cast(inMemref, UnrankedMemRefType::get(f32Type, 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedIn});
+    Value castedOut =
+        std_memref_cast(outMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedOut});
+  }
+}
+
+// TODO genTestND
+void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizesA,
+                                         ArrayRef<int64_t> inSizesB,
+                                         ArrayRef<int64_t> outSizes,
+                                         FuncOp riseFun) {
+  auto f32Type = FloatType::getF32(ScopedContext::getContext());
+
+  if (!(dims == inSizesA.size())) {
+    emitError(ScopedContext::getLocation())
+        << "Generating test failed. Dims has to match number of "
+           "input and output sizes!";
+    return;
+  }
+
+  auto inAMemrefType = MemRefType::get(inSizesA, f32Type, {}, 0);
+  auto inBMemrefType = MemRefType::get(inSizesB, f32Type, {}, 0);
+  auto outMemrefType = MemRefType::get(outSizes, f32Type, {}, 0);
+
+  SmallVector<Value, 4> lbs;
+  SmallVector<Value, 4> ubA;
+  SmallVector<Value, 4> ubB;
+  SmallVector<Value, 4> steps;
+
+  for (int i = 0; i < dims; i++) {
+    lbs.push_back(std_constant_index(0));
+    ubA.push_back(std_constant_index(inSizesA[i]));
+    ubB.push_back(std_constant_index(inSizesB[i]));
+    steps.push_back(std_constant_index(1));
+  }
+
+  Value inAMemref = std_alloc(inAMemrefType);
+  Value inBMemref = std_alloc(inBMemrefType);
+  Value outMemref = std_alloc(outMemrefType);
+
+  StdIndexedValue inA(inAMemref);
+  StdIndexedValue inB(inBMemref);
+  StdIndexedValue out(outMemref);
+
+  Value cst0f = std_constant_float(llvm::APFloat(0.0f), f32Type);
+  Value cst1f = std_constant_float(llvm::APFloat(1.0f), f32Type);
+  Value cst2f = std_constant_float(llvm::APFloat(2.0f), f32Type);
+
+  // Init input A
+  StdIndexedValue initAVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  initAVal = cst1f;
+
+  // initializing the input with ascending values starting with 0
+  loopNestBuilder(lbs, ubA, steps, [&](auto ivs) {
+    // bring ivs from ValueRange -> SmallVector to be usable by
+    // TemplatedIndexedValue
+    SmallVector<Value, 4> ivs_vector;
+    for (int i = 0; i < dims; i++) {
+      ivs_vector.push_back(ivs[i]);
+    }
+    inA(ivs_vector) = initAVal();
+    initAVal = initAVal + cst1f;
+  });
+
+  // init input B with only 1s
+  StdIndexedValue initBVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  initBVal = cst1f;
+
+  // initializing the input with 1s
+  loopNestBuilder(lbs, ubB, steps, [&](auto ivs) {
+    SmallVector<Value, 4> ivs_vector;
+    for (int i = 0; i < dims; i++) {
+      ivs_vector.push_back(ivs[i]);
+    }
+    inB(ivs_vector) = initBVal();
+    //    initBVal = initBVal + cst1f;
+  });
+
+  if (riseFun) {
+    std_call(riseFun, ValueRange{inAMemref, inBMemref, outMemref});
+    Value castedInA =
+        std_memref_cast(inAMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInA});
+    Value castedInB =
+        std_memref_cast(inBMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInB});
+
     Value castedOut =
         std_memref_cast(outMemref, UnrankedMemRefType::get(f32Type, 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedOut});

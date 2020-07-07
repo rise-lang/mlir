@@ -7,10 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
-#include "mlir/Dialect/StandardOps/EDSC/Builders.h"
-#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
+#include "mlir/Dialect/StandardOps/EDSC/Builders.h"
+#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 
 #include <iostream>
 
@@ -217,9 +217,9 @@ Value mlir::edsc::op::transpose(Value array) {
 Value mlir::edsc::op::slide(Nat windowSize, Nat step, Value array) {
   MLIRContext *context = ScopedContext::getContext();
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
-  int n =
-      (arrayT.getSize().getIntValue() + step.getIntValue() - windowSize.getIntValue()) /
-      step.getIntValue();
+  int n = (arrayT.getSize().getIntValue() + step.getIntValue() -
+           windowSize.getIntValue()) /
+          step.getIntValue();
 
   return slide(natType(n), windowSize, step, arrayT.getElementType(), array);
 }
@@ -240,18 +240,23 @@ Value mlir::edsc::op::literal(DataType t, StringRef literal) {
 // Rise high-level abstractions
 //===----------------------------------------------------------------------===//
 
-Value mlir::edsc::abstraction::mapSeq2D(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
-               Value array2D) {
-    return mapSeq2D("loop", resultElemType, bodyBuilder, array2D);
+Value mlir::edsc::abstraction::mapSeq2D(
+    DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
+    Value array2D) {
+  return mapSeq2D("loop", resultElemType, bodyBuilder, array2D);
 }
 
-Value mlir::edsc::abstraction::mapSeq2D(StringRef lowerTo, DataType resultElemType,
-               function_ref<Value(BlockArgument)> bodyBuilder, Value array2D) {
+Value mlir::edsc::abstraction::mapSeq2D(
+    StringRef lowerTo, DataType resultElemType,
+    function_ref<Value(BlockArgument)> bodyBuilder, Value array2D) {
   ArrayType arrayT = array2D.getType().dyn_cast<ArrayType>();
   ArrayType nestedArrayT = arrayT.getElementType().dyn_cast<ArrayType>();
-  return mapSeq(lowerTo , arrayType(nestedArrayT.getSize(), resultElemType), [&](Value array) {
+  return mapSeq(
+      lowerTo, arrayType(nestedArrayT.getSize(), resultElemType),
+      [&](Value array) {
         return mapSeq(lowerTo, resultElemType, bodyBuilder, array);
-      }, array2D);
+      },
+      array2D);
 }
 
 Value mlir::edsc::abstraction::slide2D(Nat szOuter, Nat spOuter, Nat szInner,
@@ -263,7 +268,8 @@ Value mlir::edsc::abstraction::slide2D(Nat szOuter, Nat spOuter, Nat szInner,
                           spInner.getIntValue();
 
   Value afterFirstSlide = map(
-      arrayType(newInnerArraySize, arrayType(szInner, innerArrayType.getElementType())),
+      arrayType(newInnerArraySize,
+                arrayType(szInner, innerArrayType.getElementType())),
       [&](Value innerArray) { return slide(szInner, spInner, innerArray); },
       array2DVal);
 
@@ -285,47 +291,54 @@ Value mlir::edsc::abstraction::slide2D(Nat szOuter, Nat spOuter, Nat szInner,
   return transposed;
 }
 
-Value mlir::edsc::abstraction::pad2D(Nat lOuter, Nat rOuter, Nat lInner, Nat rInner, Value array) {
+Value mlir::edsc::abstraction::pad2D(Nat lOuter, Nat rOuter, Nat lInner,
+                                     Nat rInner, Value array) {
   ArrayType outerArrayType = array.getType().dyn_cast<ArrayType>();
-  ArrayType innerArrayType = outerArrayType.getElementType().dyn_cast<ArrayType>();
+  ArrayType innerArrayType =
+      outerArrayType.getElementType().dyn_cast<ArrayType>();
 
-  Value map_pad = map(arrayType(innerArrayType.getSize().getIntValue() + lInner.getIntValue() + rInner.getIntValue(), innerArrayType.getElementType()), [&](Value innerArray){
-                                   return padClamp(lInner, rInner, innerArray);
-                                 }, array);
+  Value map_pad = map(
+      arrayType(innerArrayType.getSize().getIntValue() + lInner.getIntValue() +
+                    rInner.getIntValue(),
+                innerArrayType.getElementType()),
+      [&](Value innerArray) { return padClamp(lInner, rInner, innerArray); },
+      array);
   return padClamp(lOuter, rOuter, map_pad);
-
 }
 
-//def padClamp2D(b: Nat): Expr = padClamp2D(b, b, b, b)
-//def padClamp2D(l: Nat, r: Nat): Expr = padClamp2D(l, r, l, r)
-//def padClamp2D(lOuter: Nat, rOuter: Nat, lInner: Nat, rInner: Nat): Expr =
-//  map(padClamp(lInner)(rInner)) >> padClamp(lOuter)(rOuter)
+Value mlir::edsc::abstraction::zip2D(Value array2DA, Value array2DB) {
+  ArrayType arrayAType = array2DA.getType().dyn_cast<ArrayType>();
+  ArrayType nestedAType = arrayAType.getElementType().dyn_cast<ArrayType>();
+  ArrayType arrayBType = array2DB.getType().dyn_cast<ArrayType>();
+  ArrayType nestedBType = arrayBType.getElementType().dyn_cast<ArrayType>();
+
+  return map(
+      arrayType(nestedAType.getSize(), tupleType(nestedAType.getElementType(),
+                                                 nestedBType.getElementType())),
+      [&](Value tuple) { return zip(fst(tuple), snd(tuple)); },
+      zip(array2DA, array2DB));
+}
 
 using namespace mlir::edsc::op;
 Value mlir::edsc::abstraction::sumLambda(ScalarType summandType) {
-  return lambda(
-      funType(summandType, funType(summandType, summandType)), [&](auto args) {
-        return (
-            embed(summandType, ValueRange{args[0], args[1]}, [&](auto args) {
-              return args[0] + args[1];
-            }));
-      });
+  return lambda(funType(summandType, funType(summandType, summandType)),
+                [&](auto args) {
+                  return (embed(summandType, ValueRange{args[0], args[1]},
+                                [&](auto args) { return args[0] + args[1]; }));
+                });
 }
 
 Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
-  return lambda(
-      funType(tupleType(summandType, summandType),
-              funType(summandType, summandType)),
-      [&](auto args) {
-        return (embed(
-            summandType,
-            ValueRange{fst(summandType, summandType, args[0]),
-                       snd(summandType, summandType, args[0]), args[1]},
-            [&](auto args) {
-              return
-                  args[0] * (args[1] + args[2]);
-            }));
-      });
+  return lambda(funType(tupleType(summandType, summandType),
+                        funType(summandType, summandType)),
+                [&](auto args) {
+                  return (
+                      embed3(summandType,
+                             ValueRange{fst(args[0]), snd(args[0]), args[1]},
+                             [&](Value fst, Value snd, Value acc) {
+                               return acc + (fst * snd);
+                             }));
+                });
 }
 
 //===----------------------------------------------------------------------===//
@@ -361,7 +374,7 @@ Value mlir::edsc::op::lambda2(
 Value mlir::edsc::op::lambda3(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -375,7 +388,7 @@ Value mlir::edsc::op::lambda3(
 Value mlir::edsc::op::lambda4(FunType lambdaType,
                               function_ref<Value(BlockArgument, BlockArgument,
                                                  BlockArgument, BlockArgument)>
-                              bodyBuilder) {
+                                  bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -390,7 +403,7 @@ Value mlir::edsc::op::lambda5(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -405,7 +418,7 @@ Value mlir::edsc::op::lambda6(
     FunType lambdaType,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return ValueBuilder<LambdaOp>(
       lambdaType, [&](OpBuilder &nestedBuilder, Location nestedLoc,
                       MutableArrayRef<BlockArgument> args) {
@@ -437,7 +450,7 @@ Value mlir::edsc::op::embed2(
 Value mlir::edsc::op::embed3(
     Type result, ValueRange exposedValues,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2]);
   });
@@ -447,7 +460,7 @@ Value mlir::edsc::op::embed3(
 Value mlir::edsc::op::embed4(Type result, ValueRange exposedValues,
                              function_ref<Value(BlockArgument, BlockArgument,
                                                 BlockArgument, BlockArgument)>
-                             bodyBuilder) {
+                                 bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2], args[3]);
   });
@@ -458,7 +471,7 @@ Value mlir::edsc::op::embed5(
     Type result, ValueRange exposedValues,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2], args[3], args[4]);
   });
@@ -469,7 +482,7 @@ Value mlir::edsc::op::embed6(
     Type result, ValueRange exposedValues,
     function_ref<Value(BlockArgument, BlockArgument, BlockArgument,
                        BlockArgument, BlockArgument, BlockArgument)>
-    bodyBuilder) {
+        bodyBuilder) {
   return embed(result, exposedValues, [&](MutableArrayRef<BlockArgument> args) {
     return bodyBuilder(args[0], args[1], args[2], args[3], args[4], args[5]);
   });
@@ -700,13 +713,11 @@ Value mlir::edsc::op::slide(Nat n, Nat sz, Nat sp, DataType t, Value array) {
 Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t) {
   MLIRContext *context = ScopedContext::getContext();
   FunType padType = FunType::get(
-      context, t,
-      FunType::get(
-          context, ArrayType::get(context, n, t),
-          ArrayType::get(context,
-                         Nat::get(context, l.getIntValue() + n.getIntValue() +
-                                               r.getIntValue()),
-                         t)));
+      context, ArrayType::get(context, n, t),
+      ArrayType::get(context,
+                     Nat::get(context, l.getIntValue() + n.getIntValue() +
+                                           r.getIntValue()),
+                     t));
   return ValueBuilder<PadOp>(padType, NatAttr::get(context, n),
                              NatAttr::get(context, l), NatAttr::get(context, r),
                              DataTypeAttr::get(context, t));
@@ -714,8 +725,6 @@ Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t) {
 
 Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t, Value array) {
   MLIRContext *context = ScopedContext::getContext();
-  Value cst0 = mlir::edsc::intrinsics::std_constant_float(
-      llvm::APFloat(7.0f), FloatType::getF32(context));
 
   Value pad = padClamp(n, l, r, t);
   return ValueBuilder<ApplyOp>(
@@ -723,7 +732,7 @@ Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t, Value array) {
                      Nat::get(context, l.getIntValue() + n.getIntValue() +
                                            r.getIntValue()),
                      t),
-      pad, ValueRange{cst0, array});
+      pad, ValueRange{array});
 }
 
 } // namespace edsc

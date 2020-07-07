@@ -425,7 +425,6 @@ def SlideIntermediateOp : Rise_Op<"codegen.slide"> {
 def PadIntermediateOp : Rise_Op<"codegen.pad"> {
   let summary = "rise pad_interm";
   let arguments = (ins AnyType
-                   : $padvalue, AnyType
                    : $array, NatAttr
                    : $n, NatAttr
                    : $l, NatAttr
