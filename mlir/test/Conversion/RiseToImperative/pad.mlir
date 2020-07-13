@@ -4,10 +4,9 @@ func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<14xf32>, %in: memref<9xf32>) {
     %array = rise.in %in : !rise.array<9, scalar<f32>>
-    %padVal = rise.literal #rise.lit<5.0>
 
     %pad = rise.pad #rise.nat<9> #rise.nat<2> #rise.nat<3> #rise.scalar<f32>
-    %padded = rise.apply %pad, %padVal, %array
+    %padded = rise.apply %pad, %array
 
     %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
         %result = rise.embed(%summand) {
@@ -24,7 +23,6 @@ func @rise_fun(%outArg: memref<14xf32>, %in: memref<9xf32>) {
 }
 
 func @stencil() {
-    //prepare output Array
     //prepare output Array
     %outputArray = alloc() : memref<14xf32>
     %inputArray = alloc() : memref<9xf32>

@@ -143,8 +143,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     for (rise::AssignOp assign : assignOps) {
       codeGen(assign, {}, rewriter);
     }
+    emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
   }
-  emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
 
   //   cleanup:
   //   erase intermediate operations.
@@ -1097,9 +1097,9 @@ mlir::rise::codeGenStore(Value storeLocation, Value val,
     if (IdxOp idx = dyn_cast<IdxOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for idx";
 
-      path.push_back(idx.arg1());
+      path.push_back(idx.iv());
 
-      return codeGenStore(idx.arg0(), val, path, rewriter);
+      return codeGenStore(idx.array(), val, path, rewriter);
     } else if (CastOp castOp =
                    dyn_cast<CastOp>(storeLocation.getDefiningOp())) {
       emitRemark(val.getLoc()) << "CodegenStore for cast";
@@ -1231,9 +1231,9 @@ Value mlir::rise::codeGen(Value val, SmallVector<OutputPathType, 10> path,
 
       emitRemark(idx.getLoc()) << "Codegen for idx";
 
-      Value arg1 = idx.arg1();
-      path.push_back(arg1);
-      return codeGen(idx.arg0(), path, rewriter);
+      Value iv = idx.iv();
+      path.push_back(iv);
+      return codeGen(idx.array(), path, rewriter);
     } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
       emitRemark(alloc.getLoc()) << "Codegen for alloc";
 

@@ -564,8 +564,6 @@ Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
                                ValueRange{lambda, initializer, array});
 }
 
-// something fishy here! Type is not correct. It is scalar -> scalar instead of
-// tuple<scalar scalar> -> scalar
 Value mlir::edsc::op::reduceSeq(
     StringRef lowerTo, DataType t,
     function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
