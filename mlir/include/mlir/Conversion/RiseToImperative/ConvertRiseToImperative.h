@@ -26,31 +26,9 @@
 namespace mlir {
 namespace rise {
 
-
 using OutputPathType = mpark::variant<int, Value>;
 
-void AccT(ApplyOp apply, Value out, PatternRewriter &rewriter);
-void AccT(ReturnOp returnOp, Value out, PatternRewriter &rewriter);
 
-mlir::Value ConT(mlir::Value contValue, Block::iterator contLocation,
-                 PatternRewriter &rewriter);
-Value codeGen(Operation *op, SmallVector<OutputPathType, 10> path,
-              PatternRewriter &rewriter);
-Value codeGen(Value val, SmallVector<OutputPathType, 10> path,
-              PatternRewriter &rewriter);
-SmallVector<OutputPathType, 10>
-codeGenStore(Value storeLocation, Value val,
-             SmallVector<OutputPathType, 10> path, PatternRewriter &rewriter);
-Value generateWriteAccess(SmallVector<OutputPathType, 10> path, Value accessVal,
-                          PatternRewriter &rewriter);
-void generateReadAccess(SmallVector<OutputPathType, 10> path, Value storeVal,
-                        Value storeLoc, PatternRewriter &rewriter);
-
-void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
-LambdaOp expandToLambda(mlir::Value value, PatternRewriter &rewriter);
-Value createLoopForMap(Value mapOpValue, IndexType &inductionVar, PatternRewriter &rewriter);
-void printPath(SmallVector<OutputPathType, 10> path, StringRef additionalInfo = "");
-void printUses(Value val);
 } // namespace rise
 } // namespace mlir
 

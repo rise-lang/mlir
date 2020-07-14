@@ -19,11 +19,10 @@
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/StandardTypes.h"
+#include "mlir/Dialect/Rise/EDSC/Builders.h"
+
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include "mlir/IR/AffineExpr.h"
-#include "mlir/IR/AffineMap.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/MathExtras.h"
@@ -39,72 +38,20 @@ using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
 
+using namespace mlir::edsc::type;
+
 namespace mlir {
 namespace rise {
 
 //===----------------------------------------------------------------------===//
-// RiseFunOp
-//===----------------------------------------------------------------------===//
-LogicalResult parseRiseFunOp(OpAsmParser &parser, OperationState &result) {
-  auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType output;
-  Type outputType;
-
-  SmallVector<OpAsmParser::OperandType, 4> arguments;
-  SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-
-  StringAttr name;
-
-  if (parser.parseAttribute(name, "name", result.attributes))
-    return failure();
-
-  if (parser.parseLParen())
-    return failure();
-
-  // Not working correct
-  //  if (parser.parseKeyword("out:"))
-  //    return failure();
-
-  // parsing output arg
-  if (parser.parseRegionArgument(output))
-    return failure();
-  if (parser.parseColonType(outputType))
-    return failure();
-
-  arguments.push_back(output);
-  argumentTypes.push_back(outputType);
-
-  // parsing input args
-  int i = 1;
-  while (succeeded(parser.parseOptionalComma())) {
-    OpAsmParser::OperandType input;
-    Type inputType;
-    if (parser.parseRegionArgument(input) || parser.parseColonType(inputType))
-      return failure();
-
-    arguments.push_back(input);
-    argumentTypes.push_back(inputType);
-    i++;
-  }
-
-  if (parser.parseRParen())
-    return failure();
-
-  Region *body = result.addRegion();
-  if (parser.parseRegion(*body, arguments, argumentTypes))
-    return failure();
-
-  LambdaOp::ensureTerminator(*body, builder, result.location);
-  return success();
-}
-//===----------------------------------------------------------------------===//
-// RiseWrapOp
+// RiseEmbedOp
 //===----------------------------------------------------------------------===//
 LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
+
   SmallVector<OpAsmParser::OperandType, 4> operands;
-  SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
-  SmallVector<Type, 4> argumentTypesUnpacked = SmallVector<Type, 4>();
+  SmallVector<Type, 4> argumentTypes;
+  SmallVector<Type, 4> argumentTypesUnpacked;
 
   if (parser.parseLParen())
     return failure();
@@ -137,30 +84,6 @@ LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
                                   FloatType::getF32(builder.getContext())));
   return success();
 }
-
-// // Having this does not work together with the other builder!
-// void EmbedOp::build(
-//    OpBuilder &builder, OperationState &result, Type wrapped,
-//    ValueRange exposedValues,
-//    function_ref<void(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
-//        bodyBuilder) {
-//  result.addTypes(wrapped);
-//  result.addOperands(exposedValues);
-//
-//  Region *embedRegion = result.addRegion();
-//  Block *body = new Block();
-//
-//  for (Value val : exposedValues) {
-//    assert(val.getType().isa<ScalarType>() &&
-//           "Only scalar Types can be exposed with rise.embed!");
-//    body->addArgument(val.getType().dyn_cast<ScalarType>().getWrappedType());
-//  }
-//  embedRegion->push_back(body);
-//
-//  OpBuilder::InsertionGuard guard(builder);
-//  builder.setInsertionPointToStart(body);
-//  bodyBuilder(builder, result.location, body->getArguments());
-//}
 
 void EmbedOp::build(
     OpBuilder &builder, OperationState &result, Type wrapped,
@@ -244,7 +167,7 @@ LogicalResult parseLambdaOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType arg;
   SmallVector<OpAsmParser::OperandType, 4> arguments;
   Type type;
-  SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+  SmallVector<Type, 4> argumentTypes;
   FunType funType;
   Type outType;
 
@@ -317,32 +240,18 @@ void LambdaOp::build(
 LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
   // setting false here enables the requirement to explicitly give the type of
   // the applied function
-  bool simplified = true;
-
-  auto &builder = parser.getBuilder();
 
   OpAsmParser::OperandType funOperand;
   FunType funType;
   SmallVector<OpAsmParser::OperandType, 4> arguments;
-  SmallVector<Type, 4> argumentTypes = SmallVector<Type, 4>();
+  SmallVector<Type, 4> argumentTypes;
 
   // parse function
   if (parser.parseOperand(funOperand))
     return failure();
 
-  if (!simplified) {
-    // parse type of the function
-    if (parser.parseColonType(funType))
-      return failure();
-  }
-
-  if (!simplified) {
-    if (parser.resolveOperand(funOperand, funType, result.operands))
-      failure();
-  } else {
-    if (parser.resolveOperand(funOperand, result.operands))
-      failure();
-  }
+  if (parser.resolveOperand(funOperand, result.operands))
+    failure();
   funType = result.operands.front().getType().dyn_cast<FunType>();
 
   // parse arguments
@@ -358,7 +267,7 @@ LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
       argumentTypes.push_back(funType.getInput());
     } else {
       parser.emitError(parser.getCurrentLocation())
-          << "expected a maximum " << std::to_string(i)
+          << "expected a maximum of " << std::to_string(i)
           << " arguments for this function.";
       return failure();
     }
@@ -368,20 +277,13 @@ LogicalResult parseApplyOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(funType.getOutput());
-  //  result.setOperandListToResizable(true);
   return success();
 }
 
 //===----------------------------------------------------------------------===//
 // ParseLiteralOp
 //===----------------------------------------------------------------------===//
-/// This format is not the one used in the paper and will change to it soon.
-/// current Format:
-///         rise.literal #rise.int<42>
-///         rise.literal #rise.array<2, rise.int, [1,2]>
-///         rise.literal #rise.array<2.3, !rise.int, [[1,2,3],[4,5,6]]>
-// TODO: restructure the literal attribute to clearly differ between type and
-// value
+
 LogicalResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   LiteralAttr attr;
@@ -404,42 +306,10 @@ LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
-  // parsing the optional attribute specifying a lowering target
-  SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  NamedAttrList attributesFromDict;
-  if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
-    if (!attributesFromDict.empty()) {
-      bool validLowering = false;
-      if (attributesFromDict.begin()->first.str() == "to") {
-        if (StringAttr loweringAttr =
-                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
-          for (std::string target : loweringTargets) {
-            if (target == loweringAttr.getValue().str()) {
-              validLowering = true;
-              result.attributes.push_back(
-                  attributesFromDict.getAttrs().front());
-              break;
-            }
-          }
-        }
-      }
-      if (!validLowering) {
-        std::string loweringTargetsString;
-        for (std::string target : loweringTargets) {
-          loweringTargetsString.append(target);
-          loweringTargetsString.append(", ");
-        }
-        loweringTargetsString.pop_back();
-        loweringTargetsString.pop_back();
-        emitError(result.location) << "invalid lowering target specified. Use "
-                                      "on of the following: to = "
-                                   << loweringTargetsString;
-        return failure();
-      }
-    }
-  }
+  // optional lowering target
+  if (failed(parseOptionalLoweringTargetAttribute(parser, result)))
+    failure();
 
   // length of array
   if (parser.parseAttribute(n, "n", result.attributes))
@@ -469,42 +339,10 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
-  // parsing the optional attribute specifying a lowering target
-  SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  NamedAttrList attributesFromDict;
-  if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
-    if (!attributesFromDict.empty()) {
-      bool validLowering = false;
-      if (attributesFromDict.begin()->first.str() == "to") {
-        if (StringAttr loweringAttr =
-                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
-          for (std::string target : loweringTargets) {
-            if (target == loweringAttr.getValue().str()) {
-              validLowering = true;
-              result.attributes.push_back(
-                  attributesFromDict.getAttrs().front());
-              break;
-            }
-          }
-        }
-      }
-      if (!validLowering) {
-        std::string loweringTargetsString;
-        for (std::string target : loweringTargets) {
-          loweringTargetsString.append(target);
-          loweringTargetsString.append(", ");
-        }
-        loweringTargetsString.pop_back();
-        loweringTargetsString.pop_back();
-        emitError(result.location) << "invalid lowering target specified. Use "
-                                      "on of the following: to = "
-                                   << loweringTargetsString;
-        return failure();
-      }
-    }
-  }
+  // optional lowering target
+  if (failed(parseOptionalLoweringTargetAttribute(parser, result)))
+    failure();
 
   // length of array
   if (parser.parseAttribute(n, "n", result.attributes))
@@ -534,7 +372,6 @@ LogicalResult parseMapOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
   // length of array
   if (parser.parseAttribute(n, "n", result.attributes))
@@ -568,42 +405,10 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
 
   NatAttr n;
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
-  // parsing the optional attribute specifying a lowering target
-  SmallVector<std::string, 4> loweringTargets = {"affine", "loop"};
-  NamedAttrList attributesFromDict;
-  if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
-    if (!attributesFromDict.empty()) {
-      bool validLowering = false;
-      if (attributesFromDict.begin()->first.str() == "to") {
-        if (StringAttr loweringAttr =
-                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
-          for (std::string target : loweringTargets) {
-            if (target == loweringAttr.getValue().str()) {
-              validLowering = true;
-              result.attributes.push_back(
-                  attributesFromDict.getAttrs().front());
-              break;
-            }
-          }
-        }
-      }
-      if (!validLowering) {
-        std::string loweringTargetsString;
-        for (std::string target : loweringTargets) {
-          loweringTargetsString.append(target);
-          loweringTargetsString.append(", ");
-        }
-        loweringTargetsString.pop_back();
-        loweringTargetsString.pop_back();
-        emitError(result.location) << "invalid lowering target specified. Use "
-                                      "on of the following: to = "
-                                   << loweringTargetsString;
-        return failure();
-      }
-    }
-  }
+  // optional lowering target
+  if (failed(parseOptionalLoweringTargetAttribute(parser, result)))
+    failure();
 
   // number of elements in Array
   if (parser.parseAttribute(n, "n", result.attributes))
@@ -840,7 +645,6 @@ LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -862,7 +666,6 @@ LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -883,7 +686,6 @@ LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
   DataTypeAttr s, t;
-  //  result.setOperandListToResizable();
 
   // type of first element
   if (parser.parseAttribute(s, "s", result.attributes))
@@ -940,7 +742,6 @@ LogicalResult parseMulOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType value;
   Type type;
-  //  result.setOperandListToResizable();
 
   // return value
   if (parser.parseOperand(value))
@@ -953,6 +754,51 @@ LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
 
   if (parser.resolveOperand(value, type, result.operands))
     failure();
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Utils
+//===----------------------------------------------------------------------===//
+
+static LogicalResult
+parseOptionalLoweringTargetAttribute(OpAsmParser &parser,
+                                     OperationState &result) {
+  // parsing the optional attribute specifying a lowering target
+  SmallVector<std::string, 4> loweringTargets = {"affine", "scf"};
+  NamedAttrList attributesFromDict;
+
+  if (succeeded(parser.parseOptionalAttrDict(attributesFromDict))) {
+    if (!attributesFromDict.empty()) {
+      bool validLowering = false;
+      if (attributesFromDict.begin()->first.str() == "to") {
+        if (StringAttr loweringAttr =
+                attributesFromDict.begin()->second.dyn_cast<StringAttr>()) {
+          for (std::string target : loweringTargets) {
+            if (target == loweringAttr.getValue().str()) {
+              validLowering = true;
+              result.attributes.push_back(
+                  attributesFromDict.getAttrs().front());
+              return success();
+            }
+          }
+        }
+      }
+      if (!validLowering) {
+        std::string loweringTargetsString;
+        for (std::string target : loweringTargets) {
+          loweringTargetsString.append(target);
+          loweringTargetsString.append(", ");
+        }
+        loweringTargetsString.pop_back();
+        loweringTargetsString.pop_back();
+        emitError(result.location) << "invalid lowering target specified. Use "
+                                      "on of the following: to = "
+                                   << loweringTargetsString;
+        return failure();
+      }
+    }
+  }
   return success();
 }
 

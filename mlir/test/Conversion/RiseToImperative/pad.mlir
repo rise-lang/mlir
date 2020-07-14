@@ -15,7 +15,7 @@ func @rise_fun(%outArg: memref<14xf32>, %in: memref<9xf32>) {
         }
         rise.return %result : !rise.scalar<f32>
     }
-    %map = rise.mapSeq {to = "loop"} #rise.nat<14> #rise.scalar<f32> #rise.scalar<f32>
+    %map = rise.mapSeq {to = "scf"} #rise.nat<14> #rise.scalar<f32> #rise.scalar<f32>
     %result = rise.apply %map, %doubleFun, %padded
 
     rise.out %outArg <- %result

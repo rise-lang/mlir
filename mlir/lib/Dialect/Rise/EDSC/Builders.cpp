@@ -141,7 +141,7 @@ Value mlir::edsc::op::mapSeq(DataType t,
                              function_ref<Value(BlockArgument)> bodyBuilder,
                              Value array) {
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
-  return mapSeq("loop", arrayT.getElementType(), t, bodyBuilder, array);
+  return mapSeq("scf", arrayT.getElementType(), t, bodyBuilder, array);
 }
 
 Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
@@ -165,7 +165,7 @@ Value mlir::edsc::op::reduceSeq(
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
 
   return reduceSeq(
-      "loop", arrayT.getSize(), arrayT.getElementType(), t,
+      "scf", arrayT.getSize(), arrayT.getElementType(), t,
       lambda2(funType(arrayT.getElementType(), funType(t, t)), bodyBuilder),
       initializer, array);
 }
@@ -243,7 +243,7 @@ Value mlir::edsc::op::literal(DataType t, StringRef literal) {
 Value mlir::edsc::abstraction::mapSeq2D(
     DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
     Value array2D) {
-  return mapSeq2D("loop", resultElemType, bodyBuilder, array2D);
+  return mapSeq2D("scf", resultElemType, bodyBuilder, array2D);
 }
 
 Value mlir::edsc::abstraction::mapSeq2D(
@@ -588,7 +588,7 @@ Value mlir::edsc::op::reduceSeq(DataType t, Value lambda, Value initializer,
                                 Value array) {
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
 
-  return reduceSeq("loop", arrayT.getSize(), arrayT.getElementType(), t, lambda,
+  return reduceSeq("scf", arrayT.getSize(), arrayT.getElementType(), t, lambda,
                    initializer, array);
 }
 

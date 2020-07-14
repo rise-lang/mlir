@@ -16,11 +16,11 @@ func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
                 }
                rise.return %result : !rise.scalar<f32>
            }
-           %map2 = rise.mapSeq {to = "loop"} #rise.nat<2> #rise.scalar<f32> #rise.scalar<f32>
+           %map2 = rise.mapSeq {to = "scf"} #rise.nat<2> #rise.scalar<f32> #rise.scalar<f32>
            %res = rise.apply %map2, %doubleFun, %arraySlice
            rise.return %res : !rise.array<2, scalar<f32>>
         }
-        %map1 = rise.mapSeq {to = "loop"} #rise.nat<3> #rise.array<2, scalar<f32>> #rise.array<2, scalar<f32>>
+        %map1 = rise.mapSeq {to = "scf"} #rise.nat<3> #rise.array<2, scalar<f32>> #rise.array<2, scalar<f32>>
         %res = rise.apply %map1, %mapInnerLambda, %array2D
 
         %join = rise.join #rise.nat<3> #rise.nat<2> #rise.scalar<f32>

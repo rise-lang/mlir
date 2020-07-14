@@ -87,9 +87,9 @@ void mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
   Value windowed = slide(natType(windowSize), natType(1), padded);
 
   Value mapped = mapSeq(
-      "loop", scalarF32Type(),
+      "scf", scalarF32Type(),
       [&](Value window) {
-        return (reduceSeq("loop", scalarF32Type(), sumLambda(scalarF32Type()),
+        return (reduceSeq("scf", scalarF32Type(), sumLambda(scalarF32Type()),
                           literal(scalarF32Type(), "0.000000"), window));
       },
       windowed);
@@ -191,7 +191,7 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
       [&](Value slidingWindow) {
         Value flattenedWindow = join(slidingWindow);
         return reduceSeq(
-            "loop", scalarF32Type(),
+            "scf", scalarF32Type(),
             [&](Value arg1, Value arg2) {
               return embed2(scalarF32Type(), {arg1, arg2},
                             [&](Value arg1, Value arg2) {

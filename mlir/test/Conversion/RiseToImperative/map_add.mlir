@@ -13,7 +13,7 @@ func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
         }
         rise.return %result : !rise.scalar<f32>
     }
-    %map = rise.mapSeq {to = "loop"} #rise.nat<6> #rise.scalar<f32> #rise.scalar<f32>
+    %map = rise.mapSeq {to = "scf"} #rise.nat<6> #rise.scalar<f32> #rise.scalar<f32>
     %doubledArray = rise.apply %map, %doubleFun, %array
     rise.out %outArg <- %doubledArray
     return

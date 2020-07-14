@@ -46,6 +46,9 @@ namespace rise {
 
 #include "mlir/Dialect/Rise/IR/Rise.h.inc"
 
+static LogicalResult parseOptionalLoweringTargetAttribute(OpAsmParser &parser,
+                                                   OperationState &result);
+
 } // end namespace rise
 } // end namespace mlir
 
