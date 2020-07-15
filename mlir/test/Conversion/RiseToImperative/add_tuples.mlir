@@ -17,7 +17,7 @@ func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
         %result = rise.embed(%fst, %snd) {
             %result = addf %fst, %snd : f32
             rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
 

@@ -10,7 +10,7 @@ func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
         %result = rise.embed(%summand) {
             %doubled = addf %summand, %summand : f32
             rise.return %doubled : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
     %map = rise.mapSeq {to = "scf"} #rise.nat<6> #rise.scalar<f32> #rise.scalar<f32>

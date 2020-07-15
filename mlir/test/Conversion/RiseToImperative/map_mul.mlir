@@ -8,7 +8,7 @@ func @rise_fun(%outArg:memref<4xf32>, %in:memref<4xf32>) {
         %result = rise.embed(%elem, %cst5) {
             %result = mulf %elem, %cst5 : f32
             rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
     %mapFun = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>

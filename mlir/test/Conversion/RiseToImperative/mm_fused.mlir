@@ -34,7 +34,7 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
                        %product = mulf %fst, %snd :f32
                        %result = addf %product, %acc : f32
                        rise.return %result : f32
-                }
+                } : !rise.scalar<f32>
                 rise.return %result : !rise.scalar<f32>
             }
 

@@ -7,7 +7,7 @@ func @rise_fun(%outArg:memref<4x4x4xf32>, %inArg:memref<4x4x4xf32>) {
         %result = rise.embed(%summand) {
                %result = addf %summand, %summand : f32
                rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
     %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, array<4, scalar<f32>>> #rise.array<4, array<4, scalar<f32>>>

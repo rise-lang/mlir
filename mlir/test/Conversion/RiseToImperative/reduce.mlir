@@ -7,7 +7,7 @@ func @rise_fun(%outArg:memref<f32>, %inArg:memref<1024xf32>) {
         %result = rise.embed(%summand0, %summand1) {
             %result = addf %summand0, %summand1 : f32
             rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
     %initializer = rise.literal #rise.lit<0.0>

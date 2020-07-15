@@ -21,7 +21,7 @@ func @rise_fun(%outArg:memref<f32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>
         %result = rise.embed(%fst, %snd) {
             %result = mulf %fst, %snd : f32
             rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
 
@@ -33,7 +33,7 @@ func @rise_fun(%outArg:memref<f32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>
         %result = rise.embed(%summand0, %summand1) {
                %result = addf %summand0, %summand1 : f32
                rise.return %result : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
     %initializer = rise.literal #rise.lit<0.0>

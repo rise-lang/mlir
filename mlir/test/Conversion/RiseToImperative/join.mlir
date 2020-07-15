@@ -14,10 +14,10 @@ func @rise_fun(%outArg:memref<15x122xf32>, %inArg:memref<15x122xf32>) {
         %result = rise.embed(%summand) {
             %doubled = addf %summand, %summand : f32
             rise.return %doubled : f32
-        }
+        } : !rise.scalar<f32>
         rise.return %result : !rise.scalar<f32>
     }
-    %map = rise.mapSeq {to = "loop"} #rise.nat<1830> #rise.scalar<f32> #rise.scalar<f32>
+    %map = rise.mapSeq {to = "scf"} #rise.nat<1830> #rise.scalar<f32> #rise.scalar<f32>
     %doubledArray = rise.apply %map, %doubleFun, %flattened
 
     %split = rise.split #rise.nat<122> #rise.nat<15> #rise.scalar<f32>
