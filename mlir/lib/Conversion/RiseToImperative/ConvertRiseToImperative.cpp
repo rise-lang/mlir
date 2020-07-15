@@ -9,6 +9,13 @@
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 
+#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Linalg/EDSC/Builders.h"
+#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
+#include "mlir/Dialect/SCF/EDSC/Intrinsics.h"
+#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/EDSC/Builders.h"
+
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -22,6 +29,7 @@
 
 using namespace mlir;
 using namespace mlir::rise;
+using namespace mlir::edsc;
 
 namespace {
 struct ConvertRiseToImperativePass
@@ -31,7 +39,7 @@ struct ConvertRiseToImperativePass
 
 // Codegen phase 1
 void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter);
-mlir::Value lower(mlir::Value contValue, Block::iterator contLocation,
+mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
                   PatternRewriter &rewriter);
 
 void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
@@ -39,10 +47,6 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
                             Value out, Location loc, PatternRewriter &rewriter,
                             StringRef loweringTarget = "scf");
 void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
-                         Value array, Value out, Location loc,
-                         PatternRewriter &rewriter,
-                         StringRef loweringTarget = "scf");
-void lowerAndStoreMapPar(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
                          Value array, Value out, Location loc,
                          PatternRewriter &rewriter,
                          StringRef loweringTarget = "scf");
@@ -184,7 +188,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     rewriter.eraseOp(op);
   }
 
-  emitRemark(funcOp.getLoc()) << "lowerAndStore finished. Starting resolving indicees.";
+  emitRemark(funcOp.getLoc())
+      << "lowerAndStore finished. Starting resolving indicees.";
 
   SmallVector<rise::AssignOp, 10> assignOps;
   funcOp.walk([&assignOps](Operation *inst) {
@@ -201,14 +206,12 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     for (rise::AssignOp assign : assignOps) {
       lowerAssign(assign, rewriter);
     }
-    emitRemark(funcOp.getLoc()) << "CodeGen finished. Starting Cleanup.";
+    emitRemark(funcOp.getLoc())
+        << "Resolving indicees finished. Starting Cleanup.";
   }
 
   //   cleanup:
   //   erase intermediate operations.
-  //   We remove them back to front right now,
-  //   this should be alright in terms of dependencies.
-
   if (doCodegen) {
     funcOp.walk([&](Operation *inst) {
       if (inst->getDialect() &&
@@ -232,6 +235,10 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   return;
 }
 
+//===----------------------------------------------------------------------===//
+// First part of the lowering process
+//===----------------------------------------------------------------------===//
+
 void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
   if (out.getType().getDialect().getNamespace() !=
       RiseDialect::getDialectNamespace()) {
@@ -246,14 +253,14 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
     Location loc = apply.getLoc();
 
     // lowering to a specific loop depending on the lowering target dialect
-    StringRef loweringTarget;
-    if (StringAttr loweringTargetAttr =
-            appliedFun->getAttrOfType<StringAttr>("to")) {
-      loweringTarget = loweringTargetAttr.getValue();
-    } else {
-      // default lowering target
-      loweringTarget = "scf";
-    }
+    StringRef loweringTarget = [&] {
+      if (StringAttr loweringTargetAttr =
+              appliedFun->getAttrOfType<StringAttr>("to")) {
+        return loweringTargetAttr.getValue();
+      } else {
+        return StringRef("scf"); // default lowering target
+      }
+    }();
 
     // Dispatch to the correct lowerAndStore
     if (ReduceSeqOp reduceSeqOp = dyn_cast<ReduceSeqOp>(appliedFun)) {
@@ -271,8 +278,9 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
                           mapSeqOp.getLoc(), rewriter, loweringTarget);
       return;
     } else if (MapParOp mapParOp = dyn_cast<MapParOp>(appliedFun)) {
-      emitRemark(mapParOp.getLoc()) << "lowerAndStore of MapPar";
-      lowerAndStoreMapPar(mapParOp.nAttr(), mapParOp.sAttr(), mapParOp.tAttr(),
+      emitRemark(mapParOp.getLoc())
+          << "lowerAndStore of MapPar, currently not generating parallel code!";
+      lowerAndStoreMapSeq(mapParOp.nAttr(), mapParOp.sAttr(), mapParOp.tAttr(),
                           apply.getOperand(1), apply.getOperand(2), out,
                           mapParOp.getLoc(), rewriter, loweringTarget);
       return;
@@ -313,128 +321,122 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
     }
     emitRemark(appliedFun->getLoc())
         << "Can't lower the application of op: " << appliedFun->getName();
-  } else {
-    // We lower the operand of a rise::returnOp
-
-    if (!expr.isa<OpResult>()) {
-      emitError(expr.getLoc()) << "Directly returning an argument in a "
-                                  "rise.return is not supported in lowering to "
-                                  "imperative currently";
-      return;
-    }
-    if (ApplyOp apply = dyn_cast<ApplyOp>(expr.getDefiningOp())) {
-      lowerAndStore(apply.getResult(), out, rewriter);
-      return;
-    }
-    if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lowerAndStore of EmbedOp. Copy "
-                                   "operations from this block to result.";
-      assert(
-          embedOp.getNumOperands() ==
-              embedOp.region().front().getNumArguments() &&
-          "Embed has to have the same number of operands and block arguments!");
-
-      // Translating all operands first
-      for (int i = 0; i < embedOp.getOperands().size(); i++) {
-        auto operand = embedOp.getOperand(i);
-        auto operandCont =
-            lower(operand, rewriter.getInsertionPoint(), rewriter);
-        embedOp.setOperand(i, operandCont);
-      }
-      auto newEmbed = rewriter.clone(*embedOp.getOperation());
-      auto assignment = rewriter.create<AssignOp>(newEmbed->getLoc(),
-                                                  newEmbed->getResult(0), out);
-      return;
-    }
-    emitError(expr.getLoc()) << "lowerAndStore of a rise.return went wrong!";
+    return;
   }
+
+  // We lower the operand of a rise::returnOp
+  if (!expr.isa<OpResult>()) {
+    emitError(expr.getLoc()) << "Directly returning an argument in a "
+                                "rise.return is not supported in lowering to "
+                                "imperative currently";
+    return;
+  }
+  if (ApplyOp apply = dyn_cast<ApplyOp>(expr.getDefiningOp())) {
+    lowerAndStore(apply.getResult(), out, rewriter);
+    return;
+  }
+  if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
+    emitRemark(expr.getLoc()) << "lowerAndStore of EmbedOp. Copy "
+                                 "operations from this block to result.";
+    assert(
+        embedOp.getNumOperands() ==
+            embedOp.region().front().getNumArguments() &&
+        "Embed has to have the same number of operands and block arguments!");
+
+    // Translating all operands first
+    for (int i = 0; i < embedOp.getOperands().size(); i++) {
+      auto operand = embedOp.getOperand(i);
+      auto operandCont = lower(operand, rewriter.getInsertionPoint(), rewriter);
+      embedOp.setOperand(i, operandCont);
+    }
+    auto newEmbed = rewriter.clone(*embedOp.getOperation());
+    auto assignment = rewriter.create<AssignOp>(newEmbed->getLoc(),
+                                                newEmbed->getResult(0), out);
+    return;
+  }
+  emitError(expr.getLoc()) << "lowerAndStore of a rise.return went wrong!";
 }
 
-/// Continuation Translation
-mlir::Value lower(mlir::Value contValue, Block::iterator contLocation,
+mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
                   PatternRewriter &rewriter) {
-  Location loc = contValue.getLoc();
+  Location loc = expr.getLoc();
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
-  if (!contValue.isa<OpResult>()) {
-    emitRemark(contValue.getLoc())
+  if (!expr.isa<OpResult>()) {
+    emitRemark(expr.getLoc())
         << "cannot perform continuation for BlockArg, leaving as is.";
-    return contValue;
+    return expr;
   }
-  if (LiteralOp literalOp = dyn_cast<LiteralOp>(contValue.getDefiningOp())) {
+  if (LiteralOp literalOp = dyn_cast<LiteralOp>(expr.getDefiningOp())) {
     emitRemark(literalOp.getLoc()) << "lower of Literal";
     Value lowered =
         lowerLiteral(literalOp.getResult(), literalOp.getLoc(), rewriter);
     rewriter.restoreInsertionPoint(oldInsertPoint);
     return lowered;
-  } else if (ApplyOp apply = dyn_cast<ApplyOp>(contValue.getDefiningOp())) {
+  } else if (ApplyOp apply = dyn_cast<ApplyOp>(expr.getDefiningOp())) {
     if (ZipOp zipOp = dyn_cast<ZipOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Zip";
+      emitRemark(expr.getLoc()) << "lower of Applied Zip";
       return lowerZip(apply.getOperand(1), apply.getOperand(2), zipOp.getLoc(),
                       rewriter);
     } else if (FstOp fst = dyn_cast<FstOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Fst";
+      emitRemark(expr.getLoc()) << "lower of Applied Fst";
       return lowerFst(apply.getOperand(1), fst.getLoc(), rewriter);
     } else if (SndOp snd = dyn_cast<SndOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Snd";
+      emitRemark(expr.getLoc()) << "lower of Applied Snd";
       return lowerSnd(apply.getOperand(1), snd.getLoc(), rewriter);
     } else if (SplitOp splitOp =
                    dyn_cast<SplitOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied split";
+      emitRemark(expr.getLoc()) << "lower of Applied split";
       return lowerSplit(splitOp.nAttr(), splitOp.mAttr(), splitOp.tAttr(),
                         apply.getType(), apply.getOperand(1), splitOp.getLoc(),
                         rewriter);
     } else if (JoinOp joinOp = dyn_cast<JoinOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "ConT of Applied join";
+      emitRemark(expr.getLoc()) << "ConT of Applied join";
       auto arrayCont =
           lower(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
       auto joinInterm = rewriter.create<JoinIntermediateOp>(
           joinOp.getLoc(), apply.getType(), arrayCont, joinOp.nAttr(),
           joinOp.mAttr(), joinOp.tAttr());
       return joinInterm;
-      //      emitRemark(contValue.getLoc()) << "lower of Applied join";
-      //      return lowerJoin(joinOp.nAttr(), joinOp.mAttr(), joinOp.tAttr(),
-      //      apply.getType(),
-      //                       apply.getOperand(1), joinOp.getLoc(), rewriter);
     } else if (TransposeOp transposeOp =
                    dyn_cast<TransposeOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied transpose";
+      emitRemark(expr.getLoc()) << "lower of Applied transpose";
       return lowerTranspose(
           transposeOp.nAttr(), transposeOp.mAttr(), transposeOp.tAttr(),
           apply.getType(), apply.getOperand(1), transposeOp.getLoc(), rewriter);
     } else if (SlideOp slideOp =
                    dyn_cast<SlideOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Slide";
+      emitRemark(expr.getLoc()) << "lower of Applied Slide";
       return lowerSlide(slideOp.nAttr(), slideOp.szAttr(), slideOp.spAttr(),
                         slideOp.tAttr(), apply.getType(), apply.getOperand(1),
                         slideOp.getLoc(), rewriter);
     } else if (PadOp padOp = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Pad";
+      emitRemark(expr.getLoc()) << "lower of Applied Pad";
       return lowerPad(padOp.nAttr(), padOp.lAttr(), padOp.rAttr(),
                       padOp.tAttr(), apply.getType(), apply.getOperand(1),
                       padOp.getLoc(), rewriter);
     } else if (MapSeqOp mapSeqOp =
                    dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied MapSeq";
+      emitRemark(expr.getLoc()) << "lower of Applied MapSeq";
       return lowerMapSeq(mapSeqOp.nAttr(), apply.getResult(), mapSeqOp.getLoc(),
                          rewriter);
     } else if (MapParOp mapParOp =
                    dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc())
+      emitRemark(expr.getLoc())
           << "lower of Applied MapPar, currently not generating parallel code!";
       return lowerMapSeq(mapParOp.nAttr(), apply.getResult(), mapParOp.getLoc(),
                          rewriter);
     } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
-      emitRemark(contValue.getLoc()) << "lower of Applied Map";
+      emitRemark(expr.getLoc()) << "lower of Applied Map";
       return lowerMap(mapOp.nAttr(), mapOp.sAttr(), mapOp.tAttr(),
                       dyn_cast<LambdaOp>(apply.getOperand(1).getDefiningOp()),
                       apply.getOperand(2), apply.getType(), mapOp.getLoc(),
                       rewriter);
-    } else {
-      emitError(apply.getLoc()) << "Cannot perform lowering for this apply!";
     }
-  } else if (EmbedOp embedOp = dyn_cast<EmbedOp>(contValue.getDefiningOp())) {
-    emitRemark(contValue.getLoc()) << "lower of Embed";
+    emitError(apply.getLoc()) << "Cannot perform lowering for this apply!";
+    return expr;
+  } else if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
+    emitRemark(expr.getLoc()) << "lower of Embed";
 
     // Translating all operands
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
@@ -445,21 +447,21 @@ mlir::Value lower(mlir::Value contValue, Block::iterator contLocation,
 
     // This the embedded operations will be inlined later
     return embedOp.getResult();
-  } else if (InOp inOp = dyn_cast<InOp>(contValue.getDefiningOp())) {
-    emitRemark(contValue.getLoc()) << "lower of In";
+  } else if (InOp inOp = dyn_cast<InOp>(expr.getDefiningOp())) {
+    emitRemark(expr.getLoc()) << "lower of In";
 
-    // we dont return the lower of this to stay in our type system. This will
+    // we dont return the lowered of this to stay in our type system. This will
     // be resolved in the codeGen stage of the translation.
-    return contValue;
+    return expr;
   }
 
-  emitRemark(contValue.getLoc())
+  emitRemark(expr.getLoc())
       << "cannot perform lowering of "
-      << contValue.getDefiningOp()->getName().getStringRef().str()
+      << expr.getDefiningOp()->getName().getStringRef().str()
       << " leaving Value as is.";
 
   rewriter.restoreInsertionPoint(oldInsertPoint);
-  return contValue;
+  return expr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -470,15 +472,20 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
                             Value reductionFun, Value initializer, Value array,
                             Value out, Location loc, PatternRewriter &rewriter,
                             StringRef loweringTarget) {
+  using namespace mlir::edsc::op;
+  using namespace mlir::edsc::intrinsics;
+  OpBuilder builder(rewriter.getContext());
+  ScopedContext scope(builder, loc);
 
   // Add Continuation for array.
-  auto contArray = lower(array, rewriter.getInsertionPoint(), rewriter);
+  auto loweredArray = lower(array, rewriter.getInsertionPoint(), rewriter);
+  auto cst_zero = std_constant_index(0);
+  auto contInit = lower(initializer, rewriter.getInsertionPoint(), rewriter);
 
-  auto cst_zero = rewriter.create<ConstantIndexOp>(loc, 0);
-
+  // Introduce a temporary to accumulate into, or accumulate direcly in the
+  // output
   bool defineNewAccumulator = false;
-  // Accumulator for Reduction
-  // TODO: do this properly! This can be way better structured
+
   Value accum;
   if (defineNewAccumulator) {
 
@@ -487,14 +494,10 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
         ScalarType::get(rewriter.getContext(),
                         FloatType::getF32(rewriter.getContext())),
         ValueRange());
-    //      Block *embedBlock = new Block();
-    //      embedOp.region().push_front(embedBlock);
     rewriter.setInsertionPointToStart(&embedOp.region().front());
 
-    auto contInit = lower(initializer, rewriter.getInsertionPoint(), rewriter);
-
     AllocOp alloc = rewriter.create<AllocOp>(
-        loc, MemRefType::get(ArrayRef<int64_t>{1},
+        loc, MemRefType::get(ArrayRef<int64_t>{0},
                              FloatType::getF32(rewriter.getContext())));
 
     rewriter.create<linalg::FillOp>(initializer.getLoc(), alloc.getResult(),
@@ -504,33 +507,9 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
     rewriter.setInsertionPointAfter(embedOp);
     accum = embedOp.getResult();
   } else {
-    // TODO: not sure about this one
-
     accum = out;
-    Value indexedAccum;
-    if (out.getType().isa<ArrayType>()) {
-      indexedAccum = rewriter.create<IdxOp>(
-          accum.getLoc(), accum.getType().cast<ArrayType>().getElementType(),
-          accum, cst_zero.getResult());
-    } else {
-      indexedAccum = accum;
-    }
-
-    //      EmbedOp embedOp = rewriter.create<EmbedOp>(
-    //          appliedFun->getLoc(),
-    //          ScalarType::get(rewriter.getContext(),
-    //                          FloatType::getF32(rewriter.getContext())),
-    //          ValueRange());
-    //      Block *embedBlock = new Block();
-    //      embedOp.region().push_front(embedBlock);
-    //      rewriter.setInsertionPointToStart(&embedOp.region().front());
-
-    auto contInit = lower(initializer, rewriter.getInsertionPoint(), rewriter);
-
-    //      rewriter.setInsertionPointAfter(embedOp);
-    auto initAccum = rewriter.create<AssignOp>(loc, contInit, indexedAccum);
   }
-  // zero constant for indexing
+  auto initAccum = rewriter.create<AssignOp>(loc, contInit, accum);
 
   Value loopInductionVar;
   Block *forLoopBody;
@@ -551,68 +530,22 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
     loopInductionVar = forLoop.getInductionVar();
     forLoopBody = forLoop.getBody();
   }
-
   rewriter.setInsertionPointToStart(forLoopBody);
+
   LambdaOp reductionLambda = dyn_cast<LambdaOp>(reductionFun.getDefiningOp());
 
-  // TODO: not needed anymore
-  //    // index into input
-  IdxOp xi;
-  //    if (contArray.getType().isa<MemRefType>()) {
-  //      ArrayRef<int64_t> inShape =
-  //          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-  //      Type inIndexOpResult;
-  //      if (inShape.size() > 0) {
-  //        inIndexOpResult =
-  //            MemRefType::get(inShape,
-  //            FloatType::getF32(rewriter.getContext()));
-  //      } else {
-  //        inIndexOpResult = FloatType::getF32(rewriter.getContext());
-  //      }
-  //      xi = rewriter.create<IdxOp>(loc, inIndexOpResult, contArray,
-  //                                      loopInductionVar);
-  //      //      std::cout << "contArray is of MemrefType";
-  //    } else if (isa<IdxOp>(contArray.getDefiningOp())) {
-  //      //      std::cout << "contArray is not of MemrefType";
-  //    }
+  IdxOp xi = rewriter.create<IdxOp>(
+      loc, loweredArray.getType().cast<ArrayType>().getElementType(),
+      loweredArray, loopInductionVar);
 
-  if (contArray.getType().isa<ArrayType>()) {
-    xi = rewriter.create<IdxOp>(
-        loc, contArray.getType().cast<ArrayType>().getElementType(), contArray,
-        loopInductionVar);
-  }
-
-  // I think we don't need these anymore. Just pass the result of rise.embed
-  // here
-  //    IdxOp accumIdx;
-  //    if (defineNewAccumulator) {
-  //      // index into acc
-  //      accumIdx = rewriter.create<IdxOp>(
-  //          accum.getLoc(), FloatType::getF32(rewriter.getContext()),
-  //          accum, cst_zero.getResult());
-  //    } else {
-  //      accumIdx = rewriter.create<IdxOp>(
-  //          accum.getLoc(), FloatType::getF32(rewriter.getContext()),
-  //          accum, cst_zero.getResult());
-  //      //      ArrayRef<int64_t> outShape =
-  //      //          out.getType().dyn_cast<MemRefType>().getShape();
-  //      //      MemRefType outIndexOpResult =
-  //      //          MemRefType::get(outShape,
-  //      //          FloatType::getF32(rewriter.getContext()));
-  //      //      // TODO: at this point we sometimes need the 0 to access a
-  //      val and
-  //      //      // sometimes not.
-  //      //      accumIdx = rewriter.create<IdxOp>(loc, outIndexOpResult,
-  //      out,
-  //      // cst_zero.getResult());
-  //    }
-  // operate on a copy of the lambda to avoid generating dependencies.
   LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*reductionLambda));
   auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
                                       lambdaCopy.getResult(),
                                       ValueRange{accum, xi.getResult()});
 
+  // Lower and store the application of accum and xi to the reduction lambda
   lowerAndStore(fxi.getResult(), accum, rewriter);
+
   // Copy of Lambda and corresponding Apply not needed anymore.
   fxi.getResult().dropAllUses();
   rewriter.eraseOp(fxi);
@@ -622,24 +555,9 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
   // copy accumulator to output
   if (defineNewAccumulator) {
     rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
-
-    // index into accumulator
-    IdxOp storeAccIdx = rewriter.create<IdxOp>(
-        accum.getLoc(), accum.getType().dyn_cast<ArrayType>().getElementType(),
-        accum, cst_zero.getResult());
-
-    // index into output
-    ArrayRef<int64_t> outShape =
-        out.getType().dyn_cast<MemRefType>().getShape();
-    MemRefType outIndexOpResult =
-        MemRefType::get(outShape, FloatType::getF32(rewriter.getContext()));
-
-    auto out0 = rewriter.create<IdxOp>(loc, outIndexOpResult, out,
-                                       cst_zero.getResult());
-
-    rewriter.create<AssignOp>(loc, storeAccIdx.getResult(), out0.getResult());
+    rewriter.create<AssignOp>(loc, accum, out);
   }
-}
+} // namespace
 
 void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
                          Value array, Value out, Location loc,
@@ -676,117 +594,6 @@ void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
 
   IdxOp xi;
 
-  // TODO: not needed anymore
-  if (contArray.getType().isa<MemRefType>()) {
-    ArrayRef<int64_t> inShape =
-        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-
-    MemRefType inIndexOpResult =
-        MemRefType::get(inShape, FloatType::getF32(rewriter.getContext()));
-
-    xi = rewriter.create<IdxOp>(loc, inIndexOpResult, contArray,
-                                loopInductionVar);
-  } else if (isa<IdxOp>(contArray.getDefiningOp())) {
-    //      std::cout << "got an idx and not a memref! \n" << std::flush;
-  }
-
-  if (contArray.getType().isa<ArrayType>()) {
-    xi = rewriter.create<IdxOp>(
-        loc, contArray.getType().cast<ArrayType>().getElementType(), contArray,
-        loopInductionVar);
-  }
-
-  // operate on a copy of the lambda to avoid generating dependencies.
-  LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
-  auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
-                                      lambdaCopy.getResult(), xi.getResult());
-
-  //    ArrayRef<int64_t> outShape =
-  //        contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-  //    MemRefType outIndexOpResult =
-  //        MemRefType::get(outShape,
-  //        FloatType::getF32(rewriter.getContext()));
-
-  auto outi = rewriter.create<IdxOp>(
-      loc, out.getType().dyn_cast<ArrayType>().getElementType(), out,
-      loopInductionVar);
-
-  lowerAndStore(fxi.getResult(), outi.getResult(), rewriter);
-
-  // Copy of Lambda and corresponding Apply not needed anymore.
-  fxi.getResult().dropAllUses();
-  rewriter.eraseOp(fxi);
-  lambdaCopy.getResult().dropAllUses();
-  rewriter.eraseOp(lambdaCopy);
-
-  rewriter.setInsertionPointAfter(forLoopBody->getParentOp());
-}
-
-void lowerAndStoreMapPar(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
-                         Value array, Value out, Location loc,
-                         PatternRewriter &rewriter, StringRef loweringTarget) {
-
-  auto contArray = lower(array, rewriter.getInsertionPoint(), rewriter);
-
-  Value loopInductionVar;
-  Block *forLoopBody;
-
-  // TODO: These have no parallel semantics yet
-  if (loweringTarget == "scf") {
-    auto lowerBound = rewriter.create<ConstantIndexOp>(loc, 0);
-    auto upperBound =
-        rewriter.create<ConstantIndexOp>(loc, n.getValue().getIntValue());
-    auto step = rewriter.create<ConstantIndexOp>(loc, 1);
-
-    auto forLoop =
-        rewriter.create<mlir::scf::ForOp>(loc, lowerBound, upperBound, step);
-    loopInductionVar = forLoop.getInductionVar();
-    forLoopBody = forLoop.getBody();
-  } else if (loweringTarget == "affine") {
-    auto forLoop =
-        rewriter.create<AffineForOp>(loc, 0, n.getValue().getIntValue(), 1);
-
-    // TODO: Not working as intended
-    //      auto lbMap = AffineMap::getConstantMap(0,
-    //      rewriter.getContext()); auto ubMap =
-    //      AffineMap::getConstantMap(n.getValue().getIntValue(),
-    //                                             rewriter.getContext());
-    //
-    //      auto parallelOp =
-    //      rewriter.create<AffineParallelOp>(appliedFun->getLoc(),
-    //                                                          lbMap,
-    //                                                          ValueRange{},
-    //                                                          ubMap,
-    //                                                          ValueRange{});
-    //      loopInductionVar = *parallelOp.getLowerBoundsOperands().begin();
-    //      forLoopBody = parallelOp.getBody();
-    loopInductionVar = forLoop.getInductionVar();
-    forLoopBody = forLoop.getBody();
-  }
-
-  rewriter.setInsertionPointToStart(forLoopBody);
-
-  LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
-  //    if (!fLambda) {
-  //      fLambda = expandToLambda(f, rewriter);
-  //    }
-
-  IdxOp xi;
-  // TODO: not needed anymore
-  //    if (contArray.getType().isa<MemRefType>()) {
-  //      ArrayRef<int64_t> inShape =
-  //          contArray.getType().dyn_cast<MemRefType>().getShape().drop_back(1);
-  //
-  //      MemRefType inIndexOpResult =
-  //          MemRefType::get(inShape,
-  //          FloatType::getF32(rewriter.getContext()));
-  //
-  //      xi = rewriter.create<IdxOp>(loc, inIndexOpResult, contArray,
-  //                                      loopInductionVar);
-  //    } else if (isa<IdxOp>(contArray.getDefiningOp())) {
-  //      //      std::cout << "got an idx and not a memref! \n" <<
-  //      std::flush;
-  //    }
   if (contArray.getType().isa<ArrayType>()) {
     xi = rewriter.create<IdxOp>(
         loc, contArray.getType().cast<ArrayType>().getElementType(), contArray,
@@ -802,6 +609,7 @@ void lowerAndStoreMapPar(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
       loc, out.getType().dyn_cast<ArrayType>().getElementType(), out,
       loopInductionVar);
 
+  // Lower and store the application of the outi to the mapped lambda
   lowerAndStore(fxi.getResult(), outi.getResult(), rewriter);
 
   // Copy of Lambda and corresponding Apply not needed anymore.
@@ -838,13 +646,7 @@ void lowerAndStoreSplit(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
       t.getValue());
   auto splitAccInterm =
       rewriter.create<SplitAccIntermediateOp>(loc, splitAccType, out, n, m, t);
-
-  if (isa<ApplyOp>(array.getDefiningOp())) {
-    lowerAndStore(dyn_cast<ApplyOp>(array.getDefiningOp()).getResult(),
-                  splitAccInterm.getResult(), rewriter);
-  } else {
-    emitError(loc) << "input to Split has to be result of ApplyOp";
-  }
+  lowerAndStore(array, splitAccInterm.getResult(), rewriter);
 }
 
 void lowerAndStoreJoin(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
@@ -855,13 +657,7 @@ void lowerAndStoreJoin(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
 
   auto joinAccInterm =
       rewriter.create<JoinAccIntermediateOp>(loc, joinAccType, out, n, m, t);
-
-  if (isa<ApplyOp>(array.getDefiningOp())) {
-    lowerAndStore(dyn_cast<ApplyOp>(array.getDefiningOp()).getResult(),
-                  joinAccInterm.getResult(), rewriter);
-  } else {
-    emitError(loc) << "input to Join has to be result of ApplyOp";
-  }
+  lowerAndStore(array, joinAccInterm.getResult(), rewriter);
 }
 
 //===----------------------------------------------------------------------===//
@@ -900,7 +696,11 @@ mlir::Value lowerLiteral(Value literalValue, Location loc,
       shape.push_back(arrayType.getSize().getIntValue());
     }
 
-    Type memrefElementType = FloatType::getF32(rewriter.getContext());
+    ScalarType elementType = arrayType.getElementType().dyn_cast<ScalarType>();
+    assert(
+        elementType &&
+        "Element type of inner array of Literal has to be of Type ScalarType!");
+    Type memrefElementType = elementType.getWrappedType();
 
     auto array = rewriter.create<AllocOp>(
         loc, MemRefType::get(shape, memrefElementType));
@@ -1042,7 +842,7 @@ mlir::Value lowerPad(NatAttr n, NatAttr l, NatAttr r, DataTypeAttr t, Type type,
 }
 
 //===----------------------------------------------------------------------===//
-// second part of the lowering process
+// Second part of the lowering process
 //===----------------------------------------------------------------------===//
 
 void lowerAssign(AssignOp assignOp, PatternRewriter &rewriter) {
