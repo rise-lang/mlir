@@ -24,6 +24,7 @@
 #include "mlir/IR/Module.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/StandardTypes.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/IR/Verifier.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
@@ -34,6 +35,7 @@
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 #include <algorithm>
+
 using namespace mlir;
 using llvm::MemoryBuffer;
 using llvm::SMLoc;
@@ -349,6 +351,12 @@ public:
                          function_ref<ParseResult(bool)> parseElement,
                          OpAsmParser::Delimiter delimiter);
 
+  //===--------------------------------------------------------------------===//
+  // RISE Parsing
+  //===--------------------------------------------------------------------===//
+
+  ArrayRef<int64_t> parseRiseArrayShape();
+
 private:
   /// The Parser is subclassed and reinstantiated.  Do not add additional
   /// non-trivial state here, add it to the ParserState class.
@@ -658,6 +666,14 @@ public:
   /// Parse an integer set instance into 'set'.
   ParseResult printIntegerSet(IntegerSet &set) override {
     return parser.parseIntegerSetReference(set);
+  }
+
+  //===----------------------------------------------------------------------===//
+  // RISE parsing.
+  //===----------------------------------------------------------------------===//
+
+  ArrayRef<int64_t> parseRiseArrayShape() override {
+    return parser.parseRiseArrayShape();
   }
 
   //===--------------------------------------------------------------------===//
@@ -2422,6 +2438,18 @@ Attribute Parser::parseSparseElementsAttr(Type attrType) {
 }
 
 //===----------------------------------------------------------------------===//
+// RISE parsing.
+//===----------------------------------------------------------------------===//
+
+ArrayRef<int64_t> Parser::parseRiseArrayShape() {
+  TensorLiteralParser arrayParser(*this);
+  if (arrayParser.parse(false))
+    return {};
+
+  return arrayParser.getShape();
+}
+
+//===----------------------------------------------------------------------===//
 // Location parsing.
 //===----------------------------------------------------------------------===//
 
@@ -3368,6 +3396,10 @@ public:
   /// returns null on failure.
   Value resolveSSAUse(SSAUseInfo useInfo, Type type);
 
+  /// Given a reference to an SSA value, return a reference. This
+  /// returns null on failure.
+  Value resolveSSAUse(SSAUseInfo useInfo);
+
   ParseResult parseSSADefOrUseAndType(
       const std::function<ParseResult(SSAUseInfo, Type)> &action);
 
@@ -3723,6 +3755,20 @@ Value OperationParser::resolveSSAUse(SSAUseInfo useInfo, Type type) {
   entries[useInfo.number].first = result;
   entries[useInfo.number].second = useInfo.loc;
   return result;
+}
+
+/// Given an unbound reference to an SSA value, return the value
+/// it specifies.  This returns null on failure.
+Value OperationParser::resolveSSAUse(SSAUseInfo useInfo) {
+  auto &entries = getSSAValueEntry(useInfo.name);
+
+  // If we have already seen a value of this name, return it.
+  if (useInfo.number < entries.size() && entries[useInfo.number].first) {
+    auto result = entries[useInfo.number].first;
+    return result;
+  } else {
+    return nullptr;
+  }
 }
 
 /// Parse an SSA use with an associated type.
@@ -4163,6 +4209,11 @@ public:
     return success(parser.consumeIf(Token::ellipsis));
   }
 
+  /// Parse a `-` token.
+  ParseResult parseMinus() override {
+    return parser.parseToken(Token::minus, "expected '-'");
+  }
+
   /// Parse a `=` token.
   ParseResult parseEqual() override {
     return parser.parseToken(Token::equal, "expected '='");
@@ -4432,6 +4483,18 @@ public:
     OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
                                                operand.location};
     if (auto value = parser.resolveSSAUse(operandInfo, type)) {
+      result.push_back(value);
+      return success();
+    }
+    return failure();
+  }
+
+  /// Resolve an operand to an SSA value, emitting an error on failure.
+  ParseResult resolveOperand(const OperandType &operand,
+                                   SmallVectorImpl<Value> &result) override {
+    OperationParser::SSAUseInfo operandInfo = {operand.name, operand.number,
+                                               operand.location};
+    if (auto value = parser.resolveSSAUse(operandInfo)) {
       result.push_back(value);
       return success();
     }

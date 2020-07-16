@@ -18,6 +18,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/raw_ostream.h"
+#include <mlir/Dialect/Rise/IR/Types.h>
 
 namespace mlir {
 
@@ -135,7 +136,8 @@ public:
   virtual ParseResult parseFloat(double &result) = 0;
 
   /// Parse an integer value from the stream.
-  template <typename IntT> ParseResult parseInteger(IntT &result) {
+  template <typename IntT>
+  ParseResult parseInteger(IntT &result) {
     auto loc = getCurrentLocation();
     OptionalParseResult parseResult = parseOptionalInteger(result);
     if (!parseResult.hasValue())
@@ -297,6 +299,9 @@ public:
   /// Parse an integer set instance into 'set'.
   virtual ParseResult printIntegerSet(IntegerSet &set) = 0;
 
+  virtual ArrayRef<int64_t>
+  parseRiseArrayShape() = 0;
+
   //===--------------------------------------------------------------------===//
   // Type Parsing
   //===--------------------------------------------------------------------===//
@@ -305,7 +310,8 @@ public:
   virtual ParseResult parseType(Type &result) = 0;
 
   /// Parse a type of a specific kind, e.g. a FunctionType.
-  template <typename TypeType> ParseResult parseType(TypeType &result) {
+  template <typename TypeType>
+  ParseResult parseType(TypeType &result) {
     llvm::SMLoc loc = getCurrentLocation();
 
     // Parse any kind of type.

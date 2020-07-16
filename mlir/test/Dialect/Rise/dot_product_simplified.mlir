@@ -1,5 +1,3 @@
-// RUN: mlir-opt %s
-
 module {
 func @rise_dot_product_simplified() {
     //Arrays

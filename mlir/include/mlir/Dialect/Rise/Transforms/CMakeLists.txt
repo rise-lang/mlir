@@ -1,0 +1,3 @@
+set(LLVM_TARGET_DEFINITIONS RiseTransformPatterns.td)
+mlir_tablegen(RiseTransformPatterns.h.inc -gen-rewriters)
+add_public_tablegen_target(MLIRRiseTransformPatternsIncGen)

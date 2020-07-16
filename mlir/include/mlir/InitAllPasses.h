@@ -23,6 +23,7 @@
 #include "mlir/Conversion/LinalgToLLVM/LinalgToLLVM.h"
 #include "mlir/Conversion/LinalgToSPIRV/LinalgToSPIRVPass.h"
 #include "mlir/Conversion/LinalgToStandard/LinalgToStandard.h"
+#include "mlir/Conversion/RiseToImperative/ConvertRiseToImperative.h"
 #include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"
@@ -56,15 +57,6 @@ namespace mlir {
 // individual passes.
 // The global registry is interesting to interact with the command-line tools.
 inline void registerAllPasses() {
-  // At the moment we still rely on global initializers for registering passes,
-  // but we may not do it in the future.
-  // We must reference the passes in such a way that compilers will not
-  // delete it all as dead code, even with whole program optimization,
-  // yet is effectively a NO-OP. As the compiler isn't smart enough
-  // to know that getenv() never returns -1, this will do the job.
-  if (std::getenv("bar") != (char *)-1)
-    return;
-
   // Init general passes
 #define GEN_PASS_REGISTRATION
 #include "mlir/Transforms/Passes.h.inc"
@@ -97,7 +89,7 @@ inline void registerAllPasses() {
 #define GEN_PASS_REGISTRATION
 #include "mlir/Dialect/Quant/Passes.h.inc"
 
-// Rise
+  // Rise
 #define GEN_PASS_REGISTRATION
 #include "mlir/Dialect/Rise/Passes.h.inc"
 

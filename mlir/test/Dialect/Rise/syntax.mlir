@@ -1,5 +1,3 @@
-// RUN: mlir-opt %s
-
 module {
     func @rise_id() {
     ^id:
@@ -69,6 +67,7 @@ module {
 
         "rise.return"() : () -> ()
     }
+
 
 ///proposed structure:
 //        // Natural numbers: N =
