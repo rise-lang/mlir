@@ -333,10 +333,25 @@ Constant *llvm::ConstantFoldLoadThroughBitcast(Constant *C, Type *DestTy,
                                          const DataLayout &DL) {
   do {
     Type *SrcTy = C->getType();
+    uint64_t DestSize = DL.getTypeSizeInBits(DestTy);
+    uint64_t SrcSize = DL.getTypeSizeInBits(SrcTy);
+    if (SrcSize < DestSize)
+      return nullptr;
+
+    // Catch the obvious splat cases (since all-zeros can coerce non-integral
+    // pointers legally).
+    if (C->isNullValue() && !DestTy->isX86_MMXTy())
+      return Constant::getNullValue(DestTy);
+    if (C->isAllOnesValue() && !DestTy->isX86_MMXTy() &&
+        !DestTy->isPtrOrPtrVectorTy()) // Don't get ones for ptr types!
+      return Constant::getAllOnesValue(DestTy);
 
     // If the type sizes are the same and a cast is legal, just directly
     // cast the constant.
-    if (DL.getTypeSizeInBits(DestTy) == DL.getTypeSizeInBits(SrcTy)) {
+    // But be careful not to coerce non-integral pointers illegally.
+    if (SrcSize == DestSize &&
+        DL.isNonIntegralPointerType(SrcTy->getScalarType()) ==
+            DL.isNonIntegralPointerType(DestTy->getScalarType())) {
       Instruction::CastOps Cast = Instruction::BitCast;
       // If we are going from a pointer to int or vice versa, we spell the cast
       // differently.
@@ -2607,8 +2622,8 @@ static Constant *ConstantFoldScalarCall3(StringRef Name,
           // how rounding should be done, and provide their own folding to be
           // consistent with rounding. This is the same approach as used by
           // DAGTypeLegalizer::ExpandIntRes_MULFIX.
-          APInt Lhs = Op1->getValue();
-          APInt Rhs = Op2->getValue();
+          const APInt &Lhs = Op1->getValue();
+          const APInt &Rhs = Op2->getValue();
           unsigned Scale = Op3->getValue().getZExtValue();
           unsigned Width = Lhs.getBitWidth();
           assert(Scale < Width && "Illegal scale.");
@@ -2689,24 +2704,26 @@ static Constant *ConstantFoldVectorCall(StringRef Name,
                                         const DataLayout &DL,
                                         const TargetLibraryInfo *TLI,
                                         const CallBase *Call) {
-  SmallVector<Constant *, 4> Result(VTy->getNumElements());
-  SmallVector<Constant *, 4> Lane(Operands.size());
-  Type *Ty = VTy->getElementType();
-
   // Do not iterate on scalable vector. The number of elements is unknown at
   // compile-time.
   if (isa<ScalableVectorType>(VTy))
     return nullptr;
+
+  auto *FVTy = cast<FixedVectorType>(VTy);
+
+  SmallVector<Constant *, 4> Result(FVTy->getNumElements());
+  SmallVector<Constant *, 4> Lane(Operands.size());
+  Type *Ty = FVTy->getElementType();
 
   if (IntrinsicID == Intrinsic::masked_load) {
     auto *SrcPtr = Operands[0];
     auto *Mask = Operands[2];
     auto *Passthru = Operands[3];
 
-    Constant *VecData = ConstantFoldLoadFromConstPtr(SrcPtr, VTy, DL);
+    Constant *VecData = ConstantFoldLoadFromConstPtr(SrcPtr, FVTy, DL);
 
     SmallVector<Constant *, 32> NewElements;
-    for (unsigned I = 0, E = VTy->getNumElements(); I != E; ++I) {
+    for (unsigned I = 0, E = FVTy->getNumElements(); I != E; ++I) {
       auto *MaskElt = Mask->getAggregateElement(I);
       if (!MaskElt)
         break;
@@ -2732,12 +2749,12 @@ static Constant *ConstantFoldVectorCall(StringRef Name,
         return nullptr;
       }
     }
-    if (NewElements.size() != VTy->getNumElements())
+    if (NewElements.size() != FVTy->getNumElements())
       return nullptr;
     return ConstantVector::get(NewElements);
   }
 
-  for (unsigned I = 0, E = VTy->getNumElements(); I != E; ++I) {
+  for (unsigned I = 0, E = FVTy->getNumElements(); I != E; ++I) {
     // Gather a column of constants.
     for (unsigned J = 0, JE = Operands.size(); J != JE; ++J) {
       // Some intrinsics use a scalar type for certain arguments.

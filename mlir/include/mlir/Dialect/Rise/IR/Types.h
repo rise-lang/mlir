@@ -85,7 +85,7 @@ enum RiseTypeKind {
 /// like DataTypes and, for example, be stored in an array.
 ///
 
-class DataType : public Type::TypeBase<DataType, Type> {
+class DataType : public Type::TypeBase<DataType, Type, TypeStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
@@ -117,7 +117,7 @@ public:
   int getIntValue();
 };
 
-class RiseType : public Type::TypeBase<RiseType, Type> {
+class RiseType : public Type::TypeBase<RiseType, Type, TypeStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;

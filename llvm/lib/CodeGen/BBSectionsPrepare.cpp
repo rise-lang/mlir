@@ -180,7 +180,7 @@ static void updateBranches(
     MachineBasicBlock *TBB = nullptr, *FBB = nullptr; // For analyzeBranch.
     if (TII->analyzeBranch(MBB, TBB, FBB, Cond))
       continue;
-    MBB.updateTerminator();
+    MBB.updateTerminator(FTMBB);
   }
 }
 
@@ -448,7 +448,7 @@ bool BBSectionsPrepare::doInitialization(Module &M) {
 
 void BBSectionsPrepare::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequired<MachineModuleInfoWrapperPass>();
+  MachineFunctionPass::getAnalysisUsage(AU);
 }
 
 MachineFunctionPass *

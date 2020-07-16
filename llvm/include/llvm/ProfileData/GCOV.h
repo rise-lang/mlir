@@ -42,15 +42,15 @@ class FileInfo;
 
 namespace GCOV {
 
-enum GCOVVersion { V402, V407, V408, V800, V900 };
+enum GCOVVersion { V304, V407, V408, V800, V900 };
 
 /// A struct for passing gcov options between functions.
 struct Options {
-  Options(bool A, bool B, bool C, bool F, bool P, bool U, bool L, bool N,
-          bool T, bool X)
+  Options(bool A, bool B, bool C, bool F, bool P, bool U, bool I, bool L,
+          bool N, bool T, bool X)
       : AllBlocks(A), BranchInfo(B), BranchCount(C), FuncCoverage(F),
-        PreservePaths(P), UncondBranch(U), LongFileNames(L), NoOutput(N),
-        UseStdout(T), HashFilenames(X) {}
+        PreservePaths(P), UncondBranch(U), Intermediate(I), LongFileNames(L),
+        NoOutput(N), UseStdout(T), HashFilenames(X) {}
 
   bool AllBlocks;
   bool BranchInfo;
@@ -58,6 +58,7 @@ struct Options {
   bool FuncCoverage;
   bool PreservePaths;
   bool UncondBranch;
+  bool Intermediate;
   bool LongFileNames;
   bool NoOutput;
   bool UseStdout;
@@ -97,7 +98,6 @@ public:
     } else if (magic == "adcg") {
       de = DataExtractor(buf.substr(4), true, 0);
     } else {
-      errs() << "unexpected file type: " << magic << "\n";
       return false;
     }
     return true;
@@ -105,35 +105,32 @@ public:
 
   /// readGCOVVersion - Read GCOV version.
   bool readGCOVVersion(GCOV::GCOVVersion &Version) {
-    StringRef str = de.getBytes(cursor, 4);
-    int Major, Minor;
+    std::string str(de.getBytes(cursor, 4));
     if (str.size() != 4)
       return false;
-    if (de.isLittleEndian()) {
-      Major = str[3] >= 'A' ? (str[3] - 'A') * 10 + str[2] - '0' : str[3] - '0';
-      Minor = str[1] - '0';
-    } else {
-      Major = str[0] >= 'A' ? (str[0] - 'A') * 10 + str[1] - '0' : str[0] - '0';
-      Minor = str[3] - '0';
-    }
-    if (Major >= 9) {
+    if (de.isLittleEndian())
+      std::reverse(str.begin(), str.end());
+    int ver = str[0] >= 'A'
+                  ? (str[0] - 'A') * 100 + (str[1] - '0') * 10 + str[2] - '0'
+                  : (str[0] - '0') * 10 + str[2] - '0';
+    if (ver >= 90) {
       // PR gcov-profile/84846, r269678
       Version = GCOV::V900;
       return true;
-    } else if (Major >= 8) {
+    } else if (ver >= 80) {
       // PR gcov-profile/48463
       Version = GCOV::V800;
       return true;
-    } else if (Major > 4 || (Major == 4 && Minor >= 8)) {
+    } else if (ver >= 48) {
       // r189778: the exit block moved from the last to the second.
       Version = GCOV::V408;
       return true;
-    } else if (Major == 4 && Minor >= 7) {
+    } else if (ver >= 47) {
       // r173147: split checksum into cfg checksum and line checksum.
       Version = GCOV::V407;
       return true;
-    } else {
-      Version = GCOV::V402;
+    } else if (ver >= 34) {
+      Version = GCOV::V304;
       return true;
     }
     errs() << "unexpected version: " << str << "\n";
@@ -195,6 +192,9 @@ public:
   void dump() const;
   void collectLineCounts(FileInfo &FI);
 
+  std::vector<std::string> filenames;
+  StringMap<unsigned> filenameToIdx;
+
 private:
   bool GCNOInitialized = false;
   GCOV::GCOVVersion Version;
@@ -204,6 +204,11 @@ private:
   std::map<uint32_t, GCOVFunction *> IdentToFunction;
   uint32_t RunCount = 0;
   uint32_t ProgramCount = 0;
+
+  using iterator = pointee_iterator<
+      SmallVectorImpl<std::unique_ptr<GCOVFunction>>::const_iterator>;
+  iterator begin() const { return iterator(Functions.begin()); }
+  iterator end() const { return iterator(Functions.end()); }
 };
 
 struct GCOVArc {
@@ -223,10 +228,10 @@ public:
   using BlockIterator = pointee_iterator<
       SmallVectorImpl<std::unique_ptr<GCOVBlock>>::const_iterator>;
 
-  GCOVFunction(GCOVFile &P) {}
+  GCOVFunction(GCOVFile &file) : file(file) {}
 
   StringRef getName() const { return Name; }
-  StringRef getFilename() const { return Filename; }
+  StringRef getFilename() const;
   size_t getNumBlocks() const { return Blocks.size(); }
   uint64_t getEntryCount() const;
   uint64_t getExitCount() const;
@@ -241,6 +246,7 @@ public:
   void dump() const;
   void collectLineCounts(FileInfo &FI);
 
+  GCOVFile &file;
   uint32_t ident = 0;
   uint32_t linenoChecksum;
   uint32_t cfgChecksum = 0;
@@ -250,7 +256,7 @@ public:
   uint32_t endColumn = 0;
   uint8_t artificial = 0;
   StringRef Name;
-  StringRef Filename;
+  unsigned srcIdx;
   SmallVector<std::unique_ptr<GCOVBlock>, 0> Blocks;
   SmallVector<std::unique_ptr<GCOVArc>, 0> arcs, treeArcs;
 };
@@ -315,6 +321,28 @@ public:
   SmallVector<uint32_t, 16> Lines;
 };
 
+struct GCOVCoverage {
+  GCOVCoverage() = default;
+  GCOVCoverage(StringRef Name) : Name(Name) {}
+
+  StringRef Name;
+
+  uint32_t LogicalLines = 0;
+  uint32_t LinesExec = 0;
+
+  uint32_t Branches = 0;
+  uint32_t BranchesExec = 0;
+  uint32_t BranchesTaken = 0;
+};
+
+struct SourceInfo {
+  StringRef filename;
+  std::string name;
+  std::vector<GCOVFunction *> functions;
+  GCOVCoverage coverage;
+  SourceInfo(StringRef filename) : filename(filename) {}
+};
+
 class FileInfo {
 protected:
   // It is unlikely--but possible--for multiple functions to be on the same
@@ -335,20 +363,8 @@ protected:
     uint32_t LastLine = 0;
   };
 
-  struct GCOVCoverage {
-    GCOVCoverage(StringRef Name) : Name(Name) {}
-
-    StringRef Name;
-
-    uint32_t LogicalLines = 0;
-    uint32_t LinesExec = 0;
-
-    uint32_t Branches = 0;
-    uint32_t BranchesExec = 0;
-    uint32_t BranchesTaken = 0;
-  };
-
 public:
+  friend class GCOVFile;
   FileInfo(const GCOV::Options &Options) : Options(Options) {}
 
   void addBlockLine(StringRef Filename, uint32_t Line, const GCOVBlock *Block) {
@@ -367,7 +383,7 @@ public:
   void setRunCount(uint32_t Runs) { RunCount = Runs; }
   void setProgramCount(uint32_t Programs) { ProgramCount = Programs; }
   void print(raw_ostream &OS, StringRef MainFilename, StringRef GCNOFile,
-             StringRef GCDAFile, GCOV::GCOVVersion Version);
+             StringRef GCDAFile, GCOVFile &file);
 
 protected:
   std::string getCoveragePath(StringRef Filename, StringRef MainFilename);
@@ -389,11 +405,10 @@ protected:
   uint32_t RunCount = 0;
   uint32_t ProgramCount = 0;
 
-  using FileCoverageList = SmallVector<std::pair<std::string, GCOVCoverage>, 4>;
   using FuncCoverageMap = MapVector<const GCOVFunction *, GCOVCoverage>;
 
-  FileCoverageList FileCoverages;
   FuncCoverageMap FuncCoverages;
+  std::vector<SourceInfo> sources;
 };
 
 } // end namespace llvm

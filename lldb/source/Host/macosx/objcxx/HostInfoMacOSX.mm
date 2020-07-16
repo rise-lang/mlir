@@ -136,7 +136,7 @@ bool HostInfoMacOSX::ComputeSupportExeDirectory(FileSpec &file_spec) {
   size_t framework_pos = raw_path.find("LLDB.framework");
   if (framework_pos != std::string::npos) {
     framework_pos += strlen("LLDB.framework");
-#if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
+#if TARGET_OS_EMBEDDED
     // Shallow bundle
     raw_path.resize(framework_pos);
 #else
@@ -276,6 +276,9 @@ void HostInfoMacOSX::ComputeHostArchitectureSupport(ArchSpec &arch_32,
 #elif defined(TARGET_OS_WATCHOS) && TARGET_OS_WATCHOS == 1
         arch_32.GetTriple().setOS(llvm::Triple::WatchOS);
         arch_64.GetTriple().setOS(llvm::Triple::WatchOS);
+#elif defined(TARGET_OS_OSX) && TARGET_OS_OSX == 1
+        arch_32.GetTriple().setOS(llvm::Triple::MacOSX);
+        arch_64.GetTriple().setOS(llvm::Triple::MacOSX);
 #else
         arch_32.GetTriple().setOS(llvm::Triple::IOS);
         arch_64.GetTriple().setOS(llvm::Triple::IOS);
@@ -297,11 +300,92 @@ void HostInfoMacOSX::ComputeHostArchitectureSupport(ArchSpec &arch_32,
   }
 }
 
+/// Return and cache $DEVELOPER_DIR if it is set and exists.
+static std::string GetEnvDeveloperDir() {
+  static std::string g_env_developer_dir;
+  static std::once_flag g_once_flag;
+  std::call_once(g_once_flag, [&]() {
+    if (const char *developer_dir_env_var = getenv("DEVELOPER_DIR")) {
+      FileSpec fspec(developer_dir_env_var);
+      if (FileSystem::Instance().Exists(fspec))
+        g_env_developer_dir = fspec.GetPath();
+    }});
+  return g_env_developer_dir;
+}
+
+FileSpec HostInfoMacOSX::GetXcodeContentsDirectory() {
+  static FileSpec g_xcode_contents_path;
+  static std::once_flag g_once_flag;
+  std::call_once(g_once_flag, [&]() {
+    // Try the shlib dir first.
+    if (FileSpec fspec = HostInfo::GetShlibDir()) {
+      if (FileSystem::Instance().Exists(fspec)) {
+        std::string xcode_contents_dir =
+            XcodeSDK::FindXcodeContentsDirectoryInPath(fspec.GetPath());
+        if (!xcode_contents_dir.empty()) {
+          g_xcode_contents_path = FileSpec(xcode_contents_dir);
+          return;
+        }
+      }
+    }
+
+    llvm::SmallString<128> env_developer_dir(GetEnvDeveloperDir());
+    if (!env_developer_dir.empty()) {
+      llvm::sys::path::append(env_developer_dir, "Contents");
+      std::string xcode_contents_dir =
+          XcodeSDK::FindXcodeContentsDirectoryInPath(env_developer_dir);
+      if (!xcode_contents_dir.empty()) {
+        g_xcode_contents_path = FileSpec(xcode_contents_dir);
+        return;
+      }
+    }
+
+    FileSpec fspec(HostInfo::GetXcodeSDKPath(XcodeSDK::GetAnyMacOS()));
+    if (fspec) {
+      if (FileSystem::Instance().Exists(fspec)) {
+        std::string xcode_contents_dir =
+            XcodeSDK::FindXcodeContentsDirectoryInPath(fspec.GetPath());
+        if (!xcode_contents_dir.empty()) {
+          g_xcode_contents_path = FileSpec(xcode_contents_dir);
+          return;
+        }
+      }
+    }
+  });
+  return g_xcode_contents_path;
+}
+
+lldb_private::FileSpec HostInfoMacOSX::GetXcodeDeveloperDirectory() {
+  static lldb_private::FileSpec g_developer_directory;
+  static llvm::once_flag g_once_flag;
+  llvm::call_once(g_once_flag, []() {
+    if (FileSpec fspec = GetXcodeContentsDirectory()) {
+      fspec.AppendPathComponent("Developer");
+      if (FileSystem::Instance().Exists(fspec))
+        g_developer_directory = fspec;
+    }
+  });
+  return g_developer_directory;
+}
+
 static std::string GetXcodeSDK(XcodeSDK sdk) {
   XcodeSDK::Info info = sdk.Parse();
   std::string sdk_name = XcodeSDK::GetCanonicalName(info);
   auto find_sdk = [](std::string sdk_name) -> std::string {
-    std::string xcrun_cmd = "xcrun --show-sdk-path --sdk " + sdk_name;
+    std::string xcrun_cmd;
+    std::string developer_dir = GetEnvDeveloperDir();
+    if (developer_dir.empty())
+      if (FileSpec fspec = HostInfo::GetShlibDir())
+        if (FileSystem::Instance().Exists(fspec)) {
+          FileSpec path(
+              XcodeSDK::FindXcodeContentsDirectoryInPath(fspec.GetPath()));
+          if (path.RemoveLastPathComponent())
+            developer_dir = path.GetPath();
+        }
+    if (!developer_dir.empty())
+      xcrun_cmd = "/usr/bin/env DEVELOPER_DIR=\"" + developer_dir + "\" ";
+    xcrun_cmd += "xcrun --show-sdk-path --sdk " + sdk_name;
+
     int status = 0;
     int signo = 0;
     std::string output_str;

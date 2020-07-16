@@ -42,7 +42,7 @@
 // CHECK-DAG: #set{{[0-9]+}} = affine_set<(d0) : (d0 - 1 == 0)>
 #set2 = affine_set<(d0) : (d0 - 1 == 0)>
 
-// CHECK-DAG: [[SET_TRUE:#set[0-9]+]] = affine_set<() : (0 == 0)>
+// CHECK-DAG: [[$SET_TRUE:#set[0-9]+]] = affine_set<() : (0 == 0)>
 
 // CHECK-DAG: #set{{[0-9]+}} = affine_set<(d0)[s0] : (d0 - 2 >= 0, -d0 + 4 >= 0)>
 
@@ -670,19 +670,21 @@ func @densetensorattr() -> () {
 // CHECK: "fooi67"() {bar = dense<{{\[\[\[}}-5, 4, 6, 2]]]> : vector<1x1x4xi67>} : () -> ()
   "fooi67"(){bar = dense<[[[-5, 4, 6, 2]]]> : vector<1x1x4xi67>} : () -> ()
 
-// CHECK: "foo2"() {bar = dense<[]> : tensor<0xi32>} : () -> ()
-  "foo2"(){bar = dense<[]> : tensor<0xi32>} : () -> ()
-// CHECK: "foo2"() {bar = dense<{{\[\[}}]]> : tensor<1x0xi32>} : () -> ()
-  "foo2"(){bar = dense<[[]]> : tensor<1x0xi32>} : () -> ()
+// CHECK: "foo2"() {bar = dense<> : tensor<0xi32>} : () -> ()
+  "foo2"(){bar = dense<> : tensor<0xi32>} : () -> ()
+// CHECK: "foo2"() {bar = dense<> : tensor<1x0xi32>} : () -> ()
+  "foo2"(){bar = dense<> : tensor<1x0xi32>} : () -> ()
+// CHECK: dense<> : tensor<0x512x512xi32>
+  "foo2"(){bar = dense<> : tensor<0x512x512xi32>} : () -> ()
 // CHECK: "foo3"() {bar = dense<{{\[\[\[}}5, -6, 1, 2]], {{\[\[}}7, 8, 3, 4]]]> : tensor<2x1x4xi32>} : () -> ()
   "foo3"(){bar = dense<[[[5, -6, 1, 2]], [[7, 8, 3, 4]]]> : tensor<2x1x4xi32>} : () -> ()
 
 // CHECK: "float1"() {bar = dense<5.000000e+00> : tensor<1x1x1xf32>} : () -> ()
   "float1"(){bar = dense<[[[5.0]]]> : tensor<1x1x1xf32>} : () -> ()
-// CHECK: "float2"() {bar = dense<[]> : tensor<0xf32>} : () -> ()
-  "float2"(){bar = dense<[]> : tensor<0xf32>} : () -> ()
-// CHECK: "float2"() {bar = dense<{{\[\[}}]]> : tensor<1x0xf32>} : () -> ()
-  "float2"(){bar = dense<[[]]> : tensor<1x0xf32>} : () -> ()
+// CHECK: "float2"() {bar = dense<> : tensor<0xf32>} : () -> ()
+  "float2"(){bar = dense<> : tensor<0xf32>} : () -> ()
+// CHECK: "float2"() {bar = dense<> : tensor<1x0xf32>} : () -> ()
+  "float2"(){bar = dense<> : tensor<1x0xf32>} : () -> ()
 
 // CHECK: "bfloat16"() {bar = dense<{{\[\[\[}}-5.000000e+00, 6.000000e+00, 1.000000e+00, 2.000000e+00]], {{\[\[}}7.000000e+00, -8.000000e+00, 3.000000e+00, 4.000000e+00]]]> : tensor<2x1x4xbf16>} : () -> ()
   "bfloat16"(){bar = dense<[[[-5.0, 6.0, 1.0, 2.0]], [[7.0, -8.0, 3.0, 4.0]]]> : tensor<2x1x4xbf16>} : () -> ()
@@ -752,27 +754,27 @@ func @sparsetensorattr() -> () {
   "fooi8"(){bar = sparse<0, -2> : tensor<1x1x1xi8>} : () -> ()
 // CHECK: "fooi16"() {bar = sparse<{{\[\[}}1, 1, 0], {{\[}}0, 1, 0], {{\[}}0, 0, 1]], {{\[}}2, -1, 5]> : tensor<2x2x2xi16>} : () -> ()
   "fooi16"(){bar = sparse<[[1, 1, 0], [0, 1, 0], [0, 0, 1]], [2, -1, 5]> : tensor<2x2x2xi16>} : () -> ()
-// CHECK: "fooi32"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<1x1xi32>} : () -> ()
-  "fooi32"(){bar = sparse<[], []> : tensor<1x1xi32>} : () -> ()
+// CHECK: "fooi32"() {bar = sparse<> : tensor<1x1xi32>} : () -> ()
+  "fooi32"(){bar = sparse<> : tensor<1x1xi32>} : () -> ()
 // CHECK: "fooi64"() {bar = sparse<0, -1> : tensor<1xi64>} : () -> ()
   "fooi64"(){bar = sparse<[[0]], [-1]> : tensor<1xi64>} : () -> ()
-// CHECK: "foo2"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<0xi32>} : () -> ()
-  "foo2"(){bar = sparse<[], []> : tensor<0xi32>} : () -> ()
-// CHECK: "foo3"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<i32>} : () -> ()
-  "foo3"(){bar = sparse<[], []> : tensor<i32>} : () -> ()
+// CHECK: "foo2"() {bar = sparse<> : tensor<0xi32>} : () -> ()
+  "foo2"(){bar = sparse<> : tensor<0xi32>} : () -> ()
+// CHECK: "foo3"() {bar = sparse<> : tensor<i32>} : () -> ()
+  "foo3"(){bar = sparse<> : tensor<i32>} : () -> ()
 
 // CHECK: "foof16"() {bar = sparse<0, -2.000000e+00> : tensor<1x1x1xf16>} : () -> ()
   "foof16"(){bar = sparse<0, -2.0> : tensor<1x1x1xf16>} : () -> ()
 // CHECK: "foobf16"() {bar = sparse<{{\[\[}}1, 1, 0], {{\[}}0, 1, 0], {{\[}}0, 0, 1]], {{\[}}2.000000e+00, -1.000000e+00, 5.000000e+00]> : tensor<2x2x2xbf16>} : () -> ()
   "foobf16"(){bar = sparse<[[1, 1, 0], [0, 1, 0], [0, 0, 1]], [2.0, -1.0, 5.0]> : tensor<2x2x2xbf16>} : () -> ()
-// CHECK: "foof32"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<1x0x1xf32>} : () -> ()
-  "foof32"(){bar = sparse<[], []> : tensor<1x0x1xf32>} : () -> ()
+// CHECK: "foof32"() {bar = sparse<> : tensor<1x0x1xf32>} : () -> ()
+  "foof32"(){bar = sparse<> : tensor<1x0x1xf32>} : () -> ()
 // CHECK:  "foof64"() {bar = sparse<0, -1.000000e+00> : tensor<1xf64>} : () -> ()
   "foof64"(){bar = sparse<[[0]], [-1.0]> : tensor<1xf64>} : () -> ()
-// CHECK: "foof320"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<0xf32>} : () -> ()
-  "foof320"(){bar = sparse<[], []> : tensor<0xf32>} : () -> ()
-// CHECK: "foof321"() {bar = sparse<{{\[}}], {{\[}}]> : tensor<f32>} : () -> ()
-  "foof321"(){bar = sparse<[], []> : tensor<f32>} : () -> ()
+// CHECK: "foof320"() {bar = sparse<> : tensor<0xf32>} : () -> ()
+  "foof320"(){bar = sparse<> : tensor<0xf32>} : () -> ()
+// CHECK: "foof321"() {bar = sparse<> : tensor<f32>} : () -> ()
+  "foof321"(){bar = sparse<> : tensor<f32>} : () -> ()
 
 // CHECK: "foostr"() {bar = sparse<0, "foo"> : tensor<1x1x1x!unknown<"">>} : () -> ()
   "foostr"(){bar = sparse<0, "foo"> : tensor<1x1x1x!unknown<"">>} : () -> ()
@@ -789,8 +791,8 @@ func @sparsevectorattr() -> () {
   "fooi8"(){bar = sparse<0, -2> : vector<1x1x1xi8>} : () -> ()
 // CHECK: "fooi16"() {bar = sparse<{{\[\[}}1, 1, 0], {{\[}}0, 1, 0], {{\[}}0, 0, 1]], {{\[}}2, -1, 5]> : vector<2x2x2xi16>} : () -> ()
   "fooi16"(){bar = sparse<[[1, 1, 0], [0, 1, 0], [0, 0, 1]], [2, -1, 5]> : vector<2x2x2xi16>} : () -> ()
-// CHECK: "fooi32"() {bar = sparse<{{\[}}], {{\[}}]> : vector<1x1xi32>} : () -> ()
-  "fooi32"(){bar = sparse<[], []> : vector<1x1xi32>} : () -> ()
+// CHECK: "fooi32"() {bar = sparse<> : vector<1x1xi32>} : () -> ()
+  "fooi32"(){bar = sparse<> : vector<1x1xi32>} : () -> ()
 // CHECK: "fooi64"() {bar = sparse<0, -1> : vector<1xi64>} : () -> ()
   "fooi64"(){bar = sparse<[[0]], [-1]> : vector<1xi64>} : () -> ()
 
@@ -826,7 +828,7 @@ func @type_alias() -> !i32_type_alias {
 
 // CHECK-LABEL: func @no_integer_set_constraints(
 func @no_integer_set_constraints() {
-  // CHECK: affine.if [[SET_TRUE]]() {
+  // CHECK: affine.if [[$SET_TRUE]]() {
   affine.if affine_set<() : ()> () {
   }
   return
@@ -840,12 +842,12 @@ func @verbose_if(%N: index) {
   "affine.if"(%c, %N, %c) ({
     // CHECK-NEXT: "add"
     %y = "add"(%c, %N) : (index, index) -> index
-    "affine.terminator"() : () -> ()
+    "affine.yield"() : () -> ()
     // CHECK-NEXT: } else {
   }, { // The else region.
     // CHECK-NEXT: "add"
     %z = "add"(%c, %c) : (index, index) -> index
-    "affine.terminator"() : () -> ()
+    "affine.yield"() : () -> ()
   })
   { condition = #set0 } : (index, index, index) -> ()
   return
@@ -1073,28 +1075,26 @@ func @f64_special_values() {
   return
 }
 
-// FIXME: bfloat16 currently uses f64 as a storage format. This test should be
-// changed when that gets fixed.
 // CHECK-LABEL: @bfloat16_special_values
 func @bfloat16_special_values() {
   // bfloat16 signaling NaNs.
-  // CHECK: constant 0x7FF0000000000001 : bf16
-  %0 = constant 0x7FF0000000000001 : bf16
-  // CHECK: constant 0x7FF8000000000000 : bf16
-  %1 = constant 0x7FF8000000000000 : bf16
+  // CHECK: constant 0x7F81 : bf16
+  %0 = constant 0x7F81 : bf16
+  // CHECK: constant 0xFF81 : bf16
+  %1 = constant 0xFF81 : bf16
 
   // bfloat16 quiet NaNs.
-  // CHECK: constant 0x7FF0000001000000 : bf16
-  %2 = constant 0x7FF0000001000000 : bf16
-  // CHECK: constant 0xFFF0000001000000 : bf16
-  %3 = constant 0xFFF0000001000000 : bf16
+  // CHECK: constant 0x7FC0 : bf16
+  %2 = constant 0x7FC0 : bf16
+  // CHECK: constant 0xFFC0 : bf16
+  %3 = constant 0xFFC0 : bf16
 
   // bfloat16 positive infinity.
-  // CHECK: constant 0x7FF0000000000000 : bf16
-  %4 = constant 0x7FF0000000000000 : bf16
+  // CHECK: constant 0x7F80 : bf16
+  %4 = constant 0x7F80 : bf16
   // bfloat16 negative infinity.
-  // CHECK: constant 0xFFF0000000000000 : bf16
-  %5 = constant 0xFFF0000000000000 : bf16
+  // CHECK: constant 0xFF80 : bf16
+  %5 = constant 0xFF80 : bf16
 
   return
 }
@@ -1215,12 +1215,12 @@ func @pretty_names() {
   %x = test.string_attr_pretty_name
   // CHECK: %x = test.string_attr_pretty_name
   // CHECK-NOT: attributes
-  
+
   // This specifies an explicit name, which should override the result.
   %YY = test.string_attr_pretty_name attributes { names = ["y"] }
   // CHECK: %y = test.string_attr_pretty_name
   // CHECK-NOT: attributes
-  
+
   // Conflicts with the 'y' name, so need an explicit attribute.
   %0 = "test.string_attr_pretty_name"() { names = ["y"]} : () -> i32
   // CHECK: %y_0 = test.string_attr_pretty_name attributes {names = ["y"]}

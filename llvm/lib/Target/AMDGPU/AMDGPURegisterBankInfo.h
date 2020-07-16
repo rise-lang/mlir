@@ -69,13 +69,12 @@ public:
 
   void constrainOpWithReadfirstlane(MachineInstr &MI, MachineRegisterInfo &MRI,
                                     unsigned OpIdx) const;
-  bool applyMappingWideLoad(MachineInstr &MI,
-                            const OperandsMapper &OpdMapper,
-                            MachineRegisterInfo &MRI) const;
-
   bool applyMappingDynStackAlloc(MachineInstr &MI,
                                  const OperandsMapper &OpdMapper,
                                  MachineRegisterInfo &MRI) const;
+  bool applyMappingLoad(MachineInstr &MI,
+                        const OperandsMapper &OpdMapper,
+                        MachineRegisterInfo &MRI) const;
   bool
   applyMappingImage(MachineInstr &MI,
                     const OperandsMapper &OpdMapper,
@@ -179,6 +178,15 @@ public:
 
   const InstructionMapping &
   getInstrMapping(const MachineInstr &MI) const override;
+
+private:
+
+  bool foldExtractEltToCmpSelect(MachineInstr &MI,
+                                 MachineRegisterInfo &MRI,
+                                 const OperandsMapper &OpdMapper) const;
+  bool foldInsertEltToCmpSelect(MachineInstr &MI,
+                                MachineRegisterInfo &MRI,
+                                const OperandsMapper &OpdMapper) const;
 };
 } // End llvm namespace.
 #endif

@@ -4,7 +4,6 @@
 int some_func(int *);
 
 // CHECK:     VarDecl {{.*}} invalid_call
-// CHECK-NEXT: `-ImplicitCastExpr {{.*}} 'int' contains-errors
 // CHECK-NEXT:  `-RecoveryExpr {{.*}} 'int' contains-errors
 // CHECK-NEXT:    |-UnresolvedLookupExpr {{.*}} 'some_func'
 // CHECK-NEXT:    `-IntegerLiteral {{.*}} 123
@@ -13,9 +12,9 @@ int invalid_call = some_func(123);
 void test_invalid_call(int s) {
   // CHECK:      CallExpr {{.*}} '<dependent type>' contains-errors
   // CHECK-NEXT: |-UnresolvedLookupExpr {{.*}} 'some_func'
-  // CHECK-NEXT: |-RecoveryExpr {{.*}} <<invalid sloc>>
-  // CHECK-NEXT: `-BinaryOperator {{.*}} <<invalid sloc>, col:28>
-  // CHECK-NEXT:   |-RecoveryExpr {{.*}} <<invalid sloc>>
+  // CHECK-NEXT: |-RecoveryExpr {{.*}} <col:13>
+  // CHECK-NEXT: `-BinaryOperator {{.*}}
+  // CHECK-NEXT:   |-RecoveryExpr {{.*}}
   // CHECK-NEXT:   `-IntegerLiteral {{.*}} <col:28> 'int' 1
   some_func(undef1, undef2+1);
 
@@ -34,7 +33,6 @@ int ambig_func(double);
 int ambig_func(float);
 
 // CHECK:     VarDecl {{.*}} ambig_call
-// CHECK-NEXT: `-ImplicitCastExpr {{.*}} 'int' contains-errors
 // CHECK-NEXT:  `-RecoveryExpr {{.*}} 'int' contains-errors
 // CHECK-NEXT:    |-UnresolvedLookupExpr {{.*}} 'ambig_func'
 // CHECK-NEXT:    `-IntegerLiteral {{.*}} 123
@@ -211,3 +209,16 @@ struct {
 } NoCrashOnInvalidInitList = {
   .abc = nullptr,
 };
+
+// Verify the value category of recovery expression.
+int prvalue(int);
+int &lvalue(int);
+int &&xvalue(int);
+void ValueCategory() {
+  // CHECK:  RecoveryExpr {{.*}} 'int' contains-errors
+  prvalue(); // call to a function (nonreference return type) yields a prvalue (not print by default)
+  // CHECK:  RecoveryExpr {{.*}} 'int' contains-errors lvalue
+  lvalue(); // call to a function (lvalue reference return type) yields an lvalue.
+  // CHECK:  RecoveryExpr {{.*}} 'int' contains-errors xvalue
+  xvalue(); // call to a function (rvalue reference return type) yields an xvalue.
+}

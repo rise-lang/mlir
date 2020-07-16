@@ -34,8 +34,7 @@ TEST(DWARFDie, getLocations) {
           - Attribute:       DW_AT_call_data_location
             Form:            DW_FORM_sec_offset
     debug_info:
-      - Length:
-          TotalLength:     0
+      - Length:          0
         Version:         5
         UnitType:        DW_UT_compile
         AbbrOffset:      0
@@ -50,7 +49,7 @@ TEST(DWARFDie, getLocations) {
               - Value:           25
   )";
   Expected<StringMap<std::unique_ptr<MemoryBuffer>>> Sections =
-      DWARFYAML::EmitDebugSections(StringRef(yamldata), /*ApplyFixups=*/true,
+      DWARFYAML::emitDebugSections(StringRef(yamldata), /*ApplyFixups=*/true,
                                    /*IsLittleEndian=*/true);
   ASSERT_THAT_EXPECTED(Sections, Succeeded());
   std::vector<uint8_t> Loclists{
