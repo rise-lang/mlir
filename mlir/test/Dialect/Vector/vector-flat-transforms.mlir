@@ -1,11 +1,10 @@
-// RUN: mlir-opt %s -test-vector-contraction-conversion=vector-flat-transpose=1 | FileCheck %s --dump-input-on-failure
+// RUN: mlir-opt %s -test-vector-contraction-conversion=vector-flat-transpose=1 | FileCheck %s
 
 // Tests for lowering 2-D vector.transpose into vector.flat_transpose.
 //
-// TODO(ajcbik,ntv): having ShapeCastOp2DDownCastRewritePattern and
-//                   ShapeCastOp2DUpCastRewritePattern too early in
-//                   the greedy rewriting patterns misses opportunities
-//                   to fold shape casts!
+// TODO: having ShapeCastOp2DDownCastRewritePattern and
+//       ShapeCastOp2DUpCastRewritePattern too early in the greedy rewriting
+//       patterns misses opportunities to fold shape casts!
 
 // No shape cast folding expected.
 //

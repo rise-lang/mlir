@@ -429,6 +429,7 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1010, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1011, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1012, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1030, EF_AMDGPU_MACH);
     BCase(EF_AMDGPU_XNACK);
     BCase(EF_AMDGPU_SRAM_ECC);
     break;
@@ -839,8 +840,19 @@ void MappingTraits<ELFYAML::SectionHeader>::mapping(
 
 void MappingTraits<ELFYAML::SectionHeaderTable>::mapping(
     IO &IO, ELFYAML::SectionHeaderTable &SectionHeader) {
-  IO.mapRequired("Sections", SectionHeader.Sections);
+  IO.mapOptional("Sections", SectionHeader.Sections);
   IO.mapOptional("Excluded", SectionHeader.Excluded);
+  IO.mapOptional("NoHeaders", SectionHeader.NoHeaders, false);
+}
+
+StringRef MappingTraits<ELFYAML::SectionHeaderTable>::validate(
+    IO &IO, ELFYAML::SectionHeaderTable &SecHdrTable) {
+  if (SecHdrTable.NoHeaders && (SecHdrTable.Sections || SecHdrTable.Excluded))
+    return "NoHeaders can't be used together with Sections/Excluded";
+  if (!SecHdrTable.NoHeaders && !SecHdrTable.Sections && !SecHdrTable.Excluded)
+    return "SectionHeaderTable can't be empty. Use 'NoHeaders' key to drop the "
+           "section header table";
+  return StringRef();
 }
 
 void MappingTraits<ELFYAML::FileHeader>::mapping(IO &IO,
@@ -853,6 +865,13 @@ void MappingTraits<ELFYAML::FileHeader>::mapping(IO &IO,
   IO.mapRequired("Machine", FileHdr.Machine);
   IO.mapOptional("Flags", FileHdr.Flags, ELFYAML::ELF_EF(0));
   IO.mapOptional("Entry", FileHdr.Entry, Hex64(0));
+
+  // obj2yaml does not dump these fields.
+  assert(!IO.outputting() ||
+         (!FileHdr.EPhOff && !FileHdr.EPhEntSize && !FileHdr.EPhNum));
+  IO.mapOptional("EPhOff", FileHdr.EPhOff);
+  IO.mapOptional("EPhEntSize", FileHdr.EPhEntSize);
+  IO.mapOptional("EPhNum", FileHdr.EPhNum);
 
   IO.mapOptional("SHEntSize", FileHdr.SHEntSize);
   IO.mapOptional("SHOff", FileHdr.SHOff);
@@ -1090,6 +1109,17 @@ static void sectionMapping(IO &IO, ELFYAML::DynamicSection &Section) {
 static void sectionMapping(IO &IO, ELFYAML::RawContentSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapOptional("Content", Section.Content);
+
+  // We also support reading a content as array of bytes using the ContentArray
+  // key. obj2yaml never prints this field.
+  assert(!IO.outputting() || !Section.ContentBuf.hasValue());
+  IO.mapOptional("ContentArray", Section.ContentBuf);
+  if (Section.ContentBuf) {
+    if (Section.Content)
+      IO.setError("Content and ContentArray can't be used together");
+    Section.Content = yaml::BinaryRef(*Section.ContentBuf);
+  }
+
   IO.mapOptional("Size", Section.Size);
   IO.mapOptional("Info", Section.Info);
 }
@@ -1655,9 +1685,12 @@ void MappingTraits<ELFYAML::Object>::mapping(IO &IO, ELFYAML::Object &Object) {
   IO.mapOptional("Symbols", Object.Symbols);
   IO.mapOptional("DynamicSymbols", Object.DynamicSymbols);
   IO.mapOptional("DWARF", Object.DWARF);
-  if (Object.DWARF)
+  if (Object.DWARF) {
     Object.DWARF->IsLittleEndian =
         Object.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
+    Object.DWARF->Is64BitAddrSize =
+        Object.Header.Class == ELFYAML::ELF_ELFCLASS(ELF::ELFCLASS64);
+  }
   IO.setContext(nullptr);
 }
 

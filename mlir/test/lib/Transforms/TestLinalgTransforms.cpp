@@ -54,6 +54,11 @@ struct TestLinalgTransforms
       llvm::cl::desc(
           "Test a fused pass that forwards linalg.copy to vector.transfer"),
       llvm::cl::init(false)};
+  Option<bool> testGenericToVectorPattern{
+      *this, "test-contraction-to-vector-patterns",
+      llvm::cl::desc("Test a set of patterns that rewrite a linalg contraction "
+                     "in vector.contract form"),
+      llvm::cl::init(false)};
 };
 } // end anonymous namespace
 
@@ -158,14 +163,14 @@ static void applyPatterns(FuncOp funcOp) {
   // Linalg subview operands promotion.
   //===--------------------------------------------------------------------===//
   patterns.insert<LinalgPromotionPattern<MatmulOp>>(
-      ctx, LinalgPromotionOptions().useFullTileBuffersByDefault(),
+      ctx, LinalgPromotionOptions().setUseFullTileBuffersByDefault(true),
       LinalgMarker(Identifier::get("_promote_views_", ctx),
                    Identifier::get("_views_promoted_", ctx)));
   patterns.insert<LinalgPromotionPattern<MatmulOp>>(
       ctx,
       LinalgPromotionOptions()
           .setOperandsToPromote({0})
-          .useFullTileBuffersByDefault(),
+          .setUseFullTileBuffersByDefault(true),
       LinalgMarker(Identifier::get("_promote_first_view_", ctx),
                    Identifier::get("_first_view_promoted_", ctx)));
   patterns.insert<LinalgPromotionPattern<FillOp>>(
@@ -196,7 +201,7 @@ static void fillL1TilingAndMatmulToVectorPatterns(
                    Identifier::get("L1", ctx))));
 
   patternsVector.emplace_back(LinalgPromotionPattern<MatmulOp>(
-      ctx, LinalgPromotionOptions().useFullTileBuffersByDefault(),
+      ctx, LinalgPromotionOptions().setUseFullTileBuffersByDefault(true),
       LinalgMarker(Identifier::get("L1", ctx), Identifier::get("VEC", ctx))));
 
   patternsVector.emplace_back(LinalgVectorizationPattern<MatmulOp>(
@@ -244,8 +249,8 @@ static LogicalResult copyCallBackFn(OpBuilder &b, Value src, Value dst,
   return success();
 }
 
-void fillPromotionCallBackPatterns(MLIRContext *ctx,
-                                   OwningRewritePatternList &patterns) {
+static void fillPromotionCallBackPatterns(MLIRContext *ctx,
+                                          OwningRewritePatternList &patterns) {
   patterns.insert<LinalgTilingPattern<MatmulOp>>(
       ctx, LinalgTilingOptions().setTileSizes({16, 16, 16}),
       LinalgMarker(Identifier::get("START", ctx),
@@ -300,6 +305,16 @@ static void applyVectorTransferForwardingPatterns(FuncOp funcOp) {
   applyPatternsAndFoldGreedily(funcOp, forwardPattern);
 }
 
+static void applyContractionToVectorPatterns(FuncOp funcOp) {
+  OwningRewritePatternList patterns;
+  patterns.insert<LinalgVectorizationPattern<BatchMatmulOp>,
+                  LinalgVectorizationPattern<MatmulOp>,
+                  LinalgVectorizationPattern<MatvecOp>,
+                  LinalgVectorizationPattern<DotOp>,
+                  LinalgVectorizationPattern<GenericOp>>(funcOp.getContext());
+  applyPatternsAndFoldGreedily(funcOp, patterns);
+}
+
 /// Apply transformations specified as patterns.
 void TestLinalgTransforms::runOnFunction() {
   auto lambda = [&](void *) {
@@ -323,6 +338,8 @@ void TestLinalgTransforms::runOnFunction() {
                                        testMatmulToVectorPatterns2dTiling);
   if (testVectorTransferForwardingPatterns)
     return applyVectorTransferForwardingPatterns(getFunction());
+  if (testGenericToVectorPattern)
+    return applyContractionToVectorPatterns(getFunction());
 }
 
 namespace mlir {

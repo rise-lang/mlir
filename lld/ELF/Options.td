@@ -436,7 +436,7 @@ defm warn_backrefs: BB<"warn-backrefs",
     "Do not warn about backward symbol references to fetch archive members (default)">;
 
 defm warn_backrefs_exclude
-    : Eq<"warn-backrefs-exclude",
+    : EEq<"warn-backrefs-exclude",
          "Glob describing an archive (or an object file within --start-lib) "
          "which should be ignored for --warn-backrefs.">,
       MetaVarName<"<glob>">;
@@ -562,6 +562,8 @@ def thinlto_jobs: JJ<"thinlto-jobs=">,
   HelpText<"Number of ThinLTO jobs. Default to --threads=">;
 def thinlto_object_suffix_replace_eq: JJ<"thinlto-object-suffix-replace=">;
 def thinlto_prefix_replace_eq: JJ<"thinlto-prefix-replace=">;
+def thinlto_single_module_eq: JJ<"thinlto-single-module=">,
+  HelpText<"Specific a single module to compile in ThinLTO mode, for debugging only">;
 
 def: J<"plugin-opt=O">, Alias<lto_O>, HelpText<"Alias for --lto-O">;
 def: F<"plugin-opt=debug-pass-manager">,
@@ -633,6 +635,7 @@ def: F<"no-copy-dt-needed-entries">;
 def: F<"no-ctors-in-init-array">;
 def: F<"no-keep-memory">;
 def: F<"no-pipeline-knowledge">;
+def: F<"no-relax">;
 def: F<"no-warn-mismatch">;
 def: Flag<["-"], "p">;
 def: Separate<["--", "-"], "rpath-link">;

@@ -1,4 +1,4 @@
-// RUN: mlir-opt -test-buffer-placement-preparation -split-input-file %s | FileCheck %s -dump-input-on-failure
+// RUN: mlir-opt -test-buffer-placement-preparation -split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func @func_signature_conversion
 func @func_signature_conversion(%arg0: tensor<4x8xf32>) {
@@ -199,7 +199,7 @@ func @compute_allocs_position(%cond: i1, %arg0: tensor<2xf32>) -> tensor<2xf32>{
 // -----
 
 // Test case: Checking BufferAssignmentCallOpConverter and
-// FunctionAndBlockSignatureConverter and BufferAssignmentReturnOpConverter all
+// BufferAssignmentFuncOpConverter and BufferAssignmentReturnOpConverter all
 // together. The signature of `callee` after signature conversion would be:
 
 // func @callee(%arg0: memref<5xf32>,%arg1: memref<5xf32>) -> ()
@@ -246,7 +246,7 @@ func @caller(%arg0: tensor<5xf32>) -> tensor<5xf32> {
 // -----
 
 // Test case: Checking BufferAssignmentCallOpConverter and
-// FunctionAndBlockSignatureConverter and BufferAssignmentReturnOpConverter all
+// BufferAssignmentFuncOpConverter and BufferAssignmentReturnOpConverter all
 // together on functions that also have memref typed results. The signature of
 // `callee` after signature conversion would be:
 
@@ -284,3 +284,9 @@ func @caller(%arg0: tensor<5xf32>) -> tensor<5xf32> {
 // CHECK: %[[Y1:.*]] = call @callee(%[[X0]], %[[Y0]])
 // CHECK: linalg.copy(%[[Y0]], %[[CALLER_RESULT]])
 // CHECK: return
+
+// CHECK-LABEL: func @func_with_unranked_arg
+func @func_with_unranked_arg(%arg0: tensor<*xf32>) {
+  return
+}
+// CHECK-SAME: ([[ARG:%.*]]: memref<*xf32>)

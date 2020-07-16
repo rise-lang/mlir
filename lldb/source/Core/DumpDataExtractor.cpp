@@ -128,6 +128,53 @@ static lldb::offset_t DumpAPInt(Stream *s, const DataExtractor &data,
   return offset;
 }
 
+/// Dumps decoded instructions to a stream.
+static lldb::offset_t DumpInstructions(const DataExtractor &DE, Stream *s,
+                                       ExecutionContextScope *exe_scope,
+                                       offset_t start_offset,
+                                       uint64_t base_addr,
+                                       size_t number_of_instructions) {
+  offset_t offset = start_offset;
+
+  TargetSP target_sp;
+  if (exe_scope)
+    target_sp = exe_scope->CalculateTarget();
+  if (target_sp) {
+    DisassemblerSP disassembler_sp(
+        Disassembler::FindPlugin(target_sp->GetArchitecture(),
+                                 target_sp->GetDisassemblyFlavor(), nullptr));
+    if (disassembler_sp) {
+      lldb::addr_t addr = base_addr + start_offset;
+      lldb_private::Address so_addr;
+      bool data_from_file = true;
+      if (target_sp->GetSectionLoadList().ResolveLoadAddress(addr, so_addr)) {
+        data_from_file = false;
+      } else {
+        if (target_sp->GetSectionLoadList().IsEmpty() ||
+            !target_sp->GetImages().ResolveFileAddress(addr, so_addr))
+          so_addr.SetRawAddress(addr);
+      }
+
+      size_t bytes_consumed = disassembler_sp->DecodeInstructions(
+          so_addr, DE, start_offset, number_of_instructions, false,
+          data_from_file);
+
+      if (bytes_consumed) {
+        offset += bytes_consumed;
+        const bool show_address = base_addr != LLDB_INVALID_ADDRESS;
+        const bool show_bytes = true;
+        ExecutionContext exe_ctx;
+        exe_scope->CalculateExecutionContext(exe_ctx);
+        disassembler_sp->GetInstructionList().Dump(s, show_address, show_bytes,
+                                                   &exe_ctx);
+      }
+    }
+  } else
+    s->Printf("invalid target");
+
+  return offset;
+}
+
 lldb::offset_t lldb_private::DumpDataExtractor(
     const DataExtractor &DE, Stream *s, offset_t start_offset,
     lldb::Format item_format, size_t item_byte_size, size_t item_count,
@@ -147,44 +194,9 @@ lldb::offset_t lldb_private::DumpDataExtractor(
 
   offset_t offset = start_offset;
 
-  if (item_format == eFormatInstruction) {
-    TargetSP target_sp;
-    if (exe_scope)
-      target_sp = exe_scope->CalculateTarget();
-    if (target_sp) {
-      DisassemblerSP disassembler_sp(Disassembler::FindPlugin(
-          target_sp->GetArchitecture(),
-          target_sp->GetDisassemblyFlavor(), nullptr));
-      if (disassembler_sp) {
-        lldb::addr_t addr = base_addr + start_offset;
-        lldb_private::Address so_addr;
-        bool data_from_file = true;
-        if (target_sp->GetSectionLoadList().ResolveLoadAddress(addr, so_addr)) {
-          data_from_file = false;
-        } else {
-          if (target_sp->GetSectionLoadList().IsEmpty() ||
-              !target_sp->GetImages().ResolveFileAddress(addr, so_addr))
-            so_addr.SetRawAddress(addr);
-        }
-
-        size_t bytes_consumed = disassembler_sp->DecodeInstructions(
-            so_addr, DE, start_offset, item_count, false, data_from_file);
-
-        if (bytes_consumed) {
-          offset += bytes_consumed;
-          const bool show_address = base_addr != LLDB_INVALID_ADDRESS;
-          const bool show_bytes = true;
-          ExecutionContext exe_ctx;
-          exe_scope->CalculateExecutionContext(exe_ctx);
-          disassembler_sp->GetInstructionList().Dump(s, show_address,
-                                                     show_bytes, &exe_ctx);
-        }
-      }
-    } else
-      s->Printf("invalid target");
-
-    return offset;
-  }
+  if (item_format == eFormatInstruction)
+    return DumpInstructions(DE, s, exe_scope, start_offset, base_addr,
+                            item_count);
 
   if ((item_format == eFormatOSType || item_format == eFormatAddressInfo) &&
       item_byte_size > 8)
@@ -284,7 +296,7 @@ lldb::offset_t lldb_private::DumpDataExtractor(
 
       const uint64_t ch = DE.GetMaxU64Bitfield(&offset, item_byte_size,
                                                item_bit_size, item_bit_offset);
-      if (isprint(ch))
+      if (llvm::isPrint(ch))
         s->Printf("%c", (char)ch);
       else if (item_format != eFormatCharPrintable) {
         switch (ch) {
@@ -375,7 +387,7 @@ lldb::offset_t lldb_private::DumpDataExtractor(
       s->PutChar('\'');
       for (uint32_t i = 0; i < item_byte_size; ++i) {
         uint8_t ch = (uint8_t)(uval64 >> ((item_byte_size - i - 1) * 8));
-        if (isprint(ch))
+        if (llvm::isPrint(ch))
           s->Printf("%c", ch);
         else {
           switch (ch) {
@@ -425,7 +437,7 @@ lldb::offset_t lldb_private::DumpDataExtractor(
         s->PutChar('\"');
 
         while (const char c = *cstr) {
-          if (isprint(c)) {
+          if (llvm::isPrint(c)) {
             s->PutChar(c);
           } else {
             switch (c) {

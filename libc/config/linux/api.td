@@ -2,6 +2,7 @@ include "config/public_api.td"
 
 include "spec/gnu_ext.td"
 include "spec/linux.td"
+include "spec/llvm_libc_ext.td"
 include "spec/posix.td"
 include "spec/stdc.td"
 
@@ -149,25 +150,44 @@ def MathAPI : PublicAPI<"math.h"> {
     FloatT,
   ];
   let Functions = [
+   "copysign",
+   "copysignf",
+   "copysignl",
    "ceil",
    "ceilf",
+   "ceill",
    "cosf",
    "fabs",
    "fabsf",
+   "fabsl",
    "floor",
    "floorf",
+   "floorl",
+   "frexp",
+   "frexpf",
+   "frexpl",
+   "logb",
+   "logbf",
+   "logbl",
+   "modf",
+   "modff",
+   "modfl",
    "expf",
    "exp2f",
    "round",
+   "roundf",
+   "roundl",
    "sincosf",
    "sinf",
    "trunc",
    "truncf",
+   "truncl",
   ];
 }
 
 def StringAPI : PublicAPI<"string.h"> {
   let Functions = [
+    "bzero",
     "memcpy",
     "memmove",
     "memcmp",

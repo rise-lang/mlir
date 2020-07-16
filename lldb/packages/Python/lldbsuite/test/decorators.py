@@ -411,14 +411,15 @@ def expectedFailureOS(
         debug_info=debug_info)
 
 
-def expectedFailureDarwin(bugnumber=None, compilers=None, debug_info=None):
+def expectedFailureDarwin(bugnumber=None, compilers=None, debug_info=None, archs=None):
     # For legacy reasons, we support both "darwin" and "macosx" as OS X
     # triples.
     return expectedFailureOS(
         lldbplatform.darwin_all,
         bugnumber,
         compilers,
-        debug_info=debug_info)
+        debug_info=debug_info,
+        archs=archs)
 
 
 def expectedFailureAndroid(bugnumber=None, api_levels=None, archs=None):
@@ -550,6 +551,14 @@ def skipIfNoSBHeaders(func):
 
     return skipTestIfFn(are_sb_headers_missing)(func)
 
+
+def skipIfRosetta(func, bugnumber=None):
+    """Skip a test when running the testsuite on macOS under the Rosetta translation layer."""
+    def is_running_rosetta(self):
+        if not lldbplatformutil.getPlatform() in ['darwin', 'macosx']:
+            return False
+        return platform.uname()[5] == "arm" and self.getArchitecture() == "x86_64"
+    return skipTestIfFn(is_running_rosetta, bugnumber)(func)
 
 def skipIfiOSSimulator(func):
     """Decorate the item to skip tests that should be skipped on the iOS Simulator."""

@@ -2703,6 +2703,20 @@ void MachineBlockPlacement::buildCFGChains() {
     assert(!BadFunc && "Detected problems with the block placement.");
   });
 
+  // Remember original layout ordering, so we can update terminators after
+  // reordering to point to the original layout successor.
+  SmallVector<MachineBasicBlock *, 4> OriginalLayoutSuccessors(
+      F->getNumBlockIDs());
+  {
+    MachineBasicBlock *LastMBB = nullptr;
+    for (auto &MBB : *F) {
+      if (LastMBB != nullptr)
+        OriginalLayoutSuccessors[LastMBB->getNumber()] = &MBB;
+      LastMBB = &MBB;
+    }
+    OriginalLayoutSuccessors[F->back().getNumber()] = nullptr;
+  }
+
   // Splice the blocks into place.
   MachineFunction::iterator InsertPos = F->begin();
   LLVM_DEBUG(dbgs() << "[MBP] Function: " << F->getName() << "\n");
@@ -2760,15 +2774,18 @@ void MachineBlockPlacement::buildCFGChains() {
     //     TBB = FBB = nullptr;
     //   }
     // }
-    if (!TII->analyzeBranch(*PrevBB, TBB, FBB, Cond))
-      PrevBB->updateTerminator();
+    if (!TII->analyzeBranch(*PrevBB, TBB, FBB, Cond)) {
+      PrevBB->updateTerminator(OriginalLayoutSuccessors[PrevBB->getNumber()]);
+    }
   }
 
   // Fixup the last block.
   Cond.clear();
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr; // For analyzeBranch.
-  if (!TII->analyzeBranch(F->back(), TBB, FBB, Cond))
-    F->back().updateTerminator();
+  if (!TII->analyzeBranch(F->back(), TBB, FBB, Cond)) {
+    MachineBasicBlock *PrevBB = &F->back();
+    PrevBB->updateTerminator(OriginalLayoutSuccessors[PrevBB->getNumber()]);
+  }
 
   BlockWorkList.clear();
   EHPadWorkList.clear();
@@ -2802,7 +2819,6 @@ void MachineBlockPlacement::optimizeBranches() {
         DebugLoc dl; // FIXME: this is nowhere
         TII->removeBranch(*ChainBB);
         TII->insertBranch(*ChainBB, FBB, TBB, Cond, dl);
-        ChainBB->updateTerminator();
       }
     }
   }
@@ -3313,9 +3329,7 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &MF) {
     BranchFolder BF(/*EnableTailMerge=*/true, /*CommonHoist=*/false, *MBFI,
                     *MBPI, PSI, TailMergeSize);
 
-    auto *MMIWP = getAnalysisIfAvailable<MachineModuleInfoWrapperPass>();
-    if (BF.OptimizeFunction(MF, TII, MF.getSubtarget().getRegisterInfo(),
-                            MMIWP ? &MMIWP->getMMI() : nullptr, MLI,
+    if (BF.OptimizeFunction(MF, TII, MF.getSubtarget().getRegisterInfo(), MLI,
                             /*AfterPlacement=*/true)) {
       // Redo the layout if tail merging creates/removes/moves blocks.
       BlockToChain.clear();

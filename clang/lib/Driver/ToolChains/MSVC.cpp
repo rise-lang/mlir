@@ -592,8 +592,9 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     linkPath = TC.GetProgramPath(Linker.str().c_str());
   }
 
-  auto LinkCmd = std::make_unique<Command>(
-      JA, *this, Args.MakeArgString(linkPath), CmdArgs, Inputs);
+  auto LinkCmd =
+      std::make_unique<Command>(JA, *this, ResponseFileSupport::AtFileUTF16(),
+                                Args.MakeArgString(linkPath), CmdArgs, Inputs);
   if (!Environment.empty())
     LinkCmd->setEnvironment(Environment);
   C.addCommand(std::move(LinkCmd));
@@ -733,13 +734,15 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   CmdArgs.push_back(Fo);
 
   std::string Exec = FindVisualStudioExecutable(getToolChain(), "cl.exe");
-  return std::make_unique<Command>(JA, *this, Args.MakeArgString(Exec),
-                                    CmdArgs, Inputs);
+  return std::make_unique<Command>(JA, *this,
+                                   ResponseFileSupport::AtFileUTF16(),
+                                   Args.MakeArgString(Exec), CmdArgs, Inputs);
 }
 
 MSVCToolChain::MSVCToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
-    : ToolChain(D, Triple, Args), CudaInstallation(D, Triple, Args) {
+    : ToolChain(D, Triple, Args), CudaInstallation(D, Triple, Args),
+      RocmInstallation(D, Triple, Args) {
   getProgramPaths().push_back(getDriver().getInstalledDir());
   if (getDriver().getInstalledDir() != getDriver().Dir)
     getProgramPaths().push_back(getDriver().Dir);
@@ -797,8 +800,14 @@ void MSVCToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,
   CudaInstallation.AddCudaIncludeArgs(DriverArgs, CC1Args);
 }
 
+void MSVCToolChain::AddHIPIncludeArgs(const ArgList &DriverArgs,
+                                      ArgStringList &CC1Args) const {
+  RocmInstallation.AddHIPIncludeArgs(DriverArgs, CC1Args);
+}
+
 void MSVCToolChain::printVerboseInfo(raw_ostream &OS) const {
   CudaInstallation.print(OS);
+  RocmInstallation.print(OS);
 }
 
 // Windows SDKs and VC Toolchains group their contents into subdirectories based

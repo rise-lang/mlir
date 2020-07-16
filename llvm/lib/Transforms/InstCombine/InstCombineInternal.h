@@ -16,8 +16,8 @@
 #define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -51,6 +51,7 @@ using namespace llvm::PatternMatch;
 
 namespace llvm {
 
+class AAResults;
 class APInt;
 class AssumptionCache;
 class BlockFrequencyInfo;
@@ -214,18 +215,23 @@ static inline bool isFreeToInvert(Value *V, bool WillInvertAllUses) {
 }
 
 /// Given i1 V, can every user of V be freely adapted if V is changed to !V ?
+/// InstCombine's canonicalizeICmpPredicate() must be kept in sync with this fn.
 ///
 /// See also: isFreeToInvert()
 static inline bool canFreelyInvertAllUsersOf(Value *V, Value *IgnoredUser) {
   // Look at every user of V.
-  for (User *U : V->users()) {
-    if (U == IgnoredUser)
+  for (Use &U : V->uses()) {
+    if (U.getUser() == IgnoredUser)
       continue; // Don't consider this user.
 
-    auto *I = cast<Instruction>(U);
+    auto *I = cast<Instruction>(U.getUser());
     switch (I->getOpcode()) {
     case Instruction::Select:
+      if (U.getOperandNo() != 0) // Only if the value is used as select cond.
+        return false;
+      break;
     case Instruction::Br:
+      assert(U.getOperandNo() == 0 && "Must be branching on that value.");
       break; // Free to invert by swapping true/false values/destinations.
     case Instruction::Xor: // Can invert 'xor' if it's a 'not', by ignoring it.
       if (!match(I, m_Not(m_Value())))
@@ -315,7 +321,7 @@ private:
   // Mode in which we are running the combiner.
   const bool MinimizeSize;
 
-  AliasAnalysis *AA;
+  AAResults *AA;
 
   // Required analyses.
   AssumptionCache &AC;
@@ -335,7 +341,7 @@ private:
 
 public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy &Builder,
-               bool MinimizeSize, AliasAnalysis *AA,
+               bool MinimizeSize, AAResults *AA,
                AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
                OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
                ProfileSummaryInfo *PSI, const DataLayout &DL, LoopInfo *LI)
@@ -434,6 +440,7 @@ public:
   Instruction *visitLoadInst(LoadInst &LI);
   Instruction *visitStoreInst(StoreInst &SI);
   Instruction *visitAtomicRMWInst(AtomicRMWInst &SI);
+  Instruction *visitUnconditionalBranchInst(BranchInst &BI);
   Instruction *visitBranchInst(BranchInst &BI);
   Instruction *visitFenceInst(FenceInst &FI);
   Instruction *visitSwitchInst(SwitchInst &SI);
@@ -634,6 +641,7 @@ private:
   Value *getSelectCondition(Value *A, Value *B);
 
   Instruction *foldIntrinsicWithOverflowCommon(IntrinsicInst *II);
+  Instruction *foldFPSignBitOps(BinaryOperator &I);
 
 public:
   /// Inserts an instruction \p New before instruction \p Old
@@ -721,7 +729,7 @@ public:
   Instruction *eraseInstFromFunction(Instruction &I) {
     LLVM_DEBUG(dbgs() << "IC: ERASE " << I << '\n');
     assert(I.use_empty() && "Cannot erase instruction that is used!");
-    salvageDebugInfoOrMarkUndef(I);
+    salvageDebugInfo(I);
 
     // Make sure that we reprocess all operands now that we reduced their
     // use counts.
@@ -1040,6 +1048,8 @@ class Negator final {
 
   const bool IsTrulyNegation;
 
+  SmallDenseMap<Value *, Value *> NegationsCache;
+
   Negator(LLVMContext &C, const DataLayout &DL, AssumptionCache &AC,
           const DominatorTree &DT, bool IsTrulyNegation);
 
@@ -1051,7 +1061,9 @@ class Negator final {
   using Result = std::pair<ArrayRef<Instruction *> /*NewInstructions*/,
                            Value * /*NegatedRoot*/>;
 
-  LLVM_NODISCARD Value *visit(Value *V, unsigned Depth);
+  LLVM_NODISCARD Value *visitImpl(Value *V, unsigned Depth);
+
+  LLVM_NODISCARD Value *negate(Value *V, unsigned Depth);
 
   /// Recurse depth-first and attempt to sink the negation.
   /// FIXME: use worklist?
