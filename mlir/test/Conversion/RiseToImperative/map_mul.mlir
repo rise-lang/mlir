@@ -2,18 +2,21 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %in:memref<4xf32>) {
-    %array = rise.in %in : !rise.array<4, scalar<f32>>
-    %times5 = rise.lambda (%elem : !rise.scalar<f32>) -> !rise.scalar<f32> {
-        %cst5 = rise.literal #rise.lit<5.0>
-        %result = rise.embed(%elem, %cst5) {
-            %result = mulf %elem, %cst5 : f32
-            rise.return %result : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
+    rise.lowering_unit {
+        %array = rise.in %in : !rise.array<4, scalar<f32>>
+        %times5 = rise.lambda (%elem : !rise.scalar<f32>) -> !rise.scalar<f32> {
+            %cst5 = rise.literal #rise.lit<5.0>
+            %result = rise.embed(%elem, %cst5) {
+                %result = mulf %elem, %cst5 : f32
+                rise.return %result : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %multipliedArray = rise.apply %mapFun, %times5, %array
+        rise.out %outArg <- %multipliedArray
+        rise.return
     }
-    %mapFun = rise.mapSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-    %multipliedArray = rise.apply %mapFun, %times5, %array
-    rise.out %outArg <- %multipliedArray
     return
 }
 func @array_times_5() {

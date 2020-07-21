@@ -3,22 +3,25 @@
 func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<14xf32>, %in: memref<9xf32>) {
-    %array = rise.in %in : !rise.array<9, scalar<f32>>
+    rise.lowering_unit {
+        %array = rise.in %in : !rise.array<9, scalar<f32>>
 
-    %pad = rise.pad #rise.nat<9> #rise.nat<2> #rise.nat<3> #rise.scalar<f32>
-    %padded = rise.apply %pad, %array
+        %pad = rise.pad #rise.nat<9> #rise.nat<2> #rise.nat<3> #rise.scalar<f32>
+        %padded = rise.apply %pad, %array
 
-    %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
-        %result = rise.embed(%summand) {
-            %doubled = addf %summand, %summand : f32
-            rise.return %doubled : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
+        %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
+            %result = rise.embed(%summand) {
+                %doubled = addf %summand, %summand : f32
+                rise.return %doubled : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
+        %map = rise.mapSeq {to = "scf"} #rise.nat<14> #rise.scalar<f32> #rise.scalar<f32>
+        %result = rise.apply %map, %doubleFun, %padded
+
+        rise.out %outArg <- %result
+        rise.return
     }
-    %map = rise.mapSeq {to = "scf"} #rise.nat<14> #rise.scalar<f32> #rise.scalar<f32>
-    %result = rise.apply %map, %doubleFun, %padded
-
-    rise.out %outArg <- %result
     return
 }
 

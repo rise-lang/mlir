@@ -133,8 +133,19 @@ LogicalResult RiseToImperativePattern::match(FuncOp funcOp) const {
 
 void RiseToImperativePattern::rewrite(FuncOp funcOp,
                                       PatternRewriter &rewriter) const {
-  Block &block = funcOp.getBody().front();
-  funcOp.walk([&](Operation *op) {
+
+  LoweringUnitOp loweringUnit;
+  funcOp.getBody().walk([&](Operation *op) {
+    if (LoweringUnitOp loweringUnitOp = dyn_cast<LoweringUnitOp>(op))
+      loweringUnit = loweringUnitOp;
+  });
+  if (!loweringUnit) {
+    emitError(funcOp.getLoc()) << "No rise.lowering_unit found!";
+    return;
+  }
+  Block &block = loweringUnit.region().front();
+
+  block.walk([&](Operation *op) {
     if (InOp inOp = dyn_cast<InOp>(op)) {
       rewriter.setInsertionPointAfter(inOp);
     }
@@ -166,7 +177,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
 
   // Cleanup of leftover ops from lowerAndStore
   SmallVector<Operation *, 10> leftoverOps = {};
-  funcOp.walk([&leftoverOps](Operation *inst) {
+  block.walk([&leftoverOps](Operation *inst) {
     if (!inst)
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
@@ -192,7 +203,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       << "lowerAndStore finished. Starting resolving indicees.";
 
   SmallVector<rise::AssignOp, 10> assignOps;
-  funcOp.walk([&assignOps](Operation *inst) {
+  block.walk([&assignOps](Operation *inst) {
     if (inst && isa<AssignOp>(inst)) {
       assignOps.push_back(cast<AssignOp>(inst));
     }
@@ -213,7 +224,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
   //   cleanup:
   //   erase intermediate operations.
   if (doCodegen) {
-    funcOp.walk([&](Operation *inst) {
+    block.walk([&](Operation *inst) {
       if (inst->getDialect() &&
           inst->getDialect()->getNamespace().equals("rise")) {
         if (!(inst->getParentOfType<LambdaOp>() ||
@@ -231,6 +242,14 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     op->dropAllReferences();
     rewriter.eraseOp(op);
   }
+
+  // inline all operations of the loweringUnit and erase it
+  rewriter.setInsertionPointAfter(loweringUnit);
+  rewriter.getInsertionBlock()->getOperations().splice(
+      rewriter.getInsertionPoint(),
+      loweringUnit.getRegion().front().getOperations(),
+      loweringUnit.getRegion().front().begin(), Block::iterator(loweringUnit.region().front().end()));
+  rewriter.eraseOp(loweringUnit);
 
   return;
 }
@@ -272,7 +291,6 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
       return;
     } else if (MapSeqOp mapSeqOp = dyn_cast<MapSeqOp>(appliedFun)) {
       emitRemark(mapSeqOp.getLoc()) << "lowerAndStore of MapSeq";
-      mapSeqOp.getParentOfType<FuncOp>().dump();
       lowerAndStoreMapSeq(mapSeqOp.nAttr(), mapSeqOp.sAttr(), mapSeqOp.tAttr(),
                           apply.getOperand(1), apply.getOperand(2), out,
                           mapSeqOp.getLoc(), rewriter, loweringTarget);
@@ -987,7 +1005,6 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     // replace uses of embed value with returned value
     rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
         embedOp.getRegion().front().getOperations().back());
-    embedOp.getParentOfType<FuncOp>().dump();
     assert(embedReturn &&
            "Region of EmbedOp has to be terminated using rise.return!");
     embedOp.getResult().replaceAllUsesWith(embedReturn.getOperand(0));
@@ -1346,7 +1363,7 @@ void ConvertRiseToImperativePass::runOnFunction() {
   target.addLegalDialect<scf::SCFDialect>();
   target.addLegalDialect<AffineDialect>();
   target.addLegalDialect<linalg::LinalgDialect>();
-  target.addLegalDialect<rise::RiseDialect>(); // for debugging purposes
+//  target.addLegalDialect<rise::RiseDialect>(); // for debugging purposes
 
   target.addDynamicallyLegalOp<FuncOp>([](FuncOp funcOp) {
     bool riseInside = false;
@@ -1362,7 +1379,7 @@ void ConvertRiseToImperativePass::runOnFunction() {
 
   bool erased;
   applyOpPatternsAndFold(module, patterns, &erased);
-
+//  applyFullConversion(module, target, patterns);
   return;
 }
 

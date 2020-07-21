@@ -116,6 +116,17 @@ void EmbedOp::build(
 }
 
 //===----------------------------------------------------------------------===//
+// LoweringUnitOp
+//===----------------------------------------------------------------------===//
+LogicalResult parseLoweringUnitOp(OpAsmParser &parser, OperationState &result) {
+  Region *body = result.addRegion();
+  if (failed(parser.parseRegion(*body, {}, {}, false)))
+    return failure();
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // InOp
 //===----------------------------------------------------------------------===//
 LogicalResult parseInOp(OpAsmParser &parser, OperationState &result) {
@@ -598,12 +609,12 @@ LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType value;
   Type type;
 
-  // return value
-  if (failed(parser.parseOperand(value)) ||
-      failed(parser.parseColonType(type)) ||
-      failed(parser.resolveOperand(value, type, result.operands)))
-    failure();
-
+  if (parser.parseOptionalOperand(value).hasValue()) {
+    if (failed(parser.parseColonType(type)) ||
+        failed(parser.resolveOperand(value, type, result.operands)))
+      failure();
+    return success();
+  }
   return success();
 }
 

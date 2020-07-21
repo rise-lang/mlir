@@ -3,29 +3,32 @@
 func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<11xf32>, %in: memref<9xf32>) {
-    %array = rise.in %in : !rise.array<9, scalar<f32>>
-    %pad = rise.pad #rise.nat<9> #rise.nat<1> #rise.nat<3> #rise.scalar<f32>
-    %padded = rise.apply %pad, %array
-    %slide = rise.slide #rise.nat<11> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
-    %slided = rise.apply %slide, %padded
+    rise.lowering_unit {
+        %array = rise.in %in : !rise.array<9, scalar<f32>>
+        %pad = rise.pad #rise.nat<9> #rise.nat<1> #rise.nat<3> #rise.scalar<f32>
+        %padded = rise.apply %pad, %array
+        %slide = rise.slide #rise.nat<11> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
+        %slided = rise.apply %slide, %padded
 
-    %reduceWindow = rise.lambda (%window : !rise.array<3, scalar<f32>>) -> !rise.scalar<f32> {
-        %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
-            %result = rise.embed(%summand0, %summand1) {
-                %result = addf %summand0, %summand1 : f32
-                rise.return %result : f32
-            } : !rise.scalar<f32>
+        %reduceWindow = rise.lambda (%window : !rise.array<3, scalar<f32>>) -> !rise.scalar<f32> {
+            %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
+                %result = rise.embed(%summand0, %summand1) {
+                    %result = addf %summand0, %summand1 : f32
+                    rise.return %result : f32
+                } : !rise.scalar<f32>
+                rise.return %result : !rise.scalar<f32>
+            }
+            %initializer = rise.literal #rise.lit<0.0>
+            %reduce = rise.reduceSeq #rise.nat<3> #rise.scalar<f32> #rise.scalar<f32>
+            %result = rise.apply %reduce, %reductionAdd, %initializer, %window
             rise.return %result : !rise.scalar<f32>
         }
-        %initializer = rise.literal #rise.lit<0.0>
-        %reduce = rise.reduceSeq #rise.nat<3> #rise.scalar<f32> #rise.scalar<f32>
-        %result = rise.apply %reduce, %reductionAdd, %initializer, %window
-        rise.return %result : !rise.scalar<f32>
-    }
-    %map = rise.mapSeq {to = "affine"}  #rise.nat<11> #rise.array<3, scalar<f32>> #rise.scalar<f32>
-    %result = rise.apply %map, %reduceWindow, %slided
+        %map = rise.mapSeq {to = "affine"}  #rise.nat<11> #rise.array<3, scalar<f32>> #rise.scalar<f32>
+        %result = rise.apply %map, %reduceWindow, %slided
 
-    rise.out %outArg <- %result
+        rise.out %outArg <- %result
+        rise.return
+    }
     return
 }
 

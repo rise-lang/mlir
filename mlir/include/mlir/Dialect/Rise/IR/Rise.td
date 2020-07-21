@@ -110,6 +110,14 @@ def ApplyOp : Rise_Op<"apply"> {
 // Rise Operations: Interoperability
 //===----------------------------------------------------------------------===//
 
+def LoweringUnitOp : Rise_Op<"lowering_unit", [SingleBlockImplicitTerminator<"ReturnOp">]> {
+  let summary = "rise lowering unit";
+  let description = "Represents a region of RISE operations to be lowered "
+                    "independently of other RISE operations.";
+  let regions = (region SizedRegion<1> : $region);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 def InOp : Rise_Op<"in"> {
   let summary = "rise in";
   let description =

@@ -4,26 +4,28 @@
 func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg:memref<15x122xf32>, %inArg:memref<15x122xf32>) {
+    rise.lowering_unit {
+        %array2D = rise.in %inArg : !rise.array<15, array<122, scalar<f32>>>
 
-    %array2D = rise.in %inArg : !rise.array<15, array<122, scalar<f32>>>
+        %join = rise.join #rise.nat<15> #rise.nat<122> #rise.scalar<f32>
+        %flattened = rise.apply %join, %array2D
 
-    %join = rise.join #rise.nat<15> #rise.nat<122> #rise.scalar<f32>
-    %flattened = rise.apply %join, %array2D
+        %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
+            %result = rise.embed(%summand) {
+                %doubled = addf %summand, %summand : f32
+                rise.return %doubled : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
+        %map = rise.mapSeq {to = "scf"} #rise.nat<1830> #rise.scalar<f32> #rise.scalar<f32>
+        %doubledArray = rise.apply %map, %doubleFun, %flattened
 
-    %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
-        %result = rise.embed(%summand) {
-            %doubled = addf %summand, %summand : f32
-            rise.return %doubled : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
+        %split = rise.split #rise.nat<122> #rise.nat<15> #rise.scalar<f32>
+        %resStructure = rise.apply %split, %doubledArray
+
+        rise.out %outArg <- %resStructure
+        rise.return
     }
-    %map = rise.mapSeq {to = "scf"} #rise.nat<1830> #rise.scalar<f32> #rise.scalar<f32>
-    %doubledArray = rise.apply %map, %doubleFun, %flattened
-
-    %split = rise.split #rise.nat<122> #rise.nat<15> #rise.scalar<f32>
-    %resStructure = rise.apply %split, %doubledArray
-
-    rise.out %outArg <- %resStructure
     return
 }
 
