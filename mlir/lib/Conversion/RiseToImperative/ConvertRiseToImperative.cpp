@@ -255,6 +255,8 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       Block::iterator(loweringUnit.region().front().end()));
   rewriter.eraseOp(loweringUnit);
 
+  funcOp.dump();
+
   return;
 }
 
@@ -1201,11 +1203,9 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
                  dyn_cast<TransposeAccIntermediateOp>(val.getDefiningOp())) {
     // TODO: do we want this? Does it even make sense?
     emitRemark(val.getLoc()) << "resolveIndexing for TransposeAcc (!)";
-    std::cout << "moin!\n" << std::flush;
     printPath(path);
     auto n = path.pop_back_val();
     auto m = path.pop_back_val();
-    std::cout << "moin1!\n" << std::flush;
 
     path.push_back(n);
     path.push_back(m);

@@ -133,6 +133,15 @@ void mlir::edsc::op::rise_return(Value returnValue) {
   return;
 }
 
+void mlir::edsc::op::lowering_unit(function_ref<void()> bodyBuilder) {
+  OperationBuilder<LoweringUnitOp>(
+      [&](OpBuilder &nestedBuilder, Location nestedLoc) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        bodyBuilder();
+      });
+}
+
 //===----------------------------------------------------------------------===//
 // Rise Operations: Patterns
 //===----------------------------------------------------------------------===//

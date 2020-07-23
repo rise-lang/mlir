@@ -164,6 +164,82 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int pad
 }
 
 
+Value mlir::edsc::highlevel::conv2DTF(Value input, Value kernel) {
+  ArrayType inputHeight = input.getType().dyn_cast<ArrayType>();
+  ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
+  ArrayType kernelHeight = kernel.getType().dyn_cast<ArrayType>();
+  ArrayType kernelWidth = kernelHeight.getElementType().dyn_cast<ArrayType>();
+
+  int steplr = 1;
+  int steptb = 1;
+
+  int nWidth = (inputWidth.getSize().getIntValue() + steplr -
+                kernelWidth.getSize().getIntValue()) /
+               steplr;
+  int nHeight = (inputHeight.getSize().getIntValue() + steptb -
+                 kernelHeight.getSize().getIntValue()) /
+                steptb;
+
+  // If padding has to be different for l and r we pad 1 more on the left.
+  int padInnerl = ceil((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padInnerr = floor((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padOuterl = ceil((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+  int padOuterr = floor((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+
+  ScalarType elementType = scalarF32Type();
+  //  Value padded = pad2D(natType(padOuterl), natType(padOuterr),
+  //                       natType(padInnerl), natType(padInnerr), input);
+
+  Value slided = slide2D(kernelHeight.getSize(), natType(1),
+                         kernelWidth.getSize(), natType(1), input);
+  slided.getType()
+      .dyn_cast<ArrayType>()
+      .getElementType()
+      .dyn_cast<ArrayType>()
+      .getSize();
+  Value conv = mapSeq(
+      array2DType(slided.getType()
+                      .dyn_cast<ArrayType>()
+                      .getElementType()
+                      .dyn_cast<ArrayType>()
+                      .getSize(),
+                  natType(1), elementType),
+      [&](Value arr) {
+        return split(natType(1), mapSeq(
+            elementType,
+            [&](Value slidingWindow) {
+              Value zipped = zip2D(slidingWindow, kernel);
+              Value joined = join(zipped);
+
+              // this split is a workaround
+              return reduceSeq(
+                  elementType,
+                  [&](Value tuple, Value acc) {
+                    return embed3(scalarF32Type(),
+                                  {fst(tuple), snd(tuple), acc},
+                                  [&](Value fst, Value snd, Value acc) {
+                                    Value res = acc + fst * snd;
+                                    //                              std_call("print_bin_op",
+                                    //                              ArrayRef<Type>(),
+                                    //                                       ValueRange{fst,
+                                    //                                       snd,
+                                    //                                       res});
+                                    return res;
+                                  });
+                  },
+                  literal(scalarF32Type(), "0.000000"), joined);
+            },
+            arr));
+      },
+      slided);
+  ArrayType convType = conv.getType().dyn_cast<ArrayType>();
+  convType.dump();
+  ArrayType convNestedType = convType.getElementType().dyn_cast<ArrayType>();
+  Value ypp = transpose(split(natType(1), conv));
+  return ypp;
+}
+
+
 void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize,
                                       int innerStep, Value input,

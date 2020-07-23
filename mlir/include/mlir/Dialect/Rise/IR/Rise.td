@@ -116,6 +116,10 @@ def LoweringUnitOp
   let description = "Represents a region of RISE operations to be lowered "
                     "independently of other RISE operations.";
   let regions = (region SizedRegion<1> : $region);
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
+                            "function_ref<void(OpBuilder &, Location)> "
+                            "bodyBuilder">];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

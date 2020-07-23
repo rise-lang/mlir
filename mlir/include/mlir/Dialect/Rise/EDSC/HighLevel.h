@@ -32,6 +32,7 @@ namespace highlevel {
 void matrix_multiplication(int M, int N, int K, Value A, Value B, Value C);
 Value conv2D(Value input, Value kernel);
 Value conv2D(Value input, Value kernel, int padl, int padr, int padt, int padb);
+Value conv2DTF(Value input, Value kernel);
 void stencil(int N, int windowSize, int step, Value input, Value output);
 void stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize, int innerStep,

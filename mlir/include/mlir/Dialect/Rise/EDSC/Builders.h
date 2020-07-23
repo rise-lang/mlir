@@ -77,6 +77,7 @@ void out(Value writeTo, Value result);
 Value embed(Type result, ValueRange exposedValues,
             function_ref<Value(MutableArrayRef<BlockArgument>)> bodyBuilder);
 void rise_return(Value returnValue);
+void lowering_unit(function_ref<void()> bodyBuilder);
 
 // Patterns
 Value mapSeq(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
