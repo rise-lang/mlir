@@ -58,6 +58,8 @@ void lowerAndStoreSplit(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
                         Value out, Location loc, PatternRewriter &rewriter);
 void lowerAndStoreJoin(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
                        Value out, Location loc, PatternRewriter &rewriter);
+void lowerAndStoreTranspose(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
+                            Value out, Location loc, PatternRewriter &rewriter);
 
 mlir::Value lowerLiteral(Value literalValue, Location loc,
                          PatternRewriter &rewriter);
@@ -243,12 +245,14 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     rewriter.eraseOp(op);
   }
 
+
   // inline all operations of the loweringUnit and erase it
   rewriter.setInsertionPointAfter(loweringUnit);
   rewriter.getInsertionBlock()->getOperations().splice(
       rewriter.getInsertionPoint(),
       loweringUnit.getRegion().front().getOperations(),
-      loweringUnit.getRegion().front().begin(), Block::iterator(loweringUnit.region().front().end()));
+      loweringUnit.getRegion().front().begin(),
+      Block::iterator(loweringUnit.region().front().end()));
   rewriter.eraseOp(loweringUnit);
 
   return;
@@ -319,9 +323,15 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
                          apply.getOperand(1), out, splitOp.getLoc(), rewriter);
       return;
     } else if (JoinOp joinOp = dyn_cast<JoinOp>(appliedFun)) {
-      emitRemark(joinOp.getLoc()) << "AccT of Join";
+      emitRemark(joinOp.getLoc()) << "lowerAndStore of Join";
       lowerAndStoreJoin(joinOp.nAttr(), joinOp.mAttr(), joinOp.tAttr(),
                         apply.getOperand(1), out, joinOp.getLoc(), rewriter);
+      return;
+    } else if (TransposeOp transposeOp = dyn_cast<TransposeOp>(appliedFun)) {
+      emitRemark(transposeOp.getLoc()) << "lowerAndStore of Transpose";
+      lowerAndStoreTranspose(transposeOp.nAttr(), transposeOp.mAttr(),
+                             transposeOp.tAttr(), apply.getOperand(1), out,
+                             transposeOp.getLoc(), rewriter);
       return;
     } else if (LambdaOp lambdaOp = dyn_cast<LambdaOp>(appliedFun)) {
       emitRemark(appliedFun->getLoc()) << "lowerAndStore of Lambda";
@@ -479,6 +489,7 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
       << " leaving Value as is.";
 
   rewriter.restoreInsertionPoint(oldInsertPoint);
+
   return expr;
 }
 
@@ -502,7 +513,7 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
 
   // Introduce a temporary to accumulate into, or accumulate direcly in the
   // output
-  bool defineNewAccumulator = false;
+  bool defineNewAccumulator = true;
 
   Value accum;
   if (defineNewAccumulator) {
@@ -515,11 +526,8 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
     rewriter.setInsertionPointToStart(&embedOp.region().front());
 
     AllocOp alloc = rewriter.create<AllocOp>(
-        loc, MemRefType::get(ArrayRef<int64_t>{0},
+        loc, MemRefType::get(ArrayRef<int64_t>{},
                              FloatType::getF32(rewriter.getContext())));
-
-    rewriter.create<linalg::FillOp>(initializer.getLoc(), alloc.getResult(),
-                                    contInit);
     rewriter.create<rise::ReturnOp>(initializer.getLoc(), alloc.getResult());
 
     rewriter.setInsertionPointAfter(embedOp);
@@ -605,7 +613,6 @@ void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
     loopInductionVar = forLoop.getInductionVar();
     forLoopBody = forLoop.getBody();
   }
-
   rewriter.setInsertionPointToStart(forLoopBody);
 
   LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
@@ -622,7 +629,6 @@ void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
   LambdaOp lambdaCopy = cast<LambdaOp>(rewriter.clone(*fLambda));
   auto fxi = rewriter.create<ApplyOp>(loc, lambdaCopy.getType(),
                                       lambdaCopy.getResult(), xi.getResult());
-
   auto outi = rewriter.create<IdxOp>(
       loc, out.getType().dyn_cast<ArrayType>().getElementType(), out,
       loopInductionVar);
@@ -678,6 +684,16 @@ void lowerAndStoreJoin(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
   lowerAndStore(array, joinAccInterm.getResult(), rewriter);
 }
 
+void lowerAndStoreTranspose(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
+                            Value out, Location loc,
+                            PatternRewriter &rewriter) {
+  ArrayType transposeAccType = ArrayType::get(
+      rewriter.getContext(), n.getValue(),
+      ArrayType::get(rewriter.getContext(), m.getValue(), t.getValue()));
+  auto transposeAccInterm = rewriter.create<TransposeAccIntermediateOp>(
+      loc, transposeAccType, out, n, m, t);
+  lowerAndStore(array, transposeAccInterm.getResult(), rewriter);
+}
 //===----------------------------------------------------------------------===//
 // Lower{Operation}
 //===----------------------------------------------------------------------===//
@@ -865,10 +881,10 @@ mlir::Value lowerPad(NatAttr n, NatAttr l, NatAttr r, DataTypeAttr t, Type type,
 
 void lowerAssign(AssignOp assignOp, PatternRewriter &rewriter) {
   Location loc = assignOp.getLoc();
-  emitRemark(loc) << "Codegen for Assign";
-
+  emitRemark(loc) << "Lowering Assignment";
+  // TODO: set insertPOint somewhere
   if (assignOp.value().isa<OpResult>()) {
-    rewriter.setInsertionPoint(assignOp.assignee().getDefiningOp());
+    rewriter.setInsertionPoint(assignOp);
   } else {
     rewriter.setInsertionPointToStart(
         &assignOp.value().getParentRegion()->front());
@@ -887,23 +903,22 @@ resolveStoreIndexing(Value storeLocation, Value val,
                      SmallVector<OutputPathType, 10> path,
                      PatternRewriter &rewriter) {
   if (!storeLocation.isa<OpResult>()) {
-    emitRemark(val.getLoc()) << "CodegenStore for BlockArg";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for BlockArg";
     generateReadAccess(path, val, storeLocation, rewriter);
     return path;
   }
 
   if (IdxOp idx = dyn_cast<IdxOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "CodegenStore for idx";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for idx";
 
     path.push_back(idx.iv());
-
     return resolveStoreIndexing(idx.array(), val, path, rewriter);
   } else if (CastOp castOp = dyn_cast<CastOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "CodegenStore for cast";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for cast";
     return resolveStoreIndexing(castOp.getOperand(), val, path, rewriter);
   } else if (JoinAccIntermediateOp joinAccOp = dyn_cast<JoinAccIntermediateOp>(
                  storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "CodegenStore for joinAcc";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for joinAcc";
     auto i = mpark::get<Value>(path.pop_back_val());
     auto j = mpark::get<Value>(path.pop_back_val());
 
@@ -921,7 +936,7 @@ resolveStoreIndexing(Value storeLocation, Value val,
   } else if (SplitAccIntermediateOp splitAccOp =
                  dyn_cast<SplitAccIntermediateOp>(
                      storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "CodegenStore for splitAcc";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for splitAcc";
     auto loc = splitAccOp.getLoc();
     auto lhs = mpark::get<Value>(path.pop_back_val());
     auto rhs =
@@ -941,14 +956,34 @@ resolveStoreIndexing(Value storeLocation, Value val,
     path.push_back(result);
     path.push_back(divResult);
     return resolveStoreIndexing(splitAccOp.getOperand(), val, path, rewriter);
+  } else if (TransposeAccIntermediateOp transposeAccIntermediateOp =
+                 dyn_cast<TransposeAccIntermediateOp>(
+                     storeLocation.getDefiningOp())) {
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for transposeAcc";
+    auto i = mpark::get<Value>(path.pop_back_val());
+    auto j = mpark::get<Value>(path.pop_back_val());
+    path.push_back(i);
+    path.push_back(j);
+
+    return resolveStoreIndexing(transposeAccIntermediateOp.getOperand(), val,
+                                path, rewriter);
   } else if (EmbedOp embedOp =
                  dyn_cast<EmbedOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "CodegenStore for embed";
+    emitRemark(val.getLoc()) << "resolveStoreIndexing for embed";
     assert(embedOp.getNumOperands() == 0 &&
            "codegenstore for embed with operands not handled yet.");
 
     auto oldInsertPoint = rewriter.saveInsertionPoint();
     rewriter.setInsertionPointAfter(embedOp);
+
+    // replace blockArgs in the region with results of the codegen for the
+    // operands
+    for (int i = 0; i < embedOp.getOperands().size(); i++) {
+      embedOp.region().front().getArgument(i).replaceUsesWithIf(
+          embedOp.getOperand(i), [&](OpOperand &operand) {
+            return embedOp.getOperation()->isAncestor(operand.getOwner());
+          });
+    }
 
     // replace uses of embed value with returned value
     rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
@@ -968,9 +1003,10 @@ resolveStoreIndexing(Value storeLocation, Value val,
     return path;
   }
 
-  emitRemark(val.getLoc())
-      << "CodegenStore for "
-      << val.getDefiningOp()->getName().getStringRef().str();
+  emitRemark(storeLocation.getLoc())
+      << "resolveStoreIndexing for "
+      << storeLocation.getDefiningOp()->getName().getStringRef().str()
+      << " generating read access.";
 
   generateReadAccess(path, val, storeLocation, rewriter);
   return path;
@@ -980,11 +1016,12 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
                       PatternRewriter &rewriter) {
 
   if (!val.isa<OpResult>()) {
-    emitRemark(val.getLoc()) << "reached a blockArg in Codegen, reversing";
+    emitRemark(val.getLoc())
+        << "reached a blockArg in resolveIndexing, reversing";
     return generateWriteAccess(path, val, rewriter);
   }
   if (EmbedOp embedOp = dyn_cast<EmbedOp>(val.getDefiningOp())) {
-    emitRemark(embedOp.getLoc()) << "Codegen for Embed";
+    emitRemark(embedOp.getLoc()) << "resolveIndexing for Embed";
 
     auto oldInsertPoint = rewriter.saveInsertionPoint();
 
@@ -999,8 +1036,10 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     // replace blockArgs in the region with results of the codegen for the
     // operands
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
-      embedOp.region().front().getArgument(i).replaceAllUsesWith(
-          embedOp.getOperand(i));
+      embedOp.region().front().getArgument(i).replaceUsesWithIf(
+          embedOp.getOperand(i), [&](OpOperand &operand) {
+            return embedOp.getOperation()->isAncestor(operand.getOwner());
+          });
     }
     // replace uses of embed value with returned value
     rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
@@ -1020,23 +1059,20 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return embedReturn.getOperand(0);
 
   } else if (IdxOp idx = dyn_cast<IdxOp>(val.getDefiningOp())) {
-    // printPath(path, "idx");
-
-    emitRemark(idx.getLoc()) << "Codegen for idx";
+    emitRemark(idx.getLoc()) << "resolveIndexing for idx";
 
     Value iv = idx.iv();
     path.push_back(iv);
     return resolveIndexing(idx.array(), path, rewriter);
   } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
-    emitRemark(alloc.getLoc()) << "Codegen for alloc";
+    emitRemark(alloc.getLoc()) << "resolveIndexing for alloc";
 
     // call to reverse here.
     return generateWriteAccess(path, alloc.getResult(), rewriter);
   } else if (MapReadIntermediateOp mapReadOp =
                  dyn_cast<MapReadIntermediateOp>(val.getDefiningOp())) {
-    // printPath(path, "MapRead:");
 
-    emitRemark(mapReadOp.getLoc()) << "Codegen for MapRead";
+    emitRemark(mapReadOp.getLoc()) << "resolveIndexing for MapRead";
 
     auto i = mpark::get<Value>(path.pop_back_val());
     auto idx = rewriter.create<IdxOp>(
@@ -1048,7 +1084,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(mapReadOp.f(), path, rewriter);
   } else if (ZipIntermediateOp zipIntermOp =
                  dyn_cast<ZipIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(zipIntermOp.getLoc()) << "Codegen for zip";
+    emitRemark(zipIntermOp.getLoc()) << "resolveIndexing for zip";
     OutputPathType sndLastElem = path[path.size() - 2];
     int *fst = mpark::get_if<int>(&sndLastElem);
 
@@ -1065,7 +1101,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
   } else if (FstIntermediateOp fstIntermOp =
                  dyn_cast<FstIntermediateOp>(val.getDefiningOp())) {
     // printPath(path, "fst");
-    emitRemark(fstIntermOp.getLoc()) << "Codegen for fst";
+    emitRemark(fstIntermOp.getLoc()) << "resolveIndexing for fst";
 
     path.push_back(true);
     return resolveIndexing(fstIntermOp.value(), path, rewriter);
@@ -1073,18 +1109,18 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
   } else if (SndIntermediateOp sndIntermOp =
                  dyn_cast<SndIntermediateOp>(val.getDefiningOp())) {
     // printPath(path, "snd");
-    emitRemark(sndIntermOp.getLoc()) << "Codegen for snd";
+    emitRemark(sndIntermOp.getLoc()) << "resolveIndexing for snd";
 
     path.push_back(false);
     return resolveIndexing(sndIntermOp.value(), path, rewriter);
 
   } else if (isa<LoadOp>(val.getDefiningOp()) ||
              isa<AffineLoadOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "Codegen for Load";
+    emitRemark(val.getLoc()) << "resolveIndexing for Load";
     return val;
   } else if (SplitIntermediateOp splitIntermediateOp =
                  dyn_cast<SplitIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "Codegen for Split";
+    emitRemark(val.getLoc()) << "resolveIndexing for Split";
 
     auto i = mpark::get<Value>(path.pop_back_val());
     auto j = mpark::get<Value>(path.pop_back_val());
@@ -1103,9 +1139,31 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     path.push_back(newIndex);
 
     return resolveIndexing(splitIntermediateOp.value(), path, rewriter);
+  } else if (SplitAccIntermediateOp splitAccIntermediateOp =
+                 dyn_cast<SplitAccIntermediateOp>(val.getDefiningOp())) {
+    // TODO: do we want this? Does it even make sense?
+    emitRemark(val.getLoc()) << "resolveIndexing for SplitAcc (!)";
+
+    auto i = mpark::get<Value>(path.pop_back_val());
+    auto j = mpark::get<Value>(path.pop_back_val());
+
+    auto cstN =
+        rewriter
+            .create<ConstantIndexOp>(splitAccIntermediateOp.getLoc(),
+                                     splitAccIntermediateOp.n().getIntValue())
+            .getResult();
+    auto i_times_n =
+        rewriter.create<MulIOp>(splitAccIntermediateOp.getLoc(), i, cstN)
+            .getResult();
+    auto newIndex =
+        rewriter.create<AddIOp>(splitAccIntermediateOp.getLoc(), i_times_n, j)
+            .getResult();
+    path.push_back(newIndex);
+
+    return resolveIndexing(splitAccIntermediateOp.value(), path, rewriter);
   } else if (JoinIntermediateOp joinIntermediateOp =
                  dyn_cast<JoinIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "Codegen for Join";
+    emitRemark(val.getLoc()) << "resolveIndexing for Join";
 
     auto loc = joinIntermediateOp.getLoc();
     auto lhs = mpark::get<Value>(path.pop_back_val());
@@ -1130,8 +1188,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(joinIntermediateOp.value(), path, rewriter);
   } else if (TransposeIntermediateOp transposeIntermediateOp =
                  dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
-    // printPath(path, "Transpose:");
-    emitRemark(val.getLoc()) << "Codegen for Transpose";
+    emitRemark(val.getLoc()) << "resolveIndexing for Transpose";
     auto n = path.pop_back_val();
     auto m = path.pop_back_val();
 
@@ -1140,18 +1197,31 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
 
     return resolveIndexing(transposeIntermediateOp.getOperand(), path,
                            rewriter);
+  } else if (TransposeAccIntermediateOp transposeAccIntermediateOp =
+                 dyn_cast<TransposeAccIntermediateOp>(val.getDefiningOp())) {
+    // TODO: do we want this? Does it even make sense?
+    emitRemark(val.getLoc()) << "resolveIndexing for TransposeAcc (!)";
+    std::cout << "moin!\n" << std::flush;
+    printPath(path);
+    auto n = path.pop_back_val();
+    auto m = path.pop_back_val();
+    std::cout << "moin1!\n" << std::flush;
+
+    path.push_back(n);
+    path.push_back(m);
+
+    return resolveIndexing(transposeAccIntermediateOp.getOperand(), path,
+                           rewriter);
   } else if (SlideIntermediateOp slideIntermediateOp =
                  dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
-    // printPath(path, "Slide:");
-
-    emitRemark(val.getLoc()) << "Codegen for Slide";
+    emitRemark(val.getLoc()) << "resolveIndexing for Slide";
 
     Value i = mpark::get<Value>(path.pop_back_val());
     Value j = mpark::get<Value>(path.pop_back_val());
 
     if (!j) {
       emitError(slideIntermediateOp.getLoc())
-          << "Cannot do codegen for slide, path structure not correct!";
+          << "Cannot do resolveIndexing for slide, path structure not correct!";
     }
 
     Value s2 =
@@ -1172,7 +1242,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(slideIntermediateOp.value(), path, rewriter);
   } else if (PadIntermediateOp padIntermediateOp =
                  dyn_cast<PadIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "Codegen for Pad";
+    emitRemark(val.getLoc()) << "resolveIndexing for Pad";
     Location loc = padIntermediateOp.getLoc();
 
     Value i = mpark::get<Value>(path.pop_back_val());
@@ -1218,19 +1288,19 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(padIntermediateOp.array(), path, rewriter);
   } else if (InOp inOp = dyn_cast<InOp>(val.getDefiningOp())) {
     emitRemark(val.getLoc())
-        << "Codegen for In, generating read operation for operand";
+        << "resolveIndexing for In, generating read operation for operand";
     return generateWriteAccess(path, inOp.input(), rewriter);
   } else if (CastOp castOp = dyn_cast<CastOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "Codegen for Cast, reversing";
+    emitRemark(val.getLoc()) << "resolveIndexing for Cast, reversing";
     return generateWriteAccess(path, castOp.getOperand(), rewriter);
   }
 
   emitRemark(val.getLoc())
-      << "I don't know how to do codegen for: "
+      << "I don't know how to do resolveIndexing for: "
       << val.getDefiningOp()->getName().getStringRef().str()
       << " this is prob. an operation from another dialect. We walk "
          "recursively through the operands until we hit something we can "
-         "do codegen for.";
+         "do resolveIndexing for.";
 
   int i = 0;
   for (auto operand : (val.getDefiningOp()->getOperands())) {
@@ -1269,10 +1339,7 @@ void generateReadAccess(SmallVector<OutputPathType, 10> path, Value storeVal,
     assert(val && "path is ill structured!");
     indexValues.push_back(*val);
   }
-  int rank = storeLoc.getType().dyn_cast<MemRefType>().getRank();
-  if (indexValues.size() != rank) {
-    indexValues.erase(indexValues.begin());
-  }
+
   if (isa<AffineForOp>(rewriter.getBlock()->getParent()->getParentOp())) {
     rewriter.create<AffineStoreOp>(storeLoc.getLoc(), storeVal, storeLoc,
                                    llvm::makeArrayRef(indexValues));
@@ -1363,7 +1430,7 @@ void ConvertRiseToImperativePass::runOnFunction() {
   target.addLegalDialect<scf::SCFDialect>();
   target.addLegalDialect<AffineDialect>();
   target.addLegalDialect<linalg::LinalgDialect>();
-//  target.addLegalDialect<rise::RiseDialect>(); // for debugging purposes
+  //  target.addLegalDialect<rise::RiseDialect>(); // for debugging purposes
 
   target.addDynamicallyLegalOp<FuncOp>([](FuncOp funcOp) {
     bool riseInside = false;
@@ -1379,7 +1446,7 @@ void ConvertRiseToImperativePass::runOnFunction() {
 
   bool erased;
   applyOpPatternsAndFold(module, patterns, &erased);
-//  applyFullConversion(module, target, patterns);
+  //  applyFullConversion(module, target, patterns);
   return;
 }
 

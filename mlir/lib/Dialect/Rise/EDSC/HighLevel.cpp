@@ -119,9 +119,21 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel) {
   int padOuterl = ceil((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
   int padOuterr = floor((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
 
+  return conv2D(input, kernel, padInnerl, padInnerr, padOuterl, padOuterr);
+}
+
+Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int padr, int padt, int padb) {
+  ArrayType inputHeight = input.getType().dyn_cast<ArrayType>();
+  ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
+  ArrayType kernelHeight = kernel.getType().dyn_cast<ArrayType>();
+  ArrayType kernelWidth = kernelHeight.getElementType().dyn_cast<ArrayType>();
+
+  int steplr = 1;
+  int steptb = 1;
+
   ScalarType elementType = scalarF32Type();
-  Value padded = pad2D(natType(padOuterl), natType(padOuterr),
-                       natType(padInnerl), natType(padInnerr), input);
+  Value padded = pad2D(natType(padt), natType(padb),
+                       natType(padl), natType(padr), input);
 
   Value slided = slide2D(kernelHeight.getSize(), natType(1),
                          kernelWidth.getSize(), natType(1), padded);
@@ -146,6 +158,7 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel) {
       },
       slided);
 }
+
 
 void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize,
