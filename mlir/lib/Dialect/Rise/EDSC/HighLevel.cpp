@@ -132,11 +132,15 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int pad
   int steptb = 1;
 
   ScalarType elementType = scalarF32Type();
-  Value padded = pad2D(natType(padt), natType(padb),
-                       natType(padl), natType(padr), input);
+
+  Value adjustedInput = input;
+  if (padl != 0 || padr != 0 || padt != 0 || padb != 0) {
+    adjustedInput = pad2D(natType(padt), natType(padb),
+                         natType(padl), natType(padr), input);
+  }
 
   Value slided = slide2D(kernelHeight.getSize(), natType(1),
-                         kernelWidth.getSize(), natType(1), padded);
+                         kernelWidth.getSize(), natType(1), adjustedInput);
   return mapSeq2D(
       elementType,
       [&](Value slidingWindow) {
