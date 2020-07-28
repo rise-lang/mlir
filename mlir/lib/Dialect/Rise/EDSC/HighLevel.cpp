@@ -19,7 +19,6 @@
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include <iostream>
 #include <mlir/Dialect/SCF/EDSC/Builders.h>
 
 namespace mlir {
@@ -47,35 +46,46 @@ Type inferTypeForInOp(Value input) {
   return nullptr;
 }
 
-// todo: templating
 void mlir::edsc::highlevel::makeRiseProgram(
-    Value input, Value output, function_ref<Value(Value)> bodyBuilder, bool loweringUnitPresent) {
-  if (loweringUnitPresent) {
+    Value input, Value output, function_ref<Value(Value)> bodyBuilder) {
+  lowering_unit([&]() {
     Value riseInput = in(input, inferTypeForInOp(input));
     Value riseResult = bodyBuilder(riseInput);
     out(output, riseResult);
-  } else {
-
-  }
-  return;
+  });
 }
 
 void mlir::edsc::highlevel::makeRiseProgram(
     Value input0, Value input1, Value output,
-    function_ref<Value(Value, Value)> bodyBuilder, bool loweringUnitPresent) {
-  Value riseInput = in(input0, inferTypeForInOp(input0));
-  makeRiseProgram(input1, output,
-                  [&](Value input1) { return bodyBuilder(riseInput, input1); });
-  return;
+    function_ref<Value(Value, Value)> bodyBuilder) {
+  makeRiseProgram(
+      input0, output,
+      [&](Value input0) {
+        Value riseIn1 = in(input1, inferTypeForInOp(input1));
+        return bodyBuilder(input0, riseIn1);
+      });
+}
+
+ void mlir::edsc::highlevel::makeRiseProgram(
+    Value input0, Value input1, Value input2, Value output,
+    function_ref<Value(Value, Value, Value)> bodyBuilder) {
+   makeRiseProgram(
+       input0, input1, output,
+       [&](Value input0, Value input1) {
+         Value riseIn2 = in(input2, inferTypeForInOp(input2));
+         return bodyBuilder(input0, input1, riseIn2);
+       });
 }
 
 void mlir::edsc::highlevel::makeRiseProgram(
-    Value input0, Value input1, Value input2, Value output,
-    function_ref<Value(Value, Value, Value)> bodyBuilder, bool loweringUnitPresent) {
-  Value riseInput = in(input0, inferTypeForInOp(input0));
-  makeRiseProgram(input1, input2, output,
-                  [&](Value input1, Value input2) { return bodyBuilder(riseInput, input1, input2); });
-  return;
+    Value input0, Value input1, Value input2, Value input3, Value output,
+    function_ref<Value(Value, Value, Value, Value)> bodyBuilder) {
+  makeRiseProgram(
+      input0, input1, input2, output,
+      [&](Value input0, Value input1, Value input2) {
+        Value riseIn3 = in(input3, inferTypeForInOp(input3));
+        return bodyBuilder(input0, input1, input2, riseIn3);
+      });
 }
 
 // void mlir::edsc::highlevel::makeRiseTest(bool forwardDeclare = false) {
@@ -83,12 +93,11 @@ void mlir::edsc::highlevel::makeRiseProgram(
 //}
 
 // A:MxN * B:NxK = C:MxK
-void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
-                                                  Value B, Value C) {
+Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
+                                                  Value B) {
   // shape of A
   ArrayType AType = array2DType(M, N, scalarF32Type());
   rise::ArrayType arowType = AType.getElementType().dyn_cast<rise::ArrayType>();
-
   // shape of B
   rise::ArrayType BType = array2DType(N, K, scalarF32Type());
   rise::ArrayType BType_trans = array2DType(K, N, scalarF32Type());
@@ -99,11 +108,11 @@ void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
       arowType.getElementType().dyn_cast<rise::ScalarType>();
 
   // These have to be always on top!
-  Value in_A = in(A, AType);
-  Value in_B = in(B, BType);
+//  Value in_A = in(A, AType);
+//  Value in_B = in(B, BType);
 
   // clang-format off
-  out(C, mapSeq(arowType, [&](Value arow) {
+  return mapSeq(arowType, [&](Value arow) {
     return (mapSeq(bcolType,  [&](Value bcol) {
       return (reduceSeq(elementType, [&](Value tuple, Value acc){
         return (embed3(elementType, ValueRange{fst(elementType, elementType, tuple),
@@ -112,31 +121,27 @@ void mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
                          return acc * (fst + snd);
                        }));
       },literal(elementType, "0.000000"), zip(arowType.getSize(), elementType, elementType, arow, bcol)));
-    }, transpose(BType.getSize(), BType_trans.getSize(), elementType, in_B)));
-  }, in_A));
+    }, transpose(B)));
+  }, A);
   // clang-format on
-  return;
 }
 
-void mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
-                                    Value input, Value output) {
-  Value A = in(input, arrayType(N, scalarF32Type()));
+Value mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
+                                    Value input) {
   int newN = (N + step - windowSize) / step;
   int padl = ceil((N - newN) / 2.0);
   int padr = ceil((N - newN) / 2.0);
 
-  Value padded = padClamp(natType(padl), natType(padr), A);
+  Value padded = padClamp(natType(padl), natType(padr), input);
   Value windowed = slide(natType(windowSize), natType(1), padded);
 
-  Value mapped = mapSeq(
+  return mapSeq(
       "scf", scalarF32Type(),
       [&](Value window) {
         return (reduceSeq("scf", scalarF32Type(), sumLambda(scalarF32Type()),
                           literal(scalarF32Type(), "0.000000"), window));
       },
       windowed);
-
-  out(output, mapped);
 }
 
 Value mlir::edsc::highlevel::conv2D(Value input, Value kernel) {
@@ -209,13 +214,100 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl,
       slided);
 }
 
-void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
+Value mlir::edsc::highlevel::conv2DTF(Value input, Value kernel) {
+
+  ArrayType inputT = input.getType().dyn_cast<ArrayType>();
+  ArrayType nestedInputT = inputT.getElementType().dyn_cast<ArrayType>();
+  ArrayType nestedNestedInputT = nestedInputT.getElementType().dyn_cast<ArrayType>();
+
+  ArrayType kernelT = kernel.getType().dyn_cast<ArrayType>();
+  ArrayType nestedkernelT = kernelT.getElementType().dyn_cast<ArrayType>();
+
+  Value reshapedInput = join(map(
+      array2DType(nestedInputT.getSize(), nestedNestedInputT.getSize(), scalarF32Type()),
+      [&](Value array) {
+        return map(
+            arrayType(nestedNestedInputT.getSize(), scalarF32Type()),
+            [&](Value elem) { return join(elem); }, array);
+      },
+      input));
+
+  Value reshapedKernel = map(
+      arrayType(nestedkernelT.getSize(), scalarF32Type()),
+      [&](Value array) { return join(join(array)); }, kernel);
+
+  ArrayType inputHeight = reshapedInput.getType().dyn_cast<ArrayType>();
+  ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
+  ArrayType kernelHeight = reshapedKernel.getType().dyn_cast<ArrayType>();
+  ArrayType kernelWidth = kernelHeight.getElementType().dyn_cast<ArrayType>();
+
+  int steplr = 1;
+  int steptb = 1;
+
+  int nWidth = (inputWidth.getSize().getIntValue() + steplr -
+                kernelWidth.getSize().getIntValue()) /
+               steplr;
+  int nHeight = (inputHeight.getSize().getIntValue() + steptb -
+                 kernelHeight.getSize().getIntValue()) /
+                steptb;
+
+  // If padding has to be different for l and r we pad 1 more on the left.
+  int padInnerl = ceil((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padInnerr = floor((inputWidth.getSize().getIntValue() - nWidth) / 2.0);
+  int padOuterl = ceil((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+  int padOuterr = floor((inputHeight.getSize().getIntValue() - nHeight) / 2.0);
+
+  ScalarType elementType = scalarF32Type();
+  //  Value padded = pad2D(natType(padOuterl), natType(padOuterr),
+  //                       natType(padInnerl), natType(padInnerr), input);
+
+  Value slided = slide2D(kernelHeight.getSize(), natType(1),
+                         kernelWidth.getSize(), natType(1), reshapedInput);
+
+  Value conv = mapSeq(
+      array2DType(slided.getType()
+                      .dyn_cast<ArrayType>()
+                      .getElementType()
+                      .dyn_cast<ArrayType>()
+                      .getSize(),
+                  natType(1), elementType),
+      [&](Value arr) {
+        return split(natType(1), mapSeq(
+            elementType,
+            [&](Value slidingWindow) {
+              Value zipped = zip2D(slidingWindow, reshapedKernel);
+              Value joined = join(zipped);
+
+              return reduceSeq(
+                  elementType,
+                  [&](Value tuple, Value acc) {
+                    tuple.getType().dump();
+                    acc.getType().dump();
+                    return embed3(scalarF32Type(),
+                                  {fst(tuple), snd(tuple), acc},
+                                  [&](Value fst, Value snd, Value acc) {
+                                    Value res = acc + fst * snd;
+                                    //                              std_call("print_bin_op",
+                                    //                              ArrayRef<Type>(),
+                                    //                                       ValueRange{fst,
+                                    //                                       snd,
+                                    //                                       res});
+                                    return res;
+                                  });
+                  },
+                  literal(scalarF32Type(), "0.000000"), joined);
+            },
+            arr));
+      },
+      slided);
+  return transpose(split(natType(1), conv));
+}
+
+Value mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize,
-                                      int innerStep, Value input,
-                                      Value output) {
+                                      int innerStep, Value input) {
   ArrayType nestedType = arrayType(N, scalarF32Type());
   ArrayType inputType = arrayType(M, nestedType);
-  Value A = in(input, inputType);
 
   int nInner =
       (inputType.getSize().getIntValue() + innerStep - innerWindowSize) /
@@ -242,13 +334,12 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
            "on the left than on the right!";
 
   Value A_padded = pad2D(natType(padOuterl), natType(padOuterr),
-                         natType(padInnerl), natType(padInnerr), A);
+                         natType(padInnerl), natType(padInnerr), input);
   Value slizzled =
       slide2D(natType(outerWindowSize), natType(outerStep),
               natType(innerWindowSize), natType(innerStep), A_padded);
-  ArrayType slidedType = slizzled.getType().dyn_cast<ArrayType>();
 
-  Value mapped = mapSeq2D(
+  return mapSeq2D(
       scalarF32Type(),
       [&](Value slidingWindow) {
         Value flattenedWindow = join(slidingWindow);
@@ -268,8 +359,6 @@ void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
             literal(scalarF32Type(), "0.000000"), flattenedWindow);
       },
       slizzled);
-
-  out(output, mapped);
 }
 
 void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizes,

@@ -125,6 +125,19 @@ LogicalResult parseLoweringUnitOp(OpAsmParser &parser, OperationState &result) {
 
   return success();
 }
+void LoweringUnitOp::build(
+    OpBuilder &builder, OperationState &result,
+    function_ref<void(OpBuilder &, Location)> bodyBuilder) {
+  Region *embedRegion = result.addRegion();
+  Block *body = new Block();
+  embedRegion->push_back(body);
+
+
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(body);
+    bodyBuilder(builder, result.location);
+  builder.create<rise::ReturnOp>(result.location, ValueRange{});
+}
 
 //===----------------------------------------------------------------------===//
 // InOp

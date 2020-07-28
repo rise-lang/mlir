@@ -1139,6 +1139,28 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     path.push_back(newIndex);
 
     return resolveIndexing(splitIntermediateOp.value(), path, rewriter);
+  } else if (SplitAccIntermediateOp splitAccIntermediateOp =
+                 dyn_cast<SplitAccIntermediateOp>(val.getDefiningOp())) {
+    // TODO: do we want this? Does it even make sense?
+    emitRemark(val.getLoc()) << "resolveIndexing for SplitAcc (!)";
+
+    auto i = mpark::get<Value>(path.pop_back_val());
+    auto j = mpark::get<Value>(path.pop_back_val());
+
+    auto cstN =
+        rewriter
+            .create<ConstantIndexOp>(splitAccIntermediateOp.getLoc(),
+                                     splitAccIntermediateOp.n().getIntValue())
+            .getResult();
+    auto i_times_n =
+        rewriter.create<MulIOp>(splitAccIntermediateOp.getLoc(), i, cstN)
+            .getResult();
+    auto newIndex =
+        rewriter.create<AddIOp>(splitAccIntermediateOp.getLoc(), i_times_n, j)
+            .getResult();
+    path.push_back(newIndex);
+
+    return resolveIndexing(splitAccIntermediateOp.value(), path, rewriter);
   } else if (JoinIntermediateOp joinIntermediateOp =
                  dyn_cast<JoinIntermediateOp>(val.getDefiningOp())) {
     emitRemark(val.getLoc()) << "resolveIndexing for Join";
