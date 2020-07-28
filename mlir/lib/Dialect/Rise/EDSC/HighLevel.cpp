@@ -19,6 +19,7 @@
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include <iostream>
 #include <mlir/Dialect/SCF/EDSC/Builders.h>
 
 namespace mlir {
@@ -31,11 +32,52 @@ using namespace mlir::edsc::type;
 using namespace mlir::edsc::abstraction;
 using namespace mlir::edsc::intrinsics;
 
-// void mlir::edsc::highlevel::makeRiseProgram(ArrayRef<Value> inputs, Value
-// output, function_ref<Value(BlockArgument)> bodyBuilder) {
-//  return;
-//}
-//
+Type inferTypeForInOp(Value input) {
+  if (MemRefType inMemrefType = input.getType().dyn_cast<MemRefType>()) {
+    // infer input type from memref
+    DataType inputType = scalarF32Type();
+    for (auto size = inMemrefType.getShape().rbegin();
+         size != inMemrefType.getShape().rend(); size++) {
+      inputType = arrayType(*size, inputType);
+    }
+    return inputType;
+  }
+  emitError(input.getLoc())
+      << "Could not infer type for rise.in operation with provided input!";
+  return nullptr;
+}
+
+// todo: templating
+void mlir::edsc::highlevel::makeRiseProgram(
+    Value input, Value output, function_ref<Value(Value)> bodyBuilder, bool loweringUnitPresent) {
+  if (loweringUnitPresent) {
+    Value riseInput = in(input, inferTypeForInOp(input));
+    Value riseResult = bodyBuilder(riseInput);
+    out(output, riseResult);
+  } else {
+
+  }
+  return;
+}
+
+void mlir::edsc::highlevel::makeRiseProgram(
+    Value input0, Value input1, Value output,
+    function_ref<Value(Value, Value)> bodyBuilder, bool loweringUnitPresent) {
+  Value riseInput = in(input0, inferTypeForInOp(input0));
+  makeRiseProgram(input1, output,
+                  [&](Value input1) { return bodyBuilder(riseInput, input1); });
+  return;
+}
+
+void mlir::edsc::highlevel::makeRiseProgram(
+    Value input0, Value input1, Value input2, Value output,
+    function_ref<Value(Value, Value, Value)> bodyBuilder, bool loweringUnitPresent) {
+  Value riseInput = in(input0, inferTypeForInOp(input0));
+  makeRiseProgram(input1, input2, output,
+                  [&](Value input1, Value input2) { return bodyBuilder(riseInput, input1, input2); });
+  return;
+}
+
 // void mlir::edsc::highlevel::makeRiseTest(bool forwardDeclare = false) {
 //  // generate funcs and calls and everything
 //}
@@ -122,7 +164,8 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel) {
   return conv2D(input, kernel, padInnerl, padInnerr, padOuterl, padOuterr);
 }
 
-Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int padr, int padt, int padb) {
+Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl,
+                                    int padr, int padt, int padb) {
   ArrayType inputHeight = input.getType().dyn_cast<ArrayType>();
   ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
   ArrayType kernelHeight = kernel.getType().dyn_cast<ArrayType>();
@@ -135,8 +178,8 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int pad
 
   Value adjustedInput = input;
   if (padl != 0 || padr != 0 || padt != 0 || padb != 0) {
-    adjustedInput = pad2D(natType(padt), natType(padb),
-                         natType(padl), natType(padr), input);
+    adjustedInput = pad2D(natType(padt), natType(padb), natType(padl),
+                          natType(padr), input);
   }
 
   Value slided = slide2D(kernelHeight.getSize(), natType(1),
@@ -153,8 +196,11 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int pad
               return embed3(scalarF32Type(), {fst(tuple), snd(tuple), acc},
                             [&](Value fst, Value snd, Value acc) {
                               Value res = acc + fst * snd;
-//                              std_call("print_bin_op", ArrayRef<Type>(),
-//                                       ValueRange{fst, snd, res});
+                              //                              std_call("print_bin_op",
+                              //                              ArrayRef<Type>(),
+                              //                                       ValueRange{fst,
+                              //                                       snd,
+                              //                                       res});
                               return res;
                             });
             },
@@ -162,7 +208,6 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl, int pad
       },
       slided);
 }
-
 
 void mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
                                       int outerStep, int innerWindowSize,

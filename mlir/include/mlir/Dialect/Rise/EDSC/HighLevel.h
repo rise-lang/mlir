@@ -24,25 +24,46 @@
 #include "mlir/IR/Types.h"
 
 using namespace mlir::rise;
+using namespace mlir::edsc::type;
+using namespace mlir::edsc::op;
 
 namespace mlir {
 namespace edsc {
 namespace highlevel {
 
+// clang-format off
+void makeRiseProgram(Value input, Value output, function_ref<Value(Value)> bodyBuilder, bool loweringUnitPresent = false);
+void makeRiseProgram(Value input0, Value input1, Value output, function_ref<Value(Value, Value)> bodyBuilder, bool loweringUnitPresent = false);
+void makeRiseProgram(Value input0, Value input1, Value input2, Value output, function_ref<Value(Value, Value, Value)> bodyBuilder, bool loweringUnitPresent = false);
+// clang-format on
+
+// TODO: this works fine for the inputs at the end but not for the lambda. When
+// this is called its type can never be deduced. Any ideas?
+// template<typename ...Args>
+// void makeRiseProgram(Value output, function_ref<Value(Value, Args...)>
+// bodyBuilder, Value input, Args... inputs) {
+//
+//  makeRiseProgram(output, [&](auto... args){ bodyBuilder(input, args...); },
+//  inputs...);
+//
+//
+//  // [&](Value ){return bodyBuilder(input0, inputs...);});
+//  return;
+//}
+
 void matrix_multiplication(int M, int N, int K, Value A, Value B, Value C);
 Value conv2D(Value input, Value kernel);
 Value conv2D(Value input, Value kernel, int padl, int padr, int padt, int padb);
 void stencil(int N, int windowSize, int step, Value input, Value output);
-void stencil2D(int M, int N, int outerWindowSize,
-                                      int outerStep, int innerWindowSize, int innerStep,
-                                      Value input, Value output);
+void stencil2D(int M, int N, int outerWindowSize, int outerStep,
+               int innerWindowSize, int innerStep, Value input, Value output);
 
 // utilities
 void generateTest(int dims, ArrayRef<int64_t> inSizes,
                   ArrayRef<int64_t> outSizes, FuncOp riseFun = nullptr);
-void generateTest(int dims, ArrayRef<int64_t> inSizesA, ArrayRef<int64_t> inSizesB,
-                                         ArrayRef<int64_t> outSizes,
-                                         FuncOp riseFun = nullptr);
+void generateTest(int dims, ArrayRef<int64_t> inSizesA,
+                  ArrayRef<int64_t> inSizesB, ArrayRef<int64_t> outSizes,
+                  FuncOp riseFun = nullptr);
 } // namespace highlevel
 } // namespace edsc
 } // namespace mlir
