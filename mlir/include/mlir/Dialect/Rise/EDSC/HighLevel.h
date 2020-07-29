@@ -41,10 +41,12 @@ void makeRiseProgram(Value input0, Value input1, Value input2, Value input3, Val
 Value matrix_multiplication(int M, int N, int K, Value A, Value B);
 Value conv2D(Value input, Value kernel);
 Value conv2D(Value input, Value kernel, int padl, int padr, int padt, int padb);
+Value conv2DSeparated(Value input, Value kernelH, Value kernelV, int padl,
+                      int padr, int padt, int padb);
 Value conv2DTF(Value input, Value kernel);
 Value stencil(int N, int windowSize, int step, Value input);
 Value stencil2D(int M, int N, int outerWindowSize, int outerStep,
-               int innerWindowSize, int innerStep, Value input);
+                int innerWindowSize, int innerStep, Value input);
 
 // utilities
 void generateTest(int dims, ArrayRef<int64_t> inSizes,
@@ -52,6 +54,9 @@ void generateTest(int dims, ArrayRef<int64_t> inSizes,
 void generateTest(int dims, ArrayRef<int64_t> inSizesA,
                   ArrayRef<int64_t> inSizesB, ArrayRef<int64_t> outSizes,
                   FuncOp riseFun = nullptr);
+void generateTest(int dims, ArrayRef<int64_t> inSizesA,
+                  ArrayRef<int64_t> inSizesB, ArrayRef<int64_t> inSizesC,
+                  ArrayRef<int64_t> outSizes, FuncOp riseFun);
 } // namespace highlevel
 } // namespace edsc
 } // namespace mlir

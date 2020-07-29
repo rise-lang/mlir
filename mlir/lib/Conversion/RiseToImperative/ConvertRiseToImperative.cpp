@@ -63,8 +63,8 @@ void lowerAndStoreTranspose(NatAttr n, NatAttr m, DataTypeAttr t, Value array,
 
 mlir::Value lowerLiteral(Value literalValue, Location loc,
                          PatternRewriter &rewriter);
-mlir::Value lowerMapSeq(NatAttr n, Value val, Location loc,
-                        PatternRewriter &rewriter);
+mlir::Value lowerMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value val,
+                        Location loc, PatternRewriter &rewriter);
 mlir::Value lowerMap(NatAttr n, DataTypeAttr s, DataTypeAttr t, LambdaOp mapFun,
                      Value array, Type type, Location loc,
                      PatternRewriter &rewriter);
@@ -244,7 +244,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     op->dropAllReferences();
     rewriter.eraseOp(op);
   }
-
 
   // inline all operations of the loweringUnit and erase it
   rewriter.setInsertionPointAfter(loweringUnit);
@@ -446,14 +445,14 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
     } else if (MapSeqOp mapSeqOp =
                    dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
       emitRemark(expr.getLoc()) << "lower of Applied MapSeq";
-      return lowerMapSeq(mapSeqOp.nAttr(), apply.getResult(), mapSeqOp.getLoc(),
-                         rewriter);
+      return lowerMapSeq(mapSeqOp.nAttr(), mapSeqOp.sAttr(), mapSeqOp.tAttr(),
+                         apply.getResult(), mapSeqOp.getLoc(), rewriter);
     } else if (MapParOp mapParOp =
                    dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
       emitRemark(expr.getLoc())
           << "lower of Applied MapPar, currently not generating parallel code!";
-      return lowerMapSeq(mapParOp.nAttr(), apply.getResult(), mapParOp.getLoc(),
-                         rewriter);
+      return lowerMapSeq(mapParOp.nAttr(), mapParOp.sAttr(), mapParOp.tAttr(),
+                         apply.getResult(), mapParOp.getLoc(), rewriter);
     } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
       emitRemark(expr.getLoc()) << "lower of Applied Map";
       return lowerMap(mapOp.nAttr(), mapOp.sAttr(), mapOp.tAttr(),
@@ -618,7 +617,6 @@ void lowerAndStoreMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value f,
   LambdaOp fLambda = dyn_cast<LambdaOp>(f.getDefiningOp());
 
   IdxOp xi;
-
   if (contArray.getType().isa<ArrayType>()) {
     xi = rewriter.create<IdxOp>(
         loc, contArray.getType().cast<ArrayType>().getElementType(), contArray,
@@ -759,20 +757,23 @@ mlir::Value lowerLiteral(Value literalValue, Location loc,
   }
 }
 
-mlir::Value lowerMapSeq(NatAttr n, Value val, Location loc,
-                        PatternRewriter &rewriter) {
-  // introduce tmp Array of length n:
+mlir::Value lowerMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value val,
+                        Location loc, PatternRewriter &rewriter) {
   EmbedOp embedOp = rewriter.create<EmbedOp>(
-      loc,
-      ArrayType::get(rewriter.getContext(), n.getValue(),
-                     ScalarType::get(rewriter.getContext(),
-                                     FloatType::getF32(rewriter.getContext()))),
-      ValueRange());
+      loc, ArrayType::get(rewriter.getContext(), n.getValue(), t.getValue()),
+      ValueRange{});
+
+  // determine shape for new array
+  SmallVector<int64_t, 4> shape = {n.getValue().getIntValue()};
+  ArrayType arrayT = t.getValue().dyn_cast<ArrayType>();
+  while (arrayT) {
+    shape.push_back(arrayT.getSize().getIntValue());
+    arrayT = arrayT.getElementType().dyn_cast<ArrayType>();
+  }
 
   rewriter.setInsertionPointToStart(&embedOp.region().front());
   auto tmpArray = rewriter.create<AllocOp>(
-      loc, MemRefType::get(ArrayRef<int64_t>{n.getValue().getIntValue()},
-                           FloatType::getF32(rewriter.getContext())));
+      loc, MemRefType::get(shape, FloatType::getF32(rewriter.getContext())));
   rewriter.create<rise::ReturnOp>(tmpArray.getLoc(), tmpArray.getResult());
 
   rewriter.setInsertionPointAfter(embedOp);

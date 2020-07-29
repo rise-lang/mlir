@@ -58,34 +58,29 @@ void mlir::edsc::highlevel::makeRiseProgram(
 void mlir::edsc::highlevel::makeRiseProgram(
     Value input0, Value input1, Value output,
     function_ref<Value(Value, Value)> bodyBuilder) {
-  makeRiseProgram(
-      input0, output,
-      [&](Value input0) {
-        Value riseIn1 = in(input1, inferTypeForInOp(input1));
-        return bodyBuilder(input0, riseIn1);
-      });
+  makeRiseProgram(input0, output, [&](Value input0) {
+    Value riseIn1 = in(input1, inferTypeForInOp(input1));
+    return bodyBuilder(input0, riseIn1);
+  });
 }
 
- void mlir::edsc::highlevel::makeRiseProgram(
+void mlir::edsc::highlevel::makeRiseProgram(
     Value input0, Value input1, Value input2, Value output,
     function_ref<Value(Value, Value, Value)> bodyBuilder) {
-   makeRiseProgram(
-       input0, input1, output,
-       [&](Value input0, Value input1) {
-         Value riseIn2 = in(input2, inferTypeForInOp(input2));
-         return bodyBuilder(input0, input1, riseIn2);
-       });
+  makeRiseProgram(input0, input1, output, [&](Value input0, Value input1) {
+    Value riseIn2 = in(input2, inferTypeForInOp(input2));
+    return bodyBuilder(input0, input1, riseIn2);
+  });
 }
 
 void mlir::edsc::highlevel::makeRiseProgram(
     Value input0, Value input1, Value input2, Value input3, Value output,
     function_ref<Value(Value, Value, Value, Value)> bodyBuilder) {
-  makeRiseProgram(
-      input0, input1, input2, output,
-      [&](Value input0, Value input1, Value input2) {
-        Value riseIn3 = in(input3, inferTypeForInOp(input3));
-        return bodyBuilder(input0, input1, input2, riseIn3);
-      });
+  makeRiseProgram(input0, input1, input2, output,
+                  [&](Value input0, Value input1, Value input2) {
+                    Value riseIn3 = in(input3, inferTypeForInOp(input3));
+                    return bodyBuilder(input0, input1, input2, riseIn3);
+                  });
 }
 
 // void mlir::edsc::highlevel::makeRiseTest(bool forwardDeclare = false) {
@@ -94,7 +89,7 @@ void mlir::edsc::highlevel::makeRiseProgram(
 
 // A:MxN * B:NxK = C:MxK
 Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
-                                                  Value B) {
+                                                   Value B) {
   // shape of A
   ArrayType AType = array2DType(M, N, scalarF32Type());
   rise::ArrayType arowType = AType.getElementType().dyn_cast<rise::ArrayType>();
@@ -106,10 +101,6 @@ Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
 
   rise::ScalarType elementType =
       arowType.getElementType().dyn_cast<rise::ScalarType>();
-
-  // These have to be always on top!
-//  Value in_A = in(A, AType);
-//  Value in_B = in(B, BType);
 
   // clang-format off
   return mapSeq(arowType, [&](Value arow) {
@@ -127,7 +118,7 @@ Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
 }
 
 Value mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
-                                    Value input) {
+                                     Value input) {
   int newN = (N + step - windowSize) / step;
   int padl = ceil((N - newN) / 2.0);
   int padr = ceil((N - newN) / 2.0);
@@ -175,10 +166,6 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl,
   ArrayType inputWidth = inputHeight.getElementType().dyn_cast<ArrayType>();
   ArrayType kernelHeight = kernel.getType().dyn_cast<ArrayType>();
   ArrayType kernelWidth = kernelHeight.getElementType().dyn_cast<ArrayType>();
-
-  int steplr = 1;
-  int steptb = 1;
-
   ScalarType elementType = scalarF32Type();
 
   Value adjustedInput = input;
@@ -214,17 +201,82 @@ Value mlir::edsc::highlevel::conv2D(Value input, Value kernel, int padl,
       slided);
 }
 
+Value mlir::edsc::highlevel::conv2DSeparated(Value input, Value kernelH,
+                                             Value kernelV, int padl, int padr,
+                                             int padt, int padb) {
+  ScalarType elementType = scalarF32Type();
+
+  Value adjustedInput = input;
+  if (padl != 0 || padr != 0 || padt != 0 || padb != 0) {
+        adjustedInput = pad2D(natType(padt), natType(padb), natType(padl),
+                              natType(padr), input);
+  }
+
+  // vertical
+  Value slizzled = slide(natType(3), natType(1), adjustedInput);
+  Value vertical = mapSeq(
+      arrayType(slizzled.getType()
+                    .dyn_cast<ArrayType>()
+                    .getElementType()
+                    .dyn_cast<ArrayType>()
+                    .getElementType().dyn_cast<ArrayType>().getSize(),
+                elementType),
+      [&](Value arr) {
+        Value transposed = transpose(arr);
+        Value mapped = mapSeq(elementType, [&](Value nbh) {
+          Value zipped = zip(nbh, kernelV);
+          return reduceSeq(
+              elementType,
+              [&](Value tuple, Value acc) {
+                return embed3(scalarF32Type(), {fst(tuple), snd(tuple), acc},
+                              [&](Value fst, Value snd, Value acc) {
+                                Value res = acc + fst * snd;
+                                return res;
+                              });
+              },
+              literal(scalarF32Type(), "0.000000"), zipped);
+        }, transposed);
+        return mapped;
+      },
+      slizzled);
+  // horizontal
+
+  Value horizontal = mapSeq(arrayType(vertical.getType().dyn_cast<ArrayType>().getSize(),elementType), [&](Value arr) {
+    Value slizzled = slide(natType(3), natType(1), arr);
+    Value mapped = mapSeq(elementType, [&](Value nbh) {
+          nbh.getType().dump();
+      Value zipped = zip(nbh, kernelH);
+      Value reduced = reduceSeq(
+          elementType,
+          [&](Value tuple, Value acc) {
+            return embed3(scalarF32Type(), {fst(tuple), snd(tuple), acc},
+                          [&](Value fst, Value snd, Value acc) {
+                            Value res = acc + fst * snd;
+                            return res;
+                          });
+          },
+          literal(scalarF32Type(), "0.000000"), zipped);
+      return reduced;
+    }, slizzled);
+    return mapped;
+  }, vertical);
+
+  return horizontal;
+}
+
 Value mlir::edsc::highlevel::conv2DTF(Value input, Value kernel) {
 
   ArrayType inputT = input.getType().dyn_cast<ArrayType>();
   ArrayType nestedInputT = inputT.getElementType().dyn_cast<ArrayType>();
-  ArrayType nestedNestedInputT = nestedInputT.getElementType().dyn_cast<ArrayType>();
+  ArrayType nestedNestedInputT =
+      nestedInputT.getElementType().dyn_cast<ArrayType>();
 
   ArrayType kernelT = kernel.getType().dyn_cast<ArrayType>();
   ArrayType nestedkernelT = kernelT.getElementType().dyn_cast<ArrayType>();
 
   Value reshapedInput = join(map(
-      array2DType(nestedInputT.getSize(), nestedNestedInputT.getSize(), scalarF32Type()),
+      array2DType(nestedInputT.getSize(), nestedNestedInputT.getSize(),
+                  scalarF32Type()),
       [&](Value array) {
         return map(
             arrayType(nestedNestedInputT.getSize(), scalarF32Type()),
@@ -272,40 +324,42 @@ Value mlir::edsc::highlevel::conv2DTF(Value input, Value kernel) {
                       .getSize(),
                   natType(1), elementType),
       [&](Value arr) {
-        return split(natType(1), mapSeq(
-            elementType,
-            [&](Value slidingWindow) {
-              Value zipped = zip2D(slidingWindow, reshapedKernel);
-              Value joined = join(zipped);
+        return split(natType(1),
+                     mapSeq(
+                         elementType,
+                         [&](Value slidingWindow) {
+                           Value zipped = zip2D(slidingWindow, reshapedKernel);
+                           Value joined = join(zipped);
 
-              return reduceSeq(
-                  elementType,
-                  [&](Value tuple, Value acc) {
-                    tuple.getType().dump();
-                    acc.getType().dump();
-                    return embed3(scalarF32Type(),
-                                  {fst(tuple), snd(tuple), acc},
-                                  [&](Value fst, Value snd, Value acc) {
-                                    Value res = acc + fst * snd;
-                                    //                              std_call("print_bin_op",
-                                    //                              ArrayRef<Type>(),
-                                    //                                       ValueRange{fst,
-                                    //                                       snd,
-                                    //                                       res});
-                                    return res;
-                                  });
-                  },
-                  literal(scalarF32Type(), "0.000000"), joined);
-            },
-            arr));
+                           return reduceSeq(
+                               elementType,
+                               [&](Value tuple, Value acc) {
+                                 tuple.getType().dump();
+                                 acc.getType().dump();
+                                 return embed3(
+                                     scalarF32Type(),
+                                     {fst(tuple), snd(tuple), acc},
+                                     [&](Value fst, Value snd, Value acc) {
+                                       Value res = acc + fst * snd;
+                                       //                              std_call("print_bin_op",
+                                       //                              ArrayRef<Type>(),
+                                       //                                       ValueRange{fst,
+                                       //                                       snd,
+                                       //                                       res});
+                                       return res;
+                                     });
+                               },
+                               literal(scalarF32Type(), "0.000000"), joined);
+                         },
+                         arr));
       },
       slided);
   return transpose(split(natType(1), conv));
 }
 
 Value mlir::edsc::highlevel::stencil2D(int M, int N, int outerWindowSize,
-                                      int outerStep, int innerWindowSize,
-                                      int innerStep, Value input) {
+                                       int outerStep, int innerWindowSize,
+                                       int innerStep, Value input) {
   ArrayType nestedType = arrayType(N, scalarF32Type());
   ArrayType inputType = arrayType(M, nestedType);
 
@@ -502,6 +556,120 @@ void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizesA,
         std_memref_cast(inBMemref, UnrankedMemRefType::get(f32Type, 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInB});
 
+    Value castedOut =
+        std_memref_cast(outMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedOut});
+  }
+}
+
+// TODO @Martin: delete this
+void mlir::edsc::highlevel::generateTest(int dims, ArrayRef<int64_t> inSizesA,
+                                         ArrayRef<int64_t> inSizesB,
+                                         ArrayRef<int64_t> inSizesC,
+                                         ArrayRef<int64_t> outSizes,
+                                         FuncOp riseFun) {
+  auto f32Type = FloatType::getF32(ScopedContext::getContext());
+
+  if (!(dims == inSizesA.size())) {
+    emitError(ScopedContext::getLocation())
+        << "Generating test failed. Dims has to match number of "
+           "input and output sizes!";
+    return;
+  }
+
+  auto inAMemrefType = MemRefType::get(inSizesA, f32Type, {}, 0);
+  auto inBMemrefType = MemRefType::get(inSizesB, f32Type, {}, 0);
+  auto inCMemrefType = MemRefType::get(inSizesC, f32Type, {}, 0);
+  auto outMemrefType = MemRefType::get(outSizes, f32Type, {}, 0);
+
+  SmallVector<Value, 4> lbs;
+  SmallVector<Value, 4> ubA;
+  SmallVector<Value, 4> ubB;
+  SmallVector<Value, 4> ubC;
+  SmallVector<Value, 4> steps;
+  SmallVector<Value, 4> step1;
+
+  for (int i = 0; i < dims; i++) {
+    lbs.push_back(std_constant_index(0));
+    ubA.push_back(std_constant_index(inSizesA[i]));
+    steps.push_back(std_constant_index(1));
+  }
+  SmallVector<Value, 4> lb1;
+  lb1.push_back(std_constant_index(0));
+  step1.push_back(std_constant_index(1));
+  ubB.push_back(std_constant_index(inSizesB[0]));
+  ubC.push_back(std_constant_index(inSizesC[0]));
+
+  Value inAMemref = std_alloc(inAMemrefType);
+  Value inBMemref = std_alloc(inBMemrefType);
+  Value inCMemref = std_alloc(inCMemrefType);
+  Value outMemref = std_alloc(outMemrefType);
+
+  StdIndexedValue inA(inAMemref);
+  StdIndexedValue inB(inBMemref);
+  StdIndexedValue inC(inCMemref);
+  StdIndexedValue out(outMemref);
+
+  Value cst0f = std_constant_float(llvm::APFloat(0.0f), f32Type);
+  Value cst1f = std_constant_float(llvm::APFloat(1.0f), f32Type);
+  Value cst2f = std_constant_float(llvm::APFloat(2.0f), f32Type);
+
+  // Init input A
+  StdIndexedValue initAVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  initAVal = cst1f;
+
+  // initializing the input with ascending values starting with 0
+  loopNestBuilder(lbs, ubA, steps, [&](auto ivs) {
+    // bring ivs from ValueRange -> SmallVector to be usable by
+    // TemplatedIndexedValue
+    SmallVector<Value, 4> ivs_vector;
+    for (int i = 0; i < dims; i++) {
+      ivs_vector.push_back(ivs[i]);
+    }
+    inA(ivs_vector) = initAVal();
+    initAVal = initAVal + cst1f;
+  });
+
+  // init input B with only 1s
+  StdIndexedValue initBVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  initBVal = cst1f;
+
+  // initializing the input with 1s
+  loopNestBuilder(lb1, ubB, step1, [&](auto ivs) {
+    SmallVector<Value, 4> ivs_vector;
+    for (int i = 0; i < 1; i++) {
+      ivs_vector.push_back(ivs[i]);
+    }
+    inB(ivs_vector) = initBVal();
+    inC(ivs_vector) = initBVal();
+    //    initBVal = initBVal + cst1f;
+  });
+  //
+  //  // init input B with only -2s
+  //  StdIndexedValue initCVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  //  initCVal = cst1f;
+  //
+  //  // initializing the input with 1s
+  //  loopNestBuilder(lbs, ubC, steps, [&](auto ivs) {
+  //    SmallVector<Value, 4> ivs_vector;
+  //    for (int i = 0; i < dims; i++) {
+  //      ivs_vector.push_back(ivs[i]);
+  //    }
+  //    inC(ivs_vector) = initCVal();
+  //    //    initBVal = initBVal + cst1f;
+  //  });
+
+  if (riseFun) {
+    std_call(riseFun, ValueRange{inAMemref, inBMemref, inCMemref,outMemref});
+    Value castedInA =
+        std_memref_cast(inAMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInA});
+    Value castedInB =
+        std_memref_cast(inBMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInB});
+    Value castedInC =
+        std_memref_cast(inCMemref, UnrankedMemRefType::get(f32Type, 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedInC});
     Value castedOut =
         std_memref_cast(outMemref, UnrankedMemRefType::get(f32Type, 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{castedOut});
