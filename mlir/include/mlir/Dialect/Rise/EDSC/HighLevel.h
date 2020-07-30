@@ -14,29 +14,84 @@
 #ifndef MLIR_DIALECT_RISE_EDSC_HIGHLEVEL_H_
 #define MLIR_DIALECT_RISE_EDSC_HIGHLEVEL_H_
 
+#include "mlir/Dialect/Affine/EDSC/Builders.h"
+#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include "mlir/Dialect/Rise/invoke.hpp"
+#include "mlir/Dialect/SCF/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/EDSC/Builders.h"
+#include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Types.h"
+#include <iostream>
 
 using namespace mlir::rise;
+using namespace mlir::edsc;
 using namespace mlir::edsc::type;
 using namespace mlir::edsc::op;
+using namespace mlir::edsc::intrinsics;
 
 namespace mlir {
+namespace {
+Type inferTypeForInOp(Value input) {
+  if (MemRefType inMemrefType = input.getType().dyn_cast<MemRefType>()) {
+    // infer input type from memref
+    DataType inputType = scalarF32Type();
+    for (auto size = inMemrefType.getShape().rbegin();
+         size != inMemrefType.getShape().rend(); size++) {
+      inputType = arrayType(*size, inputType);
+    }
+    return inputType;
+  }
+  emitError(input.getLoc())
+      << "Could not infer type for rise.in operation with provided input!";
+  return nullptr;
+}
+
+template <std::size_t I = 0, typename FuncT, typename... Tp>
+inline typename std::enable_if<I == sizeof...(Tp), void>::type
+for_each(std::tuple<Tp...> &, FuncT) {}
+
+template <std::size_t I = 0, typename FuncT, typename... Tp>
+    inline typename std::enable_if <
+    I<sizeof...(Tp), void>::type for_each(std::tuple<Tp...> &t, FuncT f) {
+  f(std::get<I>(t));
+  for_each<I + 1, FuncT, Tp...>(t, f);
+}
+
+template <typename T, typename... Targs>
+struct builder {
+  Value output;
+  std::tuple<T, Targs...> inputs;
+  builder(Value output, std::tuple<T, Targs...> inputs)
+      : output{output}, inputs{inputs} {}
+
+  void operator()(std::function<Value(T, Targs...)> fun) {
+    lowering_unit([&]() {
+      std::array<T, std::tuple_size<std::tuple<T, Targs...>>::value> ins;
+      int index = 0;
+      for_each(inputs, [&](Value elem) {
+        ins[index++] = (in(elem, inferTypeForInOp(elem)));
+      });
+      Value result = invoke_hpp::apply(fun, ins);
+      out(output, result);
+    });
+  }
+};
+} // namespace
+
 namespace edsc {
 namespace highlevel {
 
-// clang-format off
-void makeRiseProgram(Value input, Value output, function_ref<Value(Value)> bodyBuilder);
-void makeRiseProgram(Value input0, Value input1, Value output, function_ref<Value(Value, Value)> bodyBuilder);
-void makeRiseProgram(Value input0, Value input1, Value input2, Value output, function_ref<Value(Value, Value, Value)> bodyBuilder);
-void makeRiseProgram(Value input0, Value input1, Value input2, Value input3, Value output, function_ref<Value(Value, Value, Value, Value)> bodyBuilder);
-// clang-format on
+template <typename T, typename... Targs>
+builder<T, Targs...> makeRiseProgram(Value output, T input, Targs... inputs) {
+  return builder<T, Targs...>{output, std::make_tuple(input, inputs...)};
+}
 
 Value matrix_multiplication(int M, int N, int K, Value A, Value B);
 Value conv2D(Value input, Value kernel);
@@ -57,7 +112,28 @@ void generateTest(int dims, ArrayRef<int64_t> inSizesA,
 void generateTest(int dims, ArrayRef<int64_t> inSizesA,
                   ArrayRef<int64_t> inSizesB, ArrayRef<int64_t> inSizesC,
                   ArrayRef<int64_t> outSizes, FuncOp riseFun);
+
 } // namespace highlevel
+
+namespace utils {
+Value getFilledMemRef(ArrayRef<int64_t> shape, float fillValue,
+                      Value memref = nullptr);
+Value getFilledMemRef(ArrayRef<int64_t> shape, Value memref = nullptr);
+template <typename T, typename... Targs>
+void makeRiseTest(FuncOp riseFun,
+                                      ArrayRef<int64_t> outputShape, T input,
+                                      Targs... inputs) {
+  Value output = std_alloc(MemRefType::get(outputShape, FloatType::getF32(ScopedContext::getContext()), {}, 0));
+  std::tuple<T, Targs...> tuple = std::make_tuple(input, inputs...);
+  std_call(riseFun, ValueRange{input, inputs..., output});
+  for_each(tuple, [&](Value elem){
+    Value casted = std_memref_cast(elem, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
+    std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{casted});
+  });
+  Value casted = std_memref_cast(output, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
+  std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{casted});
+}
+} // namespace utils
 } // namespace edsc
 } // namespace mlir
 
