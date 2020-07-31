@@ -10,8 +10,8 @@ func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5x
         %transpose = rise.transpose #rise.nat<2> #rise.nat<5> #rise.scalar<f32>
         %B_trans = rise.apply %transpose, %B
 
-        %m1fun = rise.lambda (%arow : !rise.array<2, scalar<f32>>) -> !rise.array<2, scalar<f32>> {
-            %m2fun = rise.lambda (%bcol : !rise.array<2, scalar<f32>>) -> !rise.array<2, scalar<f32>> {
+        %m1fun = rise.lambda (%arow : !rise.array<2, scalar<f32>>) -> !rise.array<5, scalar<f32>> {
+            %m2fun = rise.lambda (%bcol : !rise.array<2, scalar<f32>>) -> !rise.scalar<f32> {
 
                 //Zipping
                 %zipFun = rise.zip #rise.nat<2> #rise.scalar<f32> #rise.scalar<f32>
@@ -40,11 +40,11 @@ func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5x
 
                 rise.return %result : !rise.scalar<f32>
             }
-            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<5> #rise.array<2, scalar<f32>> #rise.array<2, scalar<f32>>
+            %m2 = rise.mapSeq {to = "affine"}  #rise.nat<5> #rise.array<2, scalar<f32>> #rise.scalar<f32>
             %result = rise.apply %m2, %m2fun, %B_trans
-            rise.return %result : !rise.array<5, array<2, scalar<f32>>>
+            rise.return %result : !rise.array<5, scalar<f32>>
         }
-        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<10> #rise.array<2, scalar<f32>> #rise.array<2, scalar<f32>>
+        %m1 = rise.mapSeq {to = "affine"}  #rise.nat<10> #rise.array<2, scalar<f32>> #rise.array<5, scalar<f32>>
         %result = rise.apply %m1, %m1fun, %A
         rise.out %outArg <- %result
         rise.return

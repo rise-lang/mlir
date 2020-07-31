@@ -45,8 +45,8 @@ Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
       arowType.getElementType().dyn_cast<rise::ScalarType>();
 
   // clang-format off
-  return mapSeq(arowType, [&](Value arow) {
-    return (mapSeq(bcolType,  [&](Value bcol) {
+  return mapSeq(BType.getElementType(), [&](Value arow) {
+    return (mapSeq(scalarF32Type(),  [&](Value bcol) {
       return (reduceSeq(elementType, [&](Value tuple, Value acc){
         return (embed3(elementType, ValueRange{fst(elementType, elementType, tuple),
                                                snd(elementType, elementType, tuple), acc},
@@ -197,7 +197,6 @@ Value mlir::edsc::highlevel::conv2DSeparated(Value input, Value kernelH,
         Value mapped = mapSeq(
             elementType,
             [&](Value nbh) {
-              nbh.getType().dump();
               Value zipped = zip(nbh, kernelH);
               Value reduced = reduceSeq(
                   elementType,
@@ -286,12 +285,9 @@ Value mlir::edsc::highlevel::conv2DTF(Value input, Value kernel) {
                          [&](Value slidingWindow) {
                            Value zipped = zip2D(slidingWindow, reshapedKernel);
                            Value joined = join(zipped);
-
                            return reduceSeq(
                                elementType,
                                [&](Value tuple, Value acc) {
-                                 tuple.getType().dump();
-                                 acc.getType().dump();
                                  return embed3(
                                      scalarF32Type(),
                                      {fst(tuple), snd(tuple), acc},

@@ -89,6 +89,7 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
                             "&, Location, MutableArrayRef<BlockArgument>)> "
                             "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
+  let verifier = [{ return verify$cppClass(*this); }];
 }
 
 def ApplyOp : Rise_Op<"apply"> {
@@ -113,7 +114,7 @@ def ApplyOp : Rise_Op<"apply"> {
 def LoweringUnitOp
     : Rise_Op<"lowering_unit", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let summary = "rise lowering unit";
-  let description = "Represents a region of RISE operations to be lowered "
+  let description = "Represents a unit of RISE operations to be lowered "
                     "independently of other RISE operations.";
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;

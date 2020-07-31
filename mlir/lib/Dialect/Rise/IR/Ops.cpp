@@ -132,10 +132,9 @@ void LoweringUnitOp::build(
   Block *body = new Block();
   embedRegion->push_back(body);
 
-
-    OpBuilder::InsertionGuard guard(builder);
-    builder.setInsertionPointToStart(body);
-    bodyBuilder(builder, result.location);
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointToStart(body);
+  bodyBuilder(builder, result.location);
   builder.create<rise::ReturnOp>(result.location, ValueRange{});
 }
 
@@ -247,6 +246,23 @@ void LambdaOp::build(
   } else {
     builder.create<rise::ReturnOp>(result.location, ValueRange{});
   }
+}
+
+LogicalResult verifyLambdaOp(LambdaOp op) {
+  if (!op.getResult().getType().isa<FunType>())
+    return op.emitError("result must be funType, but got")
+           << op.getResult().getType();
+  if (!llvm::hasNItems(op.region(), 1))
+    return op.emitError() << "region must have exactly 1 block";
+  Type returnType = op.getType().dyn_cast<FunType>().getOutput();
+  while (returnType.isa<FunType>()) {
+    returnType = returnType.dyn_cast<FunType>().getOutput();
+  }
+  if (op.region().front().getTerminator()->getOperand(0).getType() !=
+      returnType)
+    return op.emitError() << "return type does not match funType";
+
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

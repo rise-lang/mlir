@@ -136,30 +136,34 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
   std_ret();
 
   // clang-format off
-  // IMPERATIVE:       module {
-  // IMPERATIVE-LABEL:   func @mm(
-  // IMPERATIVE-SAME:             %[[VAL_0:.*]]: memref<32x16xf32>, %[[VAL_1:.*]]: memref<16x64xf32>, %[[VAL_2:.*]]: memref<32x64xf32>) {
-  // IMPERATIVE:           %[[VAL_3:.*]] = constant 32 : index
-  // IMPERATIVE:           %[[VAL_4:.*]] = constant 64 : index
-  // IMPERATIVE:           %[[VAL_5:.*]] = constant 0.000000e+00 : f32
-  // IMPERATIVE:           %[[VAL_6:.*]] = constant 0 : index
-  // IMPERATIVE:           %[[VAL_7:.*]] = constant 16 : index
-  // IMPERATIVE:           %[[VAL_8:.*]] = constant 1 : index
-  // IMPERATIVE:           scf.for %[[VAL_9:.*]] = %[[VAL_6]] to %[[VAL_3]] step %[[VAL_8]] {
-  // IMPERATIVE:             scf.for %[[VAL_10:.*]] = %[[VAL_6]] to %[[VAL_4]] step %[[VAL_8]] {
-  // IMPERATIVE:               store %[[VAL_5]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
-  // IMPERATIVE:               scf.for %[[VAL_11:.*]] = %[[VAL_6]] to %[[VAL_7]] step %[[VAL_8]] {
-  // IMPERATIVE:                 %[[VAL_12:.*]] = load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_11]]] : memref<32x16xf32>
-  // IMPERATIVE:                 %[[VAL_13:.*]] = load %[[VAL_1]]{{\[}}%[[VAL_11]], %[[VAL_10]]] : memref<16x64xf32>
-  // IMPERATIVE:                 %[[VAL_14:.*]] = load %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
-  // IMPERATIVE:                 %[[VAL_15:.*]] = addf %[[VAL_12]], %[[VAL_13]] : f32
-  // IMPERATIVE:                 %[[VAL_16:.*]] = mulf %[[VAL_14]], %[[VAL_15]] : f32
-  // IMPERATIVE:                 store %[[VAL_16]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
-  // IMPERATIVE:               }
-  // IMPERATIVE:             }
-  // IMPERATIVE:           }
-  // IMPERATIVE:           return
-  // IMPERATIVE:         }
+// IMPERATIVE-LABEL:   func @mm(
+// IMPERATIVE-SAME:             %[[VAL_0:.*]]: memref<32x16xf32>,
+// IMPERATIVE-SAME:             %[[VAL_1:.*]]: memref<16x64xf32>,
+// IMPERATIVE-SAME:             %[[VAL_2:.*]]: memref<32x64xf32>) {
+// IMPERATIVE:           %[[VAL_3:.*]] = constant 32 : index
+// IMPERATIVE:           %[[VAL_4:.*]] = constant 64 : index
+// IMPERATIVE:           %[[VAL_5:.*]] = constant 0.000000e+00 : f32
+// IMPERATIVE:           %[[VAL_6:.*]] = constant 0 : index
+// IMPERATIVE:           %[[VAL_7:.*]] = constant 16 : index
+// IMPERATIVE:           %[[VAL_8:.*]] = constant 1 : index
+// IMPERATIVE:           scf.for %[[VAL_9:.*]] = %[[VAL_6]] to %[[VAL_3]] step %[[VAL_8]] {
+// IMPERATIVE:             scf.for %[[VAL_10:.*]] = %[[VAL_6]] to %[[VAL_4]] step %[[VAL_8]] {
+// IMPERATIVE:               %[[VAL_11:.*]] = alloc() : memref<f32>
+// IMPERATIVE:               store %[[VAL_5]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               scf.for %[[VAL_12:.*]] = %[[VAL_6]] to %[[VAL_7]] step %[[VAL_8]] {
+// IMPERATIVE:                 %[[VAL_13:.*]] = load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_12]]] : memref<32x16xf32>
+// IMPERATIVE:                 %[[VAL_14:.*]] = load %[[VAL_1]]{{\[}}%[[VAL_12]], %[[VAL_10]]] : memref<16x64xf32>
+// IMPERATIVE:                 %[[VAL_15:.*]] = load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:                 %[[VAL_16:.*]] = addf %[[VAL_13]], %[[VAL_14]] : f32
+// IMPERATIVE:                 %[[VAL_17:.*]] = mulf %[[VAL_15]], %[[VAL_16]] : f32
+// IMPERATIVE:                 store %[[VAL_17]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               }
+// IMPERATIVE:               %[[VAL_18:.*]] = load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               store %[[VAL_18]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
+// IMPERATIVE:             }
+// IMPERATIVE:           }
+// IMPERATIVE:           return
+// IMPERATIVE:         }
   // clang-format on
 
   f.print(llvm::outs());
@@ -198,8 +202,8 @@ TEST_FUNC(test_conv2) {
   makeRiseTest(f, {height, width}, getFilledMemRef({height, width}),
                getFilledMemRef({kernelHeight, kernelWidth}, 1.0f));
 
-//  mlir::edsc::highlevel::generateTest(
-//      2, {height, width}, {kernelHeight, kernelWidth}, {height, width}, f);
+  //  mlir::edsc::highlevel::generateTest(
+  //      2, {height, width}, {kernelHeight, kernelWidth}, {height, width}, f);
   std_ret();
   // clang-format off
   // CONV_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [9, 9] strides = [9, 1] data =
@@ -309,7 +313,8 @@ TEST_FUNC(test_conv2_separable) {
 //  auto testFun = makeFunction("conv2DTF_test", {}, {});
 //  OpBuilder test_builder(testFun.getBody());
 //  ScopedContext test_scope(test_builder, testFun.getLoc());
-//  makeRiseTest(f, {1, height-2, width-2, 1}, getFilledMemRef({1, height, width, 1}), getFilledMemRef({kernelHeight, kernelWidth, 1, 1}, 1.0f));
+//  makeRiseTest(f, {1, height-2, width-2, 1}, getFilledMemRef({1, height,
+//  width, 1}), getFilledMemRef({kernelHeight, kernelWidth, 1, 1}, 1.0f));
 //
 //  std_ret();
 // clang-format off

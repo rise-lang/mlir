@@ -7,7 +7,7 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
         %B = rise.in %inB : !rise.array<4, array<4, scalar<f32>>>
 
         %f1 = rise.lambda (%arow : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
-            %f2 = rise.lambda (%bcol : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
+            %f2 = rise.lambda (%bcol : !rise.array<4, scalar<f32>>) -> !rise.scalar<f32> {
 
                 //Zipping
                 %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
@@ -44,9 +44,9 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
 
                 rise.return %result : !rise.scalar<f32>
             }
-            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
+            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.scalar<f32>
             %result = rise.apply %m2, %f2, %B
-            rise.return %result : !rise.array<4, array<4, scalar<f32>>>
+            rise.return %result : !rise.array<4, scalar<f32>>
         }
         %m1 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
         %result = rise.apply %m1, %f1, %A
