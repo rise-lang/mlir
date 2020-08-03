@@ -89,6 +89,7 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
                             "&, Location, MutableArrayRef<BlockArgument>)> "
                             "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
+  let verifier = [{ return verify$cppClass(*this); }];
 }
 
 def ApplyOp : Rise_Op<"apply"> {
@@ -109,6 +110,19 @@ def ApplyOp : Rise_Op<"apply"> {
 //===----------------------------------------------------------------------===//
 // Rise Operations: Interoperability
 //===----------------------------------------------------------------------===//
+
+def LoweringUnitOp
+    : Rise_Op<"lowering_unit", [SingleBlockImplicitTerminator<"ReturnOp">]> {
+  let summary = "rise lowering unit";
+  let description = "Represents a unit of RISE operations to be lowered "
+                    "independently of other RISE operations.";
+  let regions = (region SizedRegion<1> : $region);
+  let skipDefaultBuilders = 1;
+  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
+                            "function_ref<void(OpBuilder &, Location)> "
+                            "bodyBuilder">];
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
 
 def InOp : Rise_Op<"in"> {
   let summary = "rise in";
@@ -465,10 +479,23 @@ def JoinAccIntermediateOp : Rise_Op<"codegen.joinAcc"> {
 }
 
 def TransposeIntermediateOp : Rise_Op<"codegen.transpose"> {
-  let summary = "rise snd_interm";
+  let summary = "rise transpose_interm";
   let description =
       "The codegen.transpose operation is the codegen equivalent of "
       "the transpose operation.";
+  let arguments = (ins AnyType
+                   : $value, NatAttr
+                   : $n, NatAttr
+                   : $m, DataTypeAttr
+                   : $t);
+  let results = (outs AnyType : $output);
+}
+
+def TransposeAccIntermediateOp : Rise_Op<"codegen.transposeStore"> {
+  let summary = "rise transposeAcc_interm";
+  let description =
+      "The codegen.transpose operation is the codegen equivalent of "
+      "the transpose operation used in a writing access.";
   let arguments = (ins AnyType
                    : $value, NatAttr
                    : $n, NatAttr
@@ -505,8 +532,8 @@ def PadIntermediateOp : Rise_Op<"codegen.pad"> {
 
 def AssignOp : Rise_Op<"codegen.assign"> {
   let summary = "rise assign";
-  let description =
-      "The codegen.assign operation models an assignment of value to assignee.";
+  let description = "The codegen.assign operation models an assignment of "
+                    "value to assignee.";
   let arguments = (ins AnyType : $value, AnyType : $assignee);
 }
 

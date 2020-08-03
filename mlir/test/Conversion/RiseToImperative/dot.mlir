@@ -2,44 +2,46 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<f32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>)  {
+    rise.lowering_unit {
+        //Arrays
+        %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
+        %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
 
-    //Arrays
-    %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
-    %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
+        //Zipping
+        %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %zippedArrays = rise.apply %zipFun, %array0, %array1
 
-    //Zipping
-    %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-    %zippedArrays = rise.apply %zipFun, %array0, %array1
+        //Multiply
+        %tupleMulFun = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
+            %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+            %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
-    //Multiply
-    %tupleMulFun = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
-        %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
-        %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
+            %fst = rise.apply %fstFun, %floatTuple
+            %snd = rise.apply %sndFun, %floatTuple
+            %result = rise.embed(%fst, %snd) {
+                %result = mulf %fst, %snd : f32
+                rise.return %result : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
 
-        %fst = rise.apply %fstFun, %floatTuple
-        %snd = rise.apply %sndFun, %floatTuple
-        %result = rise.embed(%fst, %snd) {
-            %result = mulf %fst, %snd : f32
-            rise.return %result : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
+        %map10TuplesToInts = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+        %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
+
+        //Reduction
+        %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
+            %result = rise.embed(%summand0, %summand1) {
+                   %result = addf %summand0, %summand1 : f32
+                   rise.return %result : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
+        %initializer = rise.literal #rise.lit<0.0>
+        %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
+        rise.out %outArg <- %result
+        rise.return
     }
-
-    %map10TuplesToInts = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-    %multipliedArray = rise.apply %map10TuplesToInts, %tupleMulFun, %zippedArrays
-
-    //Reduction
-    %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
-        %result = rise.embed(%summand0, %summand1) {
-               %result = addf %summand0, %summand1 : f32
-               rise.return %result : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
-    }
-    %initializer = rise.literal #rise.lit<0.0>
-    %reduce10Ints = rise.reduceSeq #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-    %result = rise.apply %reduce10Ints, %reductionAdd, %initializer, %multipliedArray
-    rise.out %outArg <- %result
     return
 }
 

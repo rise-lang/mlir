@@ -116,6 +116,29 @@ void EmbedOp::build(
 }
 
 //===----------------------------------------------------------------------===//
+// LoweringUnitOp
+//===----------------------------------------------------------------------===//
+LogicalResult parseLoweringUnitOp(OpAsmParser &parser, OperationState &result) {
+  Region *body = result.addRegion();
+  if (failed(parser.parseRegion(*body, {}, {}, false)))
+    return failure();
+
+  return success();
+}
+void LoweringUnitOp::build(
+    OpBuilder &builder, OperationState &result,
+    function_ref<void(OpBuilder &, Location)> bodyBuilder) {
+  Region *embedRegion = result.addRegion();
+  Block *body = new Block();
+  embedRegion->push_back(body);
+
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointToStart(body);
+  bodyBuilder(builder, result.location);
+  builder.create<rise::ReturnOp>(result.location, ValueRange{});
+}
+
+//===----------------------------------------------------------------------===//
 // InOp
 //===----------------------------------------------------------------------===//
 LogicalResult parseInOp(OpAsmParser &parser, OperationState &result) {
@@ -223,6 +246,23 @@ void LambdaOp::build(
   } else {
     builder.create<rise::ReturnOp>(result.location, ValueRange{});
   }
+}
+
+LogicalResult verifyLambdaOp(LambdaOp op) {
+  if (!op.getResult().getType().isa<FunType>())
+    return op.emitError("result must be funType, but got")
+           << op.getResult().getType();
+  if (!llvm::hasNItems(op.region(), 1))
+    return op.emitError() << "region must have exactly 1 block";
+  Type returnType = op.getType().dyn_cast<FunType>().getOutput();
+  while (returnType.isa<FunType>()) {
+    returnType = returnType.dyn_cast<FunType>().getOutput();
+  }
+  if (op.region().front().getTerminator()->getOperand(0).getType() !=
+      returnType)
+    return op.emitError() << "return type does not match funType";
+
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -598,12 +638,12 @@ LogicalResult parseReturnOp(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::OperandType value;
   Type type;
 
-  // return value
-  if (failed(parser.parseOperand(value)) ||
-      failed(parser.parseColonType(type)) ||
-      failed(parser.resolveOperand(value, type, result.operands)))
-    failure();
-
+  if (parser.parseOptionalOperand(value).hasValue()) {
+    if (failed(parser.parseColonType(type)) ||
+        failed(parser.resolveOperand(value, type, result.operands)))
+      failure();
+    return success();
+  }
   return success();
 }
 

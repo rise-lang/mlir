@@ -3,6 +3,7 @@
 func @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
+    rise.lowering_unit {
         %array = rise.in %in : !rise.array<6, scalar<f32>>
 
         %split = rise.split #rise.nat<2> #rise.nat<3> #rise.scalar<f32>
@@ -26,7 +27,9 @@ func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
         %join = rise.join #rise.nat<3> #rise.nat<2> #rise.scalar<f32>
         %flattened = rise.apply %join, %res
         rise.out %outArg <- %flattened
-        return
+        rise.return
+    }
+    return
 }
 
 func @array_times_2() {

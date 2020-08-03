@@ -2,28 +2,31 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
-    %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
-    %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
+    rise.lowering_unit {
+        %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
+        %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
 
-    %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-    %zipped = rise.apply %zipFun, %array0, %array1
+        %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %zipped = rise.apply %zipFun, %array0, %array1
 
-    %tupleAddFun = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
-        %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
-        %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
+        %tupleAddFun = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
+            %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+            %sndFun = rise.snd #rise.scalar<f32> #rise.scalar<f32>
 
-        %fst = rise.apply %fstFun, %floatTuple
-        %snd = rise.apply %sndFun, %floatTuple
-        %result = rise.embed(%fst, %snd) {
-            %result = addf %fst, %snd : f32
-            rise.return %result : f32
-        } : !rise.scalar<f32>
-        rise.return %result : !rise.scalar<f32>
+            %fst = rise.apply %fstFun, %floatTuple
+            %snd = rise.apply %sndFun, %floatTuple
+            %result = rise.embed(%fst, %snd) {
+                %result = addf %fst, %snd : f32
+                rise.return %result : f32
+            } : !rise.scalar<f32>
+            rise.return %result : !rise.scalar<f32>
+        }
+
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+        %sumArray = rise.apply %mapFun, %tupleAddFun, %zipped
+        rise.out %outArg <- %sumArray
+        rise.return
     }
-
-    %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-    %sumArray = rise.apply %mapFun, %tupleAddFun, %zipped
-    rise.out %outArg <- %sumArray
     return
 }
 func @simple_add_tuples() {

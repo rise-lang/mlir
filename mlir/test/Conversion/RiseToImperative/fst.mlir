@@ -2,21 +2,24 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
-    %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
-    %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
+    rise.lowering_unit {
+        %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
+        %array1 = rise.in %inArg1 : !rise.array<4, scalar<f32>>
 
-    %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
-    %zipped = rise.apply %zipFun, %array0, %array1
+        %zipFun = rise.zip #rise.nat<4> #rise.scalar<f32> #rise.scalar<f32>
+        %zipped = rise.apply %zipFun, %array0, %array1
 
-    %projectToFirst = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
-        %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
-        %fst = rise.apply %fstFun, %floatTuple
-        rise.return %fst : !rise.scalar<f32>
+        %projectToFirst = rise.lambda (%floatTuple : !rise.tuple<scalar<f32>, scalar<f32>>) -> !rise.scalar<f32> {
+            %fstFun = rise.fst #rise.scalar<f32> #rise.scalar<f32>
+            %fst = rise.apply %fstFun, %floatTuple
+            rise.return %fst : !rise.scalar<f32>
+        }
+
+        %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+        %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
+        rise.out %outArg <- %fstArray
+        rise.return
     }
-
-    %mapFun = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
-    %fstArray = rise.apply %mapFun, %projectToFirst, %zipped
-    rise.out %outArg <- %fstArray
     return
 }
 

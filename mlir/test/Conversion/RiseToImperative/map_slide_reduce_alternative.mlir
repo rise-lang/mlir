@@ -2,33 +2,35 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<9x7xf32>, %inA:memref<9x9xf32>) {
+    rise.lowering_unit {
+        %A = rise.in %inA : !rise.array<9, array<9, scalar<f32>>>
 
-    %A = rise.in %inA : !rise.array<9, array<9, scalar<f32>>>
+        %mapLambda = rise.lambda (%array : !rise.array<9, scalar<f32>>) -> !rise.array<7, scalar<f32>> {
+            %slide = rise.slide #rise.nat<7> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
+            %slizzled = rise.apply %slide, %array
 
-    %mapLambda = rise.lambda (%array : !rise.array<9, scalar<f32>>) -> !rise.array<7, scalar<f32>> {
-        %slide = rise.slide #rise.nat<7> #rise.nat<3> #rise.nat<1> #rise.scalar<f32> // what does n here mean?
-        %slizzled = rise.apply %slide, %array
-
-        %reduceWindow = rise.lambda (%window : !rise.array<3, scalar<f32>>) -> !rise.scalar<f32> {
-            %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
-                %result = rise.embed(%summand0, %summand1) {
-                    %result = addf %summand0, %summand1 : f32
-                    rise.return %result : f32
-                } : !rise.scalar<f32>
+            %reduceWindow = rise.lambda (%window : !rise.array<3, scalar<f32>>) -> !rise.scalar<f32> {
+                %reductionAdd = rise.lambda (%summand0 : !rise.scalar<f32>, %summand1 : !rise.scalar<f32>) -> !rise.scalar<f32> {
+                    %result = rise.embed(%summand0, %summand1) {
+                        %result = addf %summand0, %summand1 : f32
+                        rise.return %result : f32
+                    } : !rise.scalar<f32>
+                    rise.return %result : !rise.scalar<f32>
+                }
+                %initializer = rise.literal #rise.lit<0.0>
+                %reduce = rise.reduceSeq #rise.nat<3> #rise.scalar<f32> #rise.scalar<f32>
+                %result = rise.apply %reduce, %reductionAdd, %initializer, %window
                 rise.return %result : !rise.scalar<f32>
             }
-            %initializer = rise.literal #rise.lit<0.0>
-            %reduce = rise.reduceSeq #rise.nat<3> #rise.scalar<f32> #rise.scalar<f32>
-            %result = rise.apply %reduce, %reductionAdd, %initializer, %window
-            rise.return %result : !rise.scalar<f32>
+            %mapReduce = rise.mapSeq {to = "affine"}  #rise.nat<7> #rise.array<3, scalar<f32>> #rise.scalar<f32>
+            %result = rise.apply %mapReduce, %reduceWindow, %slizzled
+            rise.return %result : !rise.array<7, scalar<f32>>
         }
-        %mapReduce = rise.mapSeq {to = "affine"}  #rise.nat<7> #rise.array<3, scalar<f32>> #rise.scalar<f32>
-        %result = rise.apply %mapReduce, %reduceWindow, %slizzled
-        rise.return %result : !rise.array<7, scalar<f32>>
+        %mapOuter = rise.mapSeq {to = "affine"}  #rise.nat<9> #rise.array<9, scalar<f32>> #rise.array<7, scalar<f32>>
+        %result = rise.apply %mapOuter, %mapLambda, %A
+        rise.out %outArg <- %result
+        rise.return
     }
-    %mapOuter = rise.mapSeq {to = "affine"}  #rise.nat<9> #rise.array<9, scalar<f32>> #rise.array<7, scalar<f32>>
-    %result = rise.apply %mapOuter, %mapLambda, %A
-    rise.out %outArg <- %result
     return
 }
 func @rtclock() -> (f64)

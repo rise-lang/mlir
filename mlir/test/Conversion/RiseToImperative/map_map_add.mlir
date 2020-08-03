@@ -2,6 +2,7 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4xf32>, %inArg:memref<4x4xf32>) {
+    rise.lowering_unit {
         %array2D = rise.in %inArg : !rise.array<4, array<4, scalar<f32>>>
         %mapInnerLambda = rise.lambda (%arraySlice : !rise.array<4, scalar<f32>>) -> !rise.array<4, scalar<f32>> {
            %doubleFun = rise.lambda (%summand : !rise.scalar<f32>) -> !rise.scalar<f32> {
@@ -18,7 +19,9 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inArg:memref<4x4xf32>) {
         %map1 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
         %res = rise.apply %map1, %mapInnerLambda, %array2D
         rise.out %outArg <- %res
-        return
+        rise.return
+    }
+    return
 }
 func @mapMapId() {
 
