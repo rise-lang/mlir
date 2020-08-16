@@ -248,6 +248,28 @@ void LambdaOp::build(
   }
 }
 
+void LambdaOp::build(
+    OpBuilder &builder, OperationState &result, ArrayRef<Type> inputTypes,
+    function_ref<Value(OpBuilder &, Location, MutableArrayRef<BlockArgument>)>
+        bodyBuilder) {
+
+  Region *lambdaRegion = result.addRegion();
+  Block *body = new Block();
+
+  for (Type type : inputTypes) {
+    body->addArgument(type);
+  }
+  lambdaRegion->push_back(body);
+
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointToStart(body);
+  Value returnValue =
+      bodyBuilder(builder, result.location, body->getArguments());
+  builder.create<rise::ReturnOp>(returnValue.getLoc(), ValueRange{returnValue});
+  returnValue.dump();
+  result.addTypes(returnValue.getType());
+}
+
 LogicalResult verifyLambdaOp(LambdaOp op) {
   if (!op.getResult().getType().isa<FunType>())
     return op.emitError("result must be funType, but got")

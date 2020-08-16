@@ -146,6 +146,33 @@ void mlir::edsc::op::lowering_unit(function_ref<void()> bodyBuilder) {
 // Rise Operations: Patterns
 //===----------------------------------------------------------------------===//
 
+Value mlir::edsc::op::mapSeq(function_ref<Value(BlockArgument)> bodyBuilder,
+                             Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  auto fun = lambda({array.getType()}, bodyBuilder);
+//  fun.dump();
+  rise::ReturnOp lambdaReturnOp =
+      dyn_cast<rise::ReturnOp>(dyn_cast<LambdaOp>(fun.getDefiningOp())
+                                   .region()
+                                   .front()
+                                   .getTerminator());
+
+//  lambdaReturnOp.getOperand(0).dump();
+  if( lambdaReturnOp.getOperand(0).getType() == ArrayType()) {
+    lambdaReturnOp.dump();
+    emitError(array.getLoc()) << lambdaReturnOp.getOperand(0).getType().getSubclassData();
+
+    lambdaReturnOp.getOperand(0).dump();
+
+  }
+
+//  DataType t = *lambdaReturnOp.operand_type_begin();
+
+//  auto t = lambdaReturnOp.getOp;
+//  t->dump();
+//  return mapSeq("affine", arrayT.getElementType(), t, fun, array);
+}
+
 Value mlir::edsc::op::mapSeq(DataType t,
                              function_ref<Value(BlockArgument)> bodyBuilder,
                              Value array) {
@@ -353,6 +380,17 @@ Value mlir::edsc::abstraction::multAndSumUpLambda(ScalarType summandType) {
 //===----------------------------------------------------------------------===//
 // Rise other convenience EDSC
 //===----------------------------------------------------------------------===//
+
+Value mlir::edsc::op::lambda(ArrayRef<Type> inputTypes,
+                             function_ref<Value(BlockArgument)> bodyBuilder) {
+  return ValueBuilder<LambdaOp>(
+      inputTypes, [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                      MutableArrayRef<BlockArgument> args) {
+        ScopedContext nestedContext(nestedBuilder, nestedLoc);
+        OpBuilder::InsertionGuard guard(nestedBuilder);
+        return bodyBuilder(args[0]);
+      });
+}
 
 // one arg
 Value mlir::edsc::op::lambda1(FunType lambdaType,

@@ -84,10 +84,16 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let regions = (region SizedRegion<1> : $region);
   let results = (outs FunType : $lambdaType);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
-                            "FunType lambdaType, function_ref<Value(OpBuilder "
-                            "&, Location, MutableArrayRef<BlockArgument>)> "
-                            "bodyBuilder = nullptr">];
+  let builders = [
+    OpBuilder<"OpBuilder &builder, OperationState &result, "
+              "FunType lambdaType, function_ref<Value(OpBuilder "
+              "&, Location, MutableArrayRef<BlockArgument>)> "
+              "bodyBuilder = nullptr">,
+    OpBuilder<
+        "OpBuilder &builder, OperationState &result, ArrayRef<Type> inputTypes,"
+        "function_ref<Value(OpBuilder &, Location, "
+        "MutableArrayRef<BlockArgument>)> bodyBuilder">
+  ];
   let parser = [{ return parse$cppClass(parser, result); }];
   let verifier = [{ return verify$cppClass(*this); }];
 }
@@ -168,7 +174,7 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
   let description = "This operation is used as a terminator for the region of "
                     "a rise.lambda and "
                     "rise.embed.";
-  let arguments = (ins Variadic<AnyType> : $operands);
+  let arguments = (ins Variadic<DataType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
   let builders = [OpBuilder<"OpBuilder &b, OperationState &result",
                             [{ build(b, result, llvm::None); }]>];

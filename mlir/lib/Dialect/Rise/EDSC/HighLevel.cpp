@@ -68,8 +68,7 @@ Value mlir::edsc::highlevel::stencil(int N, int windowSize, int step,
   Value padded = padClamp(natType(padl), natType(padr), input);
   Value windowed = slide(natType(windowSize), natType(1), padded);
 
-  return mapSeq(
-      "scf", scalarF32Type(),
+  return mapSeq("scf", scalarF32Type(),
       [&](Value window) {
         return (reduceSeq("scf", scalarF32Type(), sumLambda(scalarF32Type()),
                           literal(scalarF32Type(), "0.000000"), window));

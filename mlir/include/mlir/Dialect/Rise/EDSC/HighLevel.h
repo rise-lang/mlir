@@ -125,7 +125,17 @@ void makeRiseTest(FuncOp riseFun,
                                       Targs... inputs) {
   Value output = std_alloc(MemRefType::get(outputShape, FloatType::getF32(ScopedContext::getContext()), {}, 0));
   std::tuple<T, Targs...> tuple = std::make_tuple(input, inputs...);
-  std_call(riseFun, ValueRange{input, inputs..., output});
+
+  Value cst0 = std_constant_index(0);
+  Value step = std_constant_index(1);
+  Value repetitions = std_constant_index(100);
+  loopNestBuilder(cst0, repetitions, step, [&](auto ivs) {
+    Value t0 = std_call("rtclock", ArrayRef<Type>{FloatType::getF64(ScopedContext::getContext())}).op.getResult(0);
+    std_call(riseFun, ValueRange{input, inputs..., output});
+    Value t1 = std_call("rtclock", ArrayRef<Type>{FloatType::getF64(ScopedContext::getContext())}).op.getResult(0);
+    std_call("print_time", ArrayRef<Type>(), ValueRange{t0, t1});
+  });
+
   for_each(tuple, [&](Value elem){
     Value casted = std_memref_cast(elem, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{casted});

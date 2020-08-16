@@ -138,7 +138,7 @@ public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
 
-  /// This method is used to get an instance of ArrayType.
+  /// This method is used to get an instance of ScalarType.
   static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
 
   /// Support method to enable LLVM-style RTTI type casting.
