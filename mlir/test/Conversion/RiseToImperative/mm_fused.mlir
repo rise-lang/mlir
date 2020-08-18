@@ -57,7 +57,7 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
     return
 }
 func @rtclock() -> (f64)
-func @print_flops(f64,f64,i64)
+func @print_time(f64,f64)
 func @mm() {
     //prepare output Array
     %outputArray = alloc() : memref<2048x2048xf32>
@@ -104,6 +104,6 @@ func @mm() {
     %print_me = memref_cast %outputArray : memref<2048x2048xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
 
-    call @print_flops(%t0, %t1, %ci1): (f64,f64,i64) -> ()
+    call @print_time(%t0, %t1): (f64,f64) -> ()
     return
 }

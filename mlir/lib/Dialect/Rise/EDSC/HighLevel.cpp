@@ -51,7 +51,7 @@ Value mlir::edsc::highlevel::matrix_multiplication(int M, int N, int K, Value A,
         return (embed3(elementType, ValueRange{fst(elementType, elementType, tuple),
                                                snd(elementType, elementType, tuple), acc},
                        [&](Value fst, Value snd, Value acc){
-                         return acc * (fst + snd);
+                         return acc + (fst * snd);
                        }));
       },literal(elementType, "0.000000"), zip(arowType.getSize(), elementType, elementType, arow, bcol)));
     }, transpose(B)));

@@ -174,7 +174,7 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
   let description = "This operation is used as a terminator for the region of "
                     "a rise.lambda and "
                     "rise.embed.";
-  let arguments = (ins Variadic<DataType> : $operands);
+  let arguments = (ins Variadic<AnyType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
   let builders = [OpBuilder<"OpBuilder &b, OperationState &result",
                             [{ build(b, result, llvm::None); }]>];

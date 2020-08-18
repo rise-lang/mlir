@@ -128,7 +128,7 @@ void makeRiseTest(FuncOp riseFun,
 
   Value cst0 = std_constant_index(0);
   Value step = std_constant_index(1);
-  Value repetitions = std_constant_index(100);
+  Value repetitions = std_constant_index(300);
   loopNestBuilder(cst0, repetitions, step, [&](auto ivs) {
     Value t0 = std_call("rtclock", ArrayRef<Type>{FloatType::getF64(ScopedContext::getContext())}).op.getResult(0);
     std_call(riseFun, ValueRange{input, inputs..., output});

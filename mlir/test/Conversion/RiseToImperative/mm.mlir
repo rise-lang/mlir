@@ -1,6 +1,8 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MM
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so  | FileCheck %s --check-prefix=MM
 
 func @print_memref_f32(memref<*xf32>)
+func @rtclock() -> (f64)
+func @print_flopso(f64,f64,i64)
 func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf32>) {
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<4, array<4, scalar<f32>>>
@@ -67,10 +69,16 @@ func @mm() {
     %cst_1 = constant 5.000000e+00 : f32
     linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
 
+    %t0 = call @rtclock() : () -> (f64)
     call @rise_fun(%outputArray, %A, %B) : (memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>) -> ()
+    %t1 = call @rtclock() : () -> (f64)
+    %ci1 = constant 0 : i64 // Number of flops to compute
 
     %print_me = memref_cast %outputArray : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
+
+    call @print_flopso(%t0, %t1, %ci1): (f64,f64,i64) -> ()
+
     return
 }
 // MM: Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [4, 4] strides = [4, 1] data =
