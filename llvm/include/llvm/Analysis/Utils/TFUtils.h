@@ -9,9 +9,11 @@
 #ifndef LLVM_ANALYSIS_UTILS_TFUTILS_H
 #define LLVM_ANALYSIS_UTILS_TFUTILS_H
 
+#include "llvm/Config/llvm-config.h"
+
 #ifdef LLVM_HAVE_TF_API
-#include "tensorflow/c/c_api.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/Support/JSON.h"
 
 #include <memory>
 #include <vector>
@@ -29,54 +31,105 @@ namespace llvm {
 /// - set input values by using getInput to get each input tensor, and then
 ///   setting internal scalars, for all dimensions (tensors are row-major:
 ///   https://github.com/tensorflow/tensorflow/blob/r1.5/tensorflow/c/c_api.h#L205)
-/// - prepare an output vector of TF_Output* type, with the correct number of
-/// outputs (i.e. same as OutputNames). Initialize the vector with nullptr
-/// values.
 /// - call evaluate. The input tensors' values are not consumed after this, and
 ///   may still be read.
 /// - use the outputs in the output vector
-/// - deallocate each output tensor in the output vector, using TF_DeleteTensor.
+class TFModelEvaluatorImpl;
+class EvaluationResultImpl;
+
+/// TensorSpec encapsulates the specification of a tensor: its dimensions, or
+/// "shape" (row-major), its type (see TensorSpec::getDataType specializations
+/// for supported types), its name and port (see "TensorFlow: Large-Scale
+/// Machine Learning on Heterogeneous Distributed Systems", section 4.2, para 2:
+/// https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/45166.pdf)
+///
+/// TensorSpec is used to set up a TFModelEvaluator by describing the expected
+/// inputs and outputs.
+class TensorSpec final {
+public:
+  template <typename T>
+  static TensorSpec createSpec(const std::string &Name,
+                               const std::vector<int64_t> &Shape,
+                               int Port = 0) {
+    return TensorSpec(Name, Port, getDataType<T>(), Shape);
+  }
+
+  const std::string &name() const { return Name; }
+  int port() const { return Port; }
+  int typeIndex() const { return TypeIndex; }
+  const std::vector<int64_t> &shape() const { return Shape; }
+
+  bool operator==(const TensorSpec &Other) const {
+    return Name == Other.Name && Port == Other.Port &&
+           TypeIndex == Other.TypeIndex && Shape == Other.Shape;
+  }
+
+  bool operator!=(const TensorSpec &Other) const { return !(*this == Other); }
+
+  /// Get the number of elements in a tensor with this shape.
+  size_t getElementCount() const { return ElementCount; }
+  /// Get the size, in bytes, of one element.
+  size_t getElementByteSize() const;
+
+  template <typename T> bool isElementType() const {
+    return getDataType<T>() == TypeIndex;
+  }
+
+private:
+  TensorSpec(const std::string &Name, int Port, int TypeIndex,
+             const std::vector<int64_t> &Shape);
+
+  template <typename T> static int getDataType() {
+    llvm_unreachable("Undefined tensor type");
+  }
+
+  std::string Name;
+  int Port = 0;
+  int TypeIndex = 0;
+  std::vector<int64_t> Shape;
+  size_t ElementCount = 0;
+};
+
+Optional<TensorSpec> getTensorSpecFromJSON(LLVMContext &Ctx,
+                                           const json::Value &Value);
+
 class TFModelEvaluator final {
 public:
   /// The result of a model evaluation. Handles the lifetime of the output
-  /// TF_Tensor objects, which means that their values need to be used before
+  /// tensors, which means that their values need to be used before
   /// the EvaluationResult's dtor is called.
   class EvaluationResult {
   public:
-    ~EvaluationResult() {
-      for (auto *P : Output)
-        if (P)
-          TF_DeleteTensor(P);
-    }
-
     EvaluationResult(const EvaluationResult &) = delete;
-    EvaluationResult(EvaluationResult &&Other)
-        : OutputSize(Other.OutputSize), Output(std::move(Other.Output)) {
-      Other.Output.clear();
-    };
+    EvaluationResult &operator=(const EvaluationResult &Other) = delete;
 
-    /// Get a pointer to the first element of the tensor at Index.
+    EvaluationResult(EvaluationResult &&Other);
+    EvaluationResult &operator=(EvaluationResult &&Other);
+
+    ~EvaluationResult();
+
+    /// Get a (const) pointer to the first element of the tensor at Index.
     template <typename T> T *getTensorValue(size_t Index) {
-      return static_cast<T *>(TF_TensorData(Output[Index]));
+      return static_cast<T *>(getUntypedTensorValue(Index));
     }
+
+    template <typename T> const T *getTensorValue(size_t Index) const {
+      return static_cast<T *>(getUntypedTensorValue(Index));
+    }
+
+    /// Get a (const) pointer to the untyped data of the tensor.
+    void *getUntypedTensorValue(size_t Index);
+    const void *getUntypedTensorValue(size_t Index) const;
 
   private:
     friend class TFModelEvaluator;
-    EvaluationResult(size_t OutputSize)
-        : OutputSize(OutputSize), Output(OutputSize){};
-
-    const size_t OutputSize;
-    std::vector<TF_Tensor *> Output;
+    EvaluationResult(std::unique_ptr<EvaluationResultImpl> Impl);
+    std::unique_ptr<EvaluationResultImpl> Impl;
   };
 
-  using TFGraphPtr = std::unique_ptr<TF_Graph, decltype(&TF_DeleteGraph)>;
-  using TFSessionOptionsPtr =
-      std::unique_ptr<TF_SessionOptions, decltype(&TF_DeleteSessionOptions)>;
-  using TFStatusPtr = std::unique_ptr<TF_Status, decltype(&TF_DeleteStatus)>;
-
   TFModelEvaluator(StringRef SavedModelPath,
-                   const std::vector<std::string> &InputNames,
-                   const std::vector<std::string> &OutputNames,
+                   const std::vector<TensorSpec> &InputSpecs,
+                   const std::vector<TensorSpec> &OutputSpecs,
                    const char *Tags = "serve");
   ~TFModelEvaluator();
   TFModelEvaluator(const TFModelEvaluator &) = delete;
@@ -85,53 +138,45 @@ public:
   /// Evaluate the model, assuming it is valid. Returns None if the evaluation
   /// fails or the model is invalid, or an EvaluationResult otherwise. The
   /// inputs are assumed to have been already provided via getInput(). When
-  /// returning None, it also marks the object invalid. Pass an Output vector
-  /// with the same size as OutputNames, but with nullptr values. evaluate()
-  /// will populate it with tensors, matching in index the corresponding
-  /// OutputNames. The caller is responsible for the deallocation of those
-  /// tensors, using TF_DeleteTensor.
+  /// returning None, it also invalidates this object.
   Optional<EvaluationResult> evaluate();
 
-  /// Provides access to the input vector. It is already dimensioned correctly,
-  /// but the values need to be allocated by the user.
-  std::vector<TF_Tensor *> &getInput() { return Input; }
+  /// Provides access to the input vector.
+  template <typename T> T *getInput(size_t Index) {
+    return static_cast<T *>(getUntypedInput(Index));
+  }
 
   /// Returns true if the tensorflow model was loaded successfully, false
   /// otherwise.
-  bool isValid() const { return !!Session; }
-
-  /// Initialize the input at Index as a tensor of the given type and dimensions
-  void initInput(int Index, TF_DataType Type,
-                 const std::vector<int64_t> &Dimensions);
+  bool isValid() const { return !!Impl; }
 
 private:
-  /// The objects necessary for carrying out an evaluation of the SavedModel.
-  /// They are expensive to set up, and we maintain them accross all the
-  /// evaluations of the model.
-  TF_Session *Session = nullptr;
-  TFGraphPtr Graph;
-  TFSessionOptionsPtr Options;
-
-  /// The specification of the input nodes.
-  std::vector<TF_Output> InputFeed;
-
-  /// The input tensors. They must match by index of the corresponding InputFeed
-  /// value. We set up the tensors once and just mutate theirs scalars before
-  /// each evaluation. The input tensors keep their value after an evaluation.
-  std::vector<TF_Tensor *> Input;
-
-  /// The specification of the output nodes. When evaluating, the tensors in the
-  /// output tensor vector must match by index the corresponding element in the
-  /// OutputFeed.
-  std::vector<TF_Output> OutputFeed;
-
-  /// Reusable utility for deleting the session.
-  void deleteSession();
-
-  /// Reusable utility for ensuring we can bind the requested Name to a node in
-  /// the SavedModel Graph.
-  bool checkReportAndReset(const TF_Output &Output, StringRef Name);
+  void *getUntypedInput(size_t Index);
+  std::unique_ptr<TFModelEvaluatorImpl> Impl;
 };
+
+/// List of supported types, as a triple:
+/// C++ type
+/// short name (for strings, for instance)
+/// capitalized short name (for enums, for instance)
+#define TFUTILS_SUPPORTED_TYPES(M)                                             \
+  M(float, float, FLOAT)                                                       \
+  M(double, double, DOUBLE)                                                    \
+  M(int8_t, int8, INT8)                                                        \
+  M(uint8_t, uint8, UINT8)                                                     \
+  M(int16_t, int16, INT16)                                                     \
+  M(uint16_t, uint16, UINT16)                                                  \
+  M(int32_t, int32, INT32)                                                     \
+  M(uint32_t, uint32, UINT32)                                                  \
+  M(int64_t, int64, INT64)                                                     \
+  M(uint64_t, uint64, UINT64)
+
+#define TFUTILS_GETDATATYPE_DEF(T, S, C)                                       \
+  template <> int TensorSpec::getDataType<T>();
+
+TFUTILS_SUPPORTED_TYPES(TFUTILS_GETDATATYPE_DEF)
+
+#undef TFUTILS_GETDATATYPE_DEF
 } // namespace llvm
 
 #endif // LLVM_HAVE_TF_API

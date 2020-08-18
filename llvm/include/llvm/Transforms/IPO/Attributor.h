@@ -97,29 +97,35 @@
 #ifndef LLVM_TRANSFORMS_IPO_ATTRIBUTOR_H
 #define LLVM_TRANSFORMS_IPO_ATTRIBUTOR_H
 
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Analysis/CallGraph.h"
-#include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/AbstractCallSite.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/Allocator.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/DOTGraphTraits.h"
+#include "llvm/Support/GraphWriter.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Transforms/Utils/CallGraphUpdater.h"
 
 namespace llvm {
 
+struct AADepGraphNode;
+struct AADepGraph;
 struct Attributor;
 struct AbstractAttribute;
 struct InformationCache;
@@ -143,6 +149,74 @@ enum class DepClassTy {
   OPTIONAL,
 };
 ///}
+
+/// The data structure for the nodes of a dependency graph
+struct AADepGraphNode {
+public:
+  virtual ~AADepGraphNode(){};
+  using DepTy = PointerIntPair<AADepGraphNode *, 1>;
+
+protected:
+  /// Set of dependency graph nodes which should be updated if this one
+  /// is updated. The bit encodes if it is optional.
+  TinyPtrVector<DepTy> Deps;
+
+  static AADepGraphNode *DepGetVal(DepTy &DT) { return DT.getPointer(); }
+  static AbstractAttribute *DepGetValAA(DepTy &DT) {
+    return cast<AbstractAttribute>(DT.getPointer());
+  }
+
+  operator AbstractAttribute *() { return cast<AbstractAttribute>(this); }
+
+public:
+  using iterator =
+      mapped_iterator<TinyPtrVector<DepTy>::iterator, decltype(&DepGetVal)>;
+  using aaiterator =
+      mapped_iterator<TinyPtrVector<DepTy>::iterator, decltype(&DepGetValAA)>;
+
+  aaiterator begin() { return aaiterator(Deps.begin(), &DepGetValAA); }
+  aaiterator end() { return aaiterator(Deps.end(), &DepGetValAA); }
+  iterator child_begin() { return iterator(Deps.begin(), &DepGetVal); }
+  iterator child_end() { return iterator(Deps.end(), &DepGetVal); }
+
+  virtual void print(raw_ostream &OS) const { OS << "AADepNode Impl\n"; }
+  TinyPtrVector<DepTy> &getDeps() { return Deps; }
+
+  friend struct Attributor;
+  friend struct AADepGraph;
+};
+
+/// The data structure for the dependency graph
+///
+/// Note that in this graph if there is an edge from A to B (A -> B),
+/// then it means that B depends on A, and when the state of A is
+/// updated, node B should also be updated
+struct AADepGraph {
+  AADepGraph() {}
+  ~AADepGraph() {}
+
+  using DepTy = AADepGraphNode::DepTy;
+  static AADepGraphNode *DepGetVal(DepTy &DT) { return DT.getPointer(); }
+  using iterator =
+      mapped_iterator<TinyPtrVector<DepTy>::iterator, decltype(&DepGetVal)>;
+
+  /// There is no root node for the dependency graph. But the SCCIterator
+  /// requires a single entry point, so we maintain a fake("synthetic") root
+  /// node that depends on every node.
+  AADepGraphNode SyntheticRoot;
+  AADepGraphNode *GetEntryNode() { return &SyntheticRoot; }
+
+  iterator begin() { return SyntheticRoot.child_begin(); }
+  iterator end() { return SyntheticRoot.child_end(); }
+
+  void viewGraph();
+
+  /// Dump graph to file
+  void dumpGraph();
+
+  /// Print dependency graph
+  void print();
+};
 
 /// Helper to describe and deal with positions in the LLVM-IR.
 ///
@@ -715,6 +789,21 @@ struct InformationCache {
   /// Return the map conaining all the knowledge we have from `llvm.assume`s.
   const RetainedKnowledgeMap &getKnowledgeMap() const { return KnowledgeMap; }
 
+  /// Return if \p To is potentially reachable form \p From or not
+  /// If the same query was answered, return cached result
+  bool getPotentiallyReachable(const Instruction &From, const Instruction &To) {
+    auto KeyPair = std::make_pair(&From, &To);
+    auto Iter = PotentiallyReachableMap.find(KeyPair);
+    if (Iter != PotentiallyReachableMap.end())
+      return Iter->second;
+    const Function &F = *From.getFunction();
+    bool Result = isPotentiallyReachable(
+        &From, &To, nullptr, AG.getAnalysis<DominatorTreeAnalysis>(F),
+        AG.getAnalysis<LoopAnalysis>(F));
+    PotentiallyReachableMap.insert(std::make_pair(KeyPair, Result));
+    return Result;
+  }
+
 private:
   struct FunctionInfo {
     ~FunctionInfo();
@@ -773,6 +862,10 @@ private:
 
   /// Set of inlineable functions
   SmallPtrSet<const Function *, 8> InlineableFunctions;
+
+  /// A map for caching results of queries for isPotentiallyReachable
+  DenseMap<std::pair<const Instruction *, const Instruction *>, bool>
+      PotentiallyReachableMap;
 
   /// Give the Attributor access to the members so
   /// Attributor::identifyDefaultAbstractAttributes(...) can initialize them.
@@ -915,8 +1008,10 @@ struct Attributor {
       return AA;
     }
 
-    AA.initialize(*this);
-
+    {
+      TimeTraceScope TimeScope(AA.getName() + "::initialize");
+      AA.initialize(*this);
+    }
     // We can initialize (=look at) code outside the current function set but
     // not call update because that would again spawn new abstract attributes in
     // potentially unconnected code regions (=SCCs).
@@ -1001,7 +1096,9 @@ struct Attributor {
     assert(!AAPtr && "Attribute already in map!");
     AAPtr = &AA;
 
-    AllAbstractAttributes.push_back(&AA);
+    DG.SyntheticRoot.Deps.push_back(
+        AADepGraphNode::DepTy(&AA, unsigned(DepClassTy::REQUIRED)));
+
     return AA;
   }
 
@@ -1363,12 +1460,6 @@ private:
   /// See getOrCreateAAFor.
   bool shouldSeedAttribute(AbstractAttribute &AA);
 
-  /// The set of all abstract attributes.
-  ///{
-  using AAVector = SmallVector<AbstractAttribute *, 64>;
-  AAVector AllAbstractAttributes;
-  ///}
-
   /// A nested map to lookup abstract attributes based on the argument position
   /// on the outer level, and the addresses of the static member (AAType::ID) on
   /// the inner level.
@@ -1389,6 +1480,9 @@ private:
 
   /// Helper to update an underlying call graph.
   CallGraphUpdater &CGUpdater;
+
+  /// Abstract Attribute dependency graph
+  AADepGraph DG;
 
   /// Set of functions for which we modified the content such that it might
   /// impact the call graph.
@@ -1439,6 +1533,8 @@ private:
   SmallPtrSet<BasicBlock *, 8> ToBeDeletedBlocks;
   SmallDenseSet<WeakVH, 8> ToBeDeletedInsts;
   ///}
+
+  friend AADepGraph;
 };
 
 /// An interface to query the internal state of an abstract attribute.
@@ -2011,13 +2107,21 @@ struct IRAttribute : public BaseType {
 ///       both directions will be added in the future.
 /// NOTE: The mechanics of adding a new "concrete" abstract attribute are
 ///       described in the file comment.
-struct AbstractAttribute : public IRPosition {
+struct AbstractAttribute : public IRPosition, public AADepGraphNode {
   using StateType = AbstractState;
 
   AbstractAttribute(const IRPosition &IRP) : IRPosition(IRP) {}
 
   /// Virtual destructor.
   virtual ~AbstractAttribute() {}
+
+  /// This function is used to identify if an \p DGN is of type
+  /// AbstractAttribute so that the dyn_cast and cast can use such information
+  /// to cast an AADepGraphNode to an AbstractAttribute.
+  ///
+  /// We eagerly return true here because all AADepGraphNodes except for the
+  /// Synthethis Node are of type AbstractAttribute
+  static bool classof(const AADepGraphNode *DGN) { return true; }
 
   /// Initialize the state with the information in the Attributor \p A.
   ///
@@ -2039,7 +2143,8 @@ struct AbstractAttribute : public IRPosition {
 
   /// Helper functions, for debug purposes only.
   ///{
-  virtual void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
+  virtual void printWithDeps(raw_ostream &OS) const;
   void dump() const { print(dbgs()); }
 
   /// This function should return the "summarized" assumed state as string.
@@ -2047,6 +2152,9 @@ struct AbstractAttribute : public IRPosition {
 
   /// This function should return the name of the AbstractAttribute
   virtual const std::string getName() const = 0;
+
+  /// This function should return the address of the ID of the AbstractAttribute
+  virtual const char *getIdAddr() const = 0;
   ///}
 
   /// Allow the Attributor access to the protected methods.
@@ -2084,12 +2192,6 @@ protected:
   ///
   /// \Return CHANGED if the internal state changed, otherwise UNCHANGED.
   virtual ChangeStatus updateImpl(Attributor &A) = 0;
-
-private:
-  /// Set of abstract attributes which were queried by this one. The bit encodes
-  /// if there is an optional of required dependence.
-  using DepTy = PointerIntPair<AbstractAttribute *, 1>;
-  TinyPtrVector<DepTy> Deps;
 };
 
 /// Forward declarations of output streams for debug purposes.
@@ -2164,6 +2266,15 @@ struct AAReturnedValues
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAReturnedValues"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAReturnedValues
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2185,6 +2296,14 @@ struct AANoUnwind
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoUnwind"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoUnwind
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2205,6 +2324,14 @@ struct AANoSync
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoSync"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoSync
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2228,6 +2355,14 @@ struct AANonNull
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANonNull"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANonNull
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2250,6 +2385,14 @@ struct AANoRecurse
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoRecurse"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoRecurse
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2271,6 +2414,14 @@ struct AAWillReturn
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAWillReturn"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AAWillReturn
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2301,6 +2452,15 @@ struct AAUndefinedBehavior
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAUndefinedBehavior"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAUndefineBehavior
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2313,16 +2473,17 @@ struct AAReachability : public StateWrapper<BooleanState, AbstractAttribute> {
   /// Returns true if 'From' instruction is assumed to reach, 'To' instruction.
   /// Users should provide two positions they are interested in, and the class
   /// determines (and caches) reachability.
-  bool isAssumedReachable(const Instruction *From,
-                          const Instruction *To) const {
-    return isPotentiallyReachable(From, To);
+  bool isAssumedReachable(Attributor &A, const Instruction &From,
+                          const Instruction &To) const {
+    return A.getInfoCache().getPotentiallyReachable(From, To);
   }
 
   /// Returns true if 'From' instruction is known to reach, 'To' instruction.
   /// Users should provide two positions they are interested in, and the class
   /// determines (and caches) reachability.
-  bool isKnownReachable(const Instruction *From, const Instruction *To) const {
-    return isPotentiallyReachable(From, To);
+  bool isKnownReachable(Attributor &A, const Instruction &From,
+                        const Instruction &To) const {
+    return A.getInfoCache().getPotentiallyReachable(From, To);
   }
 
   /// Create an abstract attribute view for the position \p IRP.
@@ -2331,6 +2492,15 @@ struct AAReachability : public StateWrapper<BooleanState, AbstractAttribute> {
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAReachability"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAReachability
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2354,6 +2524,14 @@ struct AANoAlias
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoAlias"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoAlias
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2376,6 +2554,14 @@ struct AANoFree
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoFree"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoFree
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2397,6 +2583,14 @@ struct AANoReturn
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoReturn"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoReturn
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2454,6 +2648,14 @@ public:
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAIsDead"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AAIsDead
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2648,6 +2850,15 @@ struct AADereferenceable
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AADereferenceable"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AADereferenceable
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2668,6 +2879,14 @@ struct AAAlign : public IRAttribute<
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAAlign"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AAAlign
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Create an abstract attribute view for the position \p IRP.
   static AAAlign &createForPosition(const IRPosition &IRP, Attributor &A);
@@ -2726,6 +2945,14 @@ struct AANoCapture
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AANoCapture"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AANoCapture
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2747,6 +2974,15 @@ struct AAValueSimplify : public StateWrapper<BooleanState, AbstractAttribute> {
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAValueSimplify"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAValueSimplify
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -2766,6 +3002,14 @@ struct AAHeapToStack : public StateWrapper<BooleanState, AbstractAttribute> {
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAHeapToStack"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is AAHeapToStack
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2802,6 +3046,15 @@ struct AAPrivatizablePtr
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAPrivatizablePtr"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAPricatizablePtr
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -2856,6 +3109,15 @@ struct AAMemoryBehavior
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAMemoryBehavior"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAMemoryBehavior
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;
@@ -3018,6 +3280,15 @@ struct AAMemoryLocation
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAMemoryLocation"; }
 
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAMemoryLocation
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
   /// Unique ID (due to the unique address)
   static const char ID;
 };
@@ -3065,6 +3336,225 @@ struct AAValueConstantRange
 
   /// See AbstractAttribute::getName()
   const std::string getName() const override { return "AAValueConstantRange"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAValueConstantRange
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
+
+  /// Unique ID (due to the unique address)
+  static const char ID;
+};
+
+/// A class for a set state.
+/// The assumed boolean state indicates whether the corresponding set is full
+/// set or not. If the assumed state is false, this is the worst state. The
+/// worst state (invalid state) of set of potential values is when the set
+/// contains every possible value (i.e. we cannot in any way limit the value
+/// that the target position can take). That never happens naturally, we only
+/// force it. As for the conditions under which we force it, see
+/// AAPotentialValues.
+template <typename MemberTy, typename KeyInfo = DenseMapInfo<MemberTy>>
+struct PotentialValuesState : AbstractState {
+  using SetTy = DenseSet<MemberTy, KeyInfo>;
+
+  PotentialValuesState() : IsValidState(true) {}
+
+  PotentialValuesState(bool IsValid) : IsValidState(IsValid) {}
+
+  /// See AbstractState::isValidState(...)
+  bool isValidState() const override { return IsValidState.isValidState(); }
+
+  /// See AbstractState::isAtFixpoint(...)
+  bool isAtFixpoint() const override { return IsValidState.isAtFixpoint(); }
+
+  /// See AbstractState::indicatePessimisticFixpoint(...)
+  ChangeStatus indicatePessimisticFixpoint() override {
+    return IsValidState.indicatePessimisticFixpoint();
+  }
+
+  /// See AbstractState::indicateOptimisticFixpoint(...)
+  ChangeStatus indicateOptimisticFixpoint() override {
+    return IsValidState.indicateOptimisticFixpoint();
+  }
+
+  /// Return the assumed state
+  PotentialValuesState &getAssumed() { return *this; }
+  const PotentialValuesState &getAssumed() const { return *this; }
+
+  /// Return this set. We should check whether this set is valid or not by
+  /// isValidState() before calling this function.
+  const SetTy &getAssumedSet() const {
+    assert(isValidState() && "This set shoud not be used when it is invalid!");
+    return Set;
+  }
+
+  bool operator==(const PotentialValuesState &RHS) const {
+    if (isValidState() != RHS.isValidState())
+      return false;
+    if (!isValidState() && !RHS.isValidState())
+      return true;
+    return Set == RHS.getAssumedSet();
+  }
+
+  /// Maximum number of potential values to be tracked.
+  /// This is set by -attributor-max-potential-values command line option
+  static unsigned MaxPotentialValues;
+
+  /// Return empty set as the best state of potential values.
+  static PotentialValuesState getBestState() {
+    return PotentialValuesState(true);
+  }
+
+  static PotentialValuesState getBestState(PotentialValuesState &PVS) {
+    return getBestState();
+  }
+
+  /// Return full set as the worst state of potential values.
+  static PotentialValuesState getWorstState() {
+    return PotentialValuesState(false);
+  }
+
+  /// Union assumed set with the passed value.
+  void unionAssumed(const MemberTy &C) { insert(C); }
+
+  /// Union assumed set with assumed set of the passed state \p PVS.
+  void unionAssumed(const PotentialValuesState &PVS) { unionWith(PVS); }
+
+  /// "Clamp" this state with \p PVS.
+  PotentialValuesState operator^=(const PotentialValuesState &PVS) {
+    IsValidState ^= PVS.IsValidState;
+    unionAssumed(PVS);
+    return *this;
+  }
+
+  PotentialValuesState operator&=(const PotentialValuesState &PVS) {
+    IsValidState &= PVS.IsValidState;
+    unionAssumed(PVS);
+    return *this;
+  }
+
+private:
+  /// Check the size of this set, and invalidate when the size is no
+  /// less than \p MaxPotentialValues threshold.
+  void checkAndInvalidate() {
+    if (Set.size() >= MaxPotentialValues)
+      indicatePessimisticFixpoint();
+  }
+
+  /// Insert an element into this set.
+  void insert(const MemberTy &C) {
+    if (!isValidState())
+      return;
+    Set.insert(C);
+    checkAndInvalidate();
+  }
+
+  /// Take union with R.
+  void unionWith(const PotentialValuesState &R) {
+    /// If this is a full set, do nothing.;
+    if (!isValidState())
+      return;
+    /// If R is full set, change L to a full set.
+    if (!R.isValidState()) {
+      indicatePessimisticFixpoint();
+      return;
+    }
+    for (const MemberTy &C : R.Set)
+      Set.insert(C);
+    checkAndInvalidate();
+  }
+
+  /// Take intersection with R.
+  void intersectWith(const PotentialValuesState &R) {
+    /// If R is a full set, do nothing.
+    if (!R.isValidState())
+      return;
+    /// If this is a full set, change this to R.
+    if (!isValidState()) {
+      *this = R;
+      return;
+    }
+    SetTy IntersectSet;
+    for (const MemberTy &C : Set) {
+      if (R.Set.count(C))
+        IntersectSet.insert(C);
+    }
+    Set = IntersectSet;
+  }
+
+  /// A helper state which indicate whether this state is valid or not.
+  BooleanState IsValidState;
+
+  /// Container for potential values
+  SetTy Set;
+};
+
+using PotentialConstantIntValuesState = PotentialValuesState<APInt>;
+
+raw_ostream &operator<<(raw_ostream &OS,
+                        const PotentialConstantIntValuesState &R);
+
+/// An abstract interface for potential values analysis.
+///
+/// This AA collects potential values for each IR position.
+/// An assumed set of potential values is initialized with the empty set (the
+/// best state) and it will grow monotonically as we find more potential values
+/// for this position.
+/// The set might be forced to the worst state, that is, to contain every
+/// possible value for this position in 2 cases.
+///   1. We surpassed the \p MaxPotentialValues threshold. This includes the
+///      case that this position is affected (e.g. because of an operation) by a
+///      Value that is in the worst state.
+///   2. We tried to initialize on a Value that we cannot handle (e.g. an
+///      operator we do not currently handle).
+///
+/// TODO: Support values other than constant integers.
+struct AAPotentialValues
+    : public StateWrapper<PotentialConstantIntValuesState, AbstractAttribute> {
+  using Base = StateWrapper<PotentialConstantIntValuesState, AbstractAttribute>;
+  AAPotentialValues(const IRPosition &IRP, Attributor &A) : Base(IRP) {}
+
+  /// See AbstractAttribute::getState(...).
+  PotentialConstantIntValuesState &getState() override { return *this; }
+  const PotentialConstantIntValuesState &getState() const override {
+    return *this;
+  }
+
+  /// Create an abstract attribute view for the position \p IRP.
+  static AAPotentialValues &createForPosition(const IRPosition &IRP,
+                                              Attributor &A);
+
+  /// Return assumed constant for the associated value
+  Optional<ConstantInt *>
+  getAssumedConstantInt(Attributor &A,
+                        const Instruction *CtxI = nullptr) const {
+    if (!isValidState())
+      return nullptr;
+    if (getAssumedSet().size() == 1)
+      return cast<ConstantInt>(ConstantInt::get(getAssociatedValue().getType(),
+                                                *(getAssumedSet().begin())));
+    if (getAssumedSet().size() == 0)
+      return llvm::None;
+
+    return nullptr;
+  }
+
+  /// See AbstractAttribute::getName()
+  const std::string getName() const override { return "AAPotentialValues"; }
+
+  /// See AbstractAttribute::getIdAddr()
+  const char *getIdAddr() const override { return &ID; }
+
+  /// This function should return true if the type of the \p AA is
+  /// AAPotentialValues
+  static bool classof(const AbstractAttribute *AA) {
+    return (AA->getIdAddr() == &ID);
+  }
 
   /// Unique ID (due to the unique address)
   static const char ID;

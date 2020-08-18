@@ -430,6 +430,7 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1011, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1012, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1030, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1031, EF_AMDGPU_MACH);
     BCase(EF_AMDGPU_XNACK);
     BCase(EF_AMDGPU_SRAM_ECC);
     break;
@@ -823,6 +824,8 @@ void ScalarBitSetTraits<ELFYAML::MIPS_AFL_ASE>::bitset(
   BCase(MIPS16);
   BCase(MICROMIPS);
   BCase(XPA);
+  BCase(CRC);
+  BCase(GINV);
 #undef BCase
 }
 
@@ -842,7 +845,7 @@ void MappingTraits<ELFYAML::SectionHeaderTable>::mapping(
     IO &IO, ELFYAML::SectionHeaderTable &SectionHeader) {
   IO.mapOptional("Sections", SectionHeader.Sections);
   IO.mapOptional("Excluded", SectionHeader.Excluded);
-  IO.mapOptional("NoHeaders", SectionHeader.NoHeaders, false);
+  IO.mapOptional("NoHeaders", SectionHeader.NoHeaders);
 }
 
 StringRef MappingTraits<ELFYAML::SectionHeaderTable>::validate(
@@ -872,11 +875,10 @@ void MappingTraits<ELFYAML::FileHeader>::mapping(IO &IO,
   IO.mapOptional("EPhOff", FileHdr.EPhOff);
   IO.mapOptional("EPhEntSize", FileHdr.EPhEntSize);
   IO.mapOptional("EPhNum", FileHdr.EPhNum);
-
-  IO.mapOptional("SHEntSize", FileHdr.SHEntSize);
-  IO.mapOptional("SHOff", FileHdr.SHOff);
-  IO.mapOptional("SHNum", FileHdr.SHNum);
-  IO.mapOptional("SHStrNdx", FileHdr.SHStrNdx);
+  IO.mapOptional("EShEntSize", FileHdr.EShEntSize);
+  IO.mapOptional("EShOff", FileHdr.EShOff);
+  IO.mapOptional("EShNum", FileHdr.EShNum);
+  IO.mapOptional("EShStrNdx", FileHdr.EShStrNdx);
 }
 
 void MappingTraits<ELFYAML::ProgramHeader>::mapping(
@@ -1093,11 +1095,13 @@ static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
   // automatically when they are not explicitly defined.
   assert(!IO.outputting() ||
          (!Section.ShOffset.hasValue() && !Section.ShSize.hasValue() &&
-          !Section.ShName.hasValue() && !Section.ShFlags.hasValue()));
+          !Section.ShName.hasValue() && !Section.ShFlags.hasValue() &&
+          !Section.ShType.hasValue()));
   IO.mapOptional("ShName", Section.ShName);
   IO.mapOptional("ShOffset", Section.ShOffset);
   IO.mapOptional("ShSize", Section.ShSize);
   IO.mapOptional("ShFlags", Section.ShFlags);
+  IO.mapOptional("ShType", Section.ShType);
 }
 
 static void sectionMapping(IO &IO, ELFYAML::DynamicSection &Section) {

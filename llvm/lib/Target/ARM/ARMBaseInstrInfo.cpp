@@ -537,6 +537,18 @@ bool ARMBaseInstrInfo::PredicateInstruction(
     MachineOperand &PMO = MI.getOperand(PIdx);
     PMO.setImm(Pred[0].getImm());
     MI.getOperand(PIdx+1).setReg(Pred[1].getReg());
+
+    // Thumb 1 arithmetic instructions do not set CPSR when executed inside an
+    // IT block. This affects how they are printed.
+    const MCInstrDesc &MCID = MI.getDesc();
+    if (MCID.TSFlags & ARMII::ThumbArithFlagSetting) {
+      assert(MCID.OpInfo[1].isOptionalDef() && "CPSR def isn't expected operand");
+      assert((MI.getOperand(1).isDead() ||
+              MI.getOperand(1).getReg() != ARM::CPSR) &&
+             "if conversion tried to stop defining used CPSR");
+      MI.getOperand(1).setReg(ARM::NoRegister);
+    }
+
     return true;
   }
   return false;
@@ -575,6 +587,13 @@ bool ARMBaseInstrInfo::DefinesPredicate(
     const MachineOperand &MO = MI.getOperand(i);
     if ((MO.isRegMask() && MO.clobbersPhysReg(ARM::CPSR)) ||
         (MO.isReg() && MO.isDef() && MO.getReg() == ARM::CPSR)) {
+
+      // Filter out T1 instructions that have a dead CPSR,
+      // allowing IT blocks to be generated containing T1 instructions
+      const MCInstrDesc &MCID = MI.getDesc();
+      if (MCID.TSFlags & ARMII::ThumbArithFlagSetting && MO.isDead())
+        continue;
+
       Pred.push_back(MO);
       Found = true;
     }
@@ -2142,7 +2161,12 @@ ARMBaseInstrInfo::extraSizeToPredicateInstructions(const MachineFunction &MF,
   // Thumb2 needs a 2-byte IT instruction to predicate up to 4 instructions.
   // ARM has a condition code field in every predicable instruction, using it
   // doesn't change code size.
-  return Subtarget.isThumb2() ? divideCeil(NumInsts, 4) * 2 : 0;
+  if (!Subtarget.isThumb2())
+    return 0;
+
+  // It's possible that the size of the IT is restricted to a single block.
+  unsigned MaxInsts = Subtarget.restrictIT() ? 1 : 4;
+  return divideCeil(NumInsts, MaxInsts) * 2;
 }
 
 unsigned
@@ -5500,6 +5524,8 @@ unsigned llvm::ConstantMaterializationCost(unsigned Val,
     if (Subtarget->hasV6T2Ops() && Val <= 0xffff) // MOVW
       return ForCodesize ? 4 : 1;
     if (ARM_AM::isSOImmTwoPartVal(Val)) // two instrs
+      return ForCodesize ? 8 : 2;
+    if (ARM_AM::isSOImmTwoPartValNeg(Val)) // two instrs
       return ForCodesize ? 8 : 2;
   }
   if (Subtarget->useMovt()) // MOVW + MOVT

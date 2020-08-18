@@ -114,7 +114,7 @@ public:
 ///
 /// Variables that have been optimized out use none of these fields.
 class DbgVariable : public DbgEntity {
-  /// Offset in DebugLocs.
+  /// Index of the entry list in DebugLocs.
   unsigned DebugLocListIndex = ~0u;
   /// DW_OP_LLVM_tag_offset value from DebugLocs.
   Optional<uint8_t> DebugLocListTagOffset;
@@ -371,6 +371,9 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Generate DWARF v4 type units.
   bool GenerateTypeUnits;
+
+  /// Emit a .debug_macro section instead of .debug_macinfo.
+  bool UseDebugMacroSection;
 
   /// DWARF5 Experimental Options
   /// @{
@@ -784,6 +787,10 @@ public:
   static void emitDebugLocValue(const AsmPrinter &AP, const DIBasicType *BT,
                                 const DbgValueLoc &Value,
                                 DwarfExpression &DwarfExpr);
+
+  /// If the \p File has an MD5 checksum, return it as an MD5Result
+  /// allocated in the MCContext.
+  Optional<MD5::MD5Result> getMD5AsBytes(const DIFile *File) const;
 };
 
 } // end namespace llvm

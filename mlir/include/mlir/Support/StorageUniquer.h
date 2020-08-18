@@ -10,10 +10,13 @@
 #define MLIR_SUPPORT_STORAGEUNIQUER_H
 
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Allocator.h"
 
 namespace mlir {
+class TypeID;
+
 namespace detail {
 struct StorageUniquerImpl;
 
@@ -60,6 +63,24 @@ using has_impltype_hash_t = decltype(ImplTy::hashKey(std::declval<T>()));
 ///      that is called when erasing a storage instance. This should cleanup any
 ///      fields of the storage as necessary and not attempt to free the memory
 ///      of the storage itself.
+///
+/// Storage classes may have an optional mutable component, which must not take
+/// part in the unique immutable key. In this case, storage classes may be
+/// mutated with `mutate` and must additionally respect the following:
+///    - Provide a mutation method:
+///        'LogicalResult mutate(StorageAllocator &, <...>)'
+///      that is called when mutating a storage instance. The first argument is
+///      an allocator to store any mutable data, and the remaining arguments are
+///      forwarded from the call site. The storage can be mutated at any time
+///      after creation. Care must be taken to avoid excessive mutation since
+///      the allocated storage can keep containing previous states. The return
+///      value of the function is used to indicate whether the mutation was
+///      successful, e.g., to limit the number of mutations or enable deferred
+///      one-time assignment of the mutable component.
+///
+/// All storage classes must be registered with the uniquer via
+/// `registerStorageType` using an appropriate unique `TypeID` for the storage
+/// class.
 class StorageUniquer {
 public:
   StorageUniquer();
@@ -67,6 +88,10 @@ public:
 
   /// Set the flag specifying if multi-threading is disabled within the uniquer.
   void disableMultithreading(bool disable = true);
+
+  /// Register a new storage object with this uniquer using the given unique
+  /// type id.
+  void registerStorageType(TypeID id);
 
   /// This class acts as the base storage that all storage classes must derived
   /// from.
@@ -125,8 +150,8 @@ public:
   /// function is used for derived types that have complex storage or uniquing
   /// constraints.
   template <typename Storage, typename Arg, typename... Args>
-  Storage *get(function_ref<void(Storage *)> initFn, unsigned kind, Arg &&arg,
-               Args &&... args) {
+  Storage *get(const TypeID &id, function_ref<void(Storage *)> initFn,
+               unsigned kind, Arg &&arg, Args &&...args) {
     // Construct a value of the derived key type.
     auto derivedKey =
         getKey<Storage>(std::forward<Arg>(arg), std::forward<Args>(args)...);
@@ -148,7 +173,8 @@ public:
     };
 
     // Get an instance for the derived storage.
-    return static_cast<Storage *>(getImpl(kind, hashValue, isEqual, ctorFn));
+    return static_cast<Storage *>(
+        getImpl(id, kind, hashValue, isEqual, ctorFn));
   }
 
   /// Gets a uniqued instance of 'Storage'. 'initFn' is an optional parameter
@@ -156,20 +182,32 @@ public:
   /// function is used for derived types that use no additional storage or
   /// uniquing outside of the kind.
   template <typename Storage>
-  Storage *get(function_ref<void(Storage *)> initFn, unsigned kind) {
+  Storage *get(const TypeID &id, function_ref<void(Storage *)> initFn,
+               unsigned kind) {
     auto ctorFn = [&](StorageAllocator &allocator) {
       auto *storage = new (allocator.allocate<Storage>()) Storage();
       if (initFn)
         initFn(storage);
       return storage;
     };
-    return static_cast<Storage *>(getImpl(kind, ctorFn));
+    return static_cast<Storage *>(getImpl(id, kind, ctorFn));
+  }
+
+  /// Changes the mutable component of 'storage' by forwarding the trailing
+  /// arguments to the 'mutate' function of the derived class.
+  template <typename Storage, typename... Args>
+  LogicalResult mutate(const TypeID &id, Storage *storage, Args &&...args) {
+    auto mutationFn = [&](StorageAllocator &allocator) -> LogicalResult {
+      return static_cast<Storage &>(*storage).mutate(
+          allocator, std::forward<Args>(args)...);
+    };
+    return mutateImpl(id, mutationFn);
   }
 
   /// Erases a uniqued instance of 'Storage'. This function is used for derived
   /// types that have complex storage or uniquing constraints.
   template <typename Storage, typename Arg, typename... Args>
-  void erase(unsigned kind, Arg &&arg, Args &&... args) {
+  void erase(const TypeID &id, unsigned kind, Arg &&arg, Args &&...args) {
     // Construct a value of the derived key type.
     auto derivedKey =
         getKey<Storage>(std::forward<Arg>(arg), std::forward<Args>(args)...);
@@ -183,7 +221,7 @@ public:
     };
 
     // Attempt to erase the storage instance.
-    eraseImpl(kind, hashValue, isEqual, [](BaseStorage *storage) {
+    eraseImpl(id, kind, hashValue, isEqual, [](BaseStorage *storage) {
       static_cast<Storage *>(storage)->cleanup();
     });
   }
@@ -191,20 +229,25 @@ public:
 private:
   /// Implementation for getting/creating an instance of a derived type with
   /// complex storage.
-  BaseStorage *getImpl(unsigned kind, unsigned hashValue,
+  BaseStorage *getImpl(const TypeID &id, unsigned kind, unsigned hashValue,
                        function_ref<bool(const BaseStorage *)> isEqual,
                        function_ref<BaseStorage *(StorageAllocator &)> ctorFn);
 
   /// Implementation for getting/creating an instance of a derived type with
   /// default storage.
-  BaseStorage *getImpl(unsigned kind,
+  BaseStorage *getImpl(const TypeID &id, unsigned kind,
                        function_ref<BaseStorage *(StorageAllocator &)> ctorFn);
 
   /// Implementation for erasing an instance of a derived type with complex
   /// storage.
-  void eraseImpl(unsigned kind, unsigned hashValue,
+  void eraseImpl(const TypeID &id, unsigned kind, unsigned hashValue,
                  function_ref<bool(const BaseStorage *)> isEqual,
                  function_ref<void(BaseStorage *)> cleanupFn);
+
+  /// Implementation for mutating an instance of a derived storage.
+  LogicalResult
+  mutateImpl(const TypeID &id,
+             function_ref<LogicalResult(StorageAllocator &)> mutationFn);
 
   /// The internal implementation class.
   std::unique_ptr<detail::StorageUniquerImpl> impl;
@@ -219,7 +262,7 @@ private:
   static typename std::enable_if<
       llvm::is_detected<detail::has_impltype_getkey_t, ImplTy, Args...>::value,
       typename ImplTy::KeyTy>::type
-  getKey(Args &&... args) {
+  getKey(Args &&...args) {
     return ImplTy::getKey(args...);
   }
   /// If there is no 'ImplTy::getKey' method, then we try to directly construct
@@ -228,7 +271,7 @@ private:
   static typename std::enable_if<
       !llvm::is_detected<detail::has_impltype_getkey_t, ImplTy, Args...>::value,
       typename ImplTy::KeyTy>::type
-  getKey(Args &&... args) {
+  getKey(Args &&...args) {
     return typename ImplTy::KeyTy(args...);
   }
 

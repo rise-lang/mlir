@@ -19,7 +19,6 @@ import lldb
 from . import configuration
 from . import test_categories
 from . import lldbtest_config
-from lldbsuite.test_event.event_builder import EventBuilder
 from lldbsuite.support import funcutils
 from lldbsuite.test import lldbplatform
 from lldbsuite.test import lldbplatformutil
@@ -100,10 +99,6 @@ def expectedFailure(expected_fn, bugnumber=None):
             else:
                 xfail_reason = expected_fn()
             if xfail_reason is not None:
-                if configuration.results_formatter_object is not None:
-                    # Mark this test as expected to fail.
-                    configuration.results_formatter_object.handle_event(
-                        EventBuilder.event_for_mark_test_expected_failure(self))
                 xfail_func = unittest2.expectedFailure(func)
                 xfail_func(*args, **kwargs)
             else:
@@ -137,7 +132,7 @@ def skipTestIfFn(expected_fn, bugnumber=None):
             if reason is not None:
                 self.skipTest(reason)
             else:
-                func(*args, **kwargs)
+                return func(*args, **kwargs)
         return wrapper
 
     # Some decorators can be called both with no arguments (e.g. @expectedFailureWindows)
@@ -445,21 +440,11 @@ def expectedFailureNetBSD(bugnumber=None):
         ['netbsd'],
         bugnumber)
 
-# Flakey tests get two chances to run. If they fail the first time round, the result formatter
-# makes sure it is run one more time.
-
-
+# TODO: This decorator does not do anything. Remove it.
 def expectedFlakey(expected_fn, bugnumber=None):
     def expectedFailure_impl(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            self = args[0]
-            if expected_fn(self):
-                # Send event marking test as explicitly eligible for rerunning.
-                if configuration.results_formatter_object is not None:
-                    # Mark this test as rerunnable.
-                    configuration.results_formatter_object.handle_event(
-                        EventBuilder.event_for_mark_test_rerun_eligible(self))
             func(*args, **kwargs)
         return wrapper
     # Some decorators can be called both with no arguments (e.g. @expectedFailureWindows)
@@ -517,9 +502,7 @@ def skipIfOutOfTreeDebugserver(func):
 
 def skipIfRemote(func):
     """Decorate the item to skip tests if testing remotely."""
-    def is_remote():
-        return "skip on remote platform" if lldb.remote_platform else None
-    return skipTestIfFn(is_remote)(func)
+    return unittest2.skipIf(lldb.remote_platform, "skip on remote platform")(func)
 
 
 def skipIfNoSBHeaders(func):
@@ -552,13 +535,14 @@ def skipIfNoSBHeaders(func):
     return skipTestIfFn(are_sb_headers_missing)(func)
 
 
-def skipIfRosetta(func, bugnumber=None):
+def skipIfRosetta(bugnumber):
     """Skip a test when running the testsuite on macOS under the Rosetta translation layer."""
     def is_running_rosetta(self):
-        if not lldbplatformutil.getPlatform() in ['darwin', 'macosx']:
-            return False
-        return platform.uname()[5] == "arm" and self.getArchitecture() == "x86_64"
-    return skipTestIfFn(is_running_rosetta, bugnumber)(func)
+        if lldbplatformutil.getPlatform() in ['darwin', 'macosx']:
+            if (platform.uname()[5] == "arm") and (self.getArchitecture() == "x86_64"):
+                return "skipped under Rosetta"
+        return None
+    return skipTestIfFn(is_running_rosetta)
 
 def skipIfiOSSimulator(func):
     """Decorate the item to skip tests that should be skipped on the iOS Simulator."""
@@ -879,8 +863,6 @@ def skipUnlessFeature(feature):
 
 def skipIfReproducer(func):
     """Skip this test if the environment is set up to run LLDB with reproducers."""
-    def is_reproducer():
-        if configuration.capture_path or configuration.replay_path:
-            return "reproducers unsupported"
-        return None
-    return skipTestIfFn(is_reproducer)(func)
+    return unittest2.skipIf(
+        configuration.capture_path or configuration.replay_path,
+        "reproducers unsupported")(func)

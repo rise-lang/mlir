@@ -794,8 +794,6 @@ private:
   bool emitFieldValue(const FieldInfo &Field, const RealFieldInfo &Contents);
   bool emitFieldValue(const FieldInfo &Field, const StructFieldInfo &Contents);
 
-  bool emitStructValue(const StructInfo &Structure);
-
   bool emitFieldInitializer(const FieldInfo &Field,
                             const FieldInitializer &Initializer);
   bool emitFieldInitializer(const FieldInfo &Field,
@@ -812,9 +810,6 @@ private:
                              const StructInitializer &Initializer);
 
   // User-defined types (structs, unions):
-  bool emitStructValue(const StructInfo &Structure,
-                       const StructInitializer &Initializer,
-                       size_t InitialOffset = 0, size_t InitialField = 0);
   bool emitStructValues(const StructInfo &Structure);
   bool addStructField(StringRef Name, const StructInfo &Structure);
   bool parseDirectiveStructValue(const StructInfo &Structure,
@@ -1725,8 +1720,6 @@ static unsigned getGNUBinOpPrecedence(AsmToken::TokenKind K,
     return 4;
 
   // High Intermediate Precedence: |, &, ^
-  //
-  // FIXME: gas seems to support '!' as an infix operator?
   case AsmToken::Pipe:
     Kind = MCBinaryExpr::Or;
     return 5;
@@ -3831,20 +3824,6 @@ bool MasmParser::emitFieldValue(const FieldInfo &Field) {
     return emitFieldValue(Field, Field.Contents.StructInfo);
   }
   llvm_unreachable("Unhandled FieldType enum");
-}
-
-bool MasmParser::emitStructValue(const StructInfo &Structure) {
-  size_t Offset = 0;
-  for (const auto &Field : Structure.Fields) {
-    getStreamer().emitZeros(Field.Offset - Offset);
-    if (emitFieldValue(Field))
-      return true;
-    Offset = Field.Offset + Field.SizeOf;
-  }
-  // Add final padding.
-  if (Offset != Structure.Size)
-    getStreamer().emitZeros(Structure.Size - Offset);
-  return false;
 }
 
 bool MasmParser::emitFieldInitializer(const FieldInfo &Field,

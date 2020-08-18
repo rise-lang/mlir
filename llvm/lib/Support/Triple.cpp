@@ -160,8 +160,6 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
 
   case AMD: return "amd";
   case Apple: return "apple";
-  case BGP: return "bgp";
-  case BGQ: return "bgq";
   case CSR: return "csr";
   case Freescale: return "fsl";
   case IBM: return "ibm";
@@ -187,7 +185,6 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case AMDHSA: return "amdhsa";
   case AMDPAL: return "amdpal";
   case Ananas: return "ananas";
-  case CNK: return "cnk";
   case CUDA: return "cuda";
   case CloudABI: return "cloudabi";
   case Contiki: return "contiki";
@@ -218,6 +215,7 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case WASI: return "wasi";
   case WatchOS: return "watchos";
   case Win32: return "windows";
+  case ZOS: return "zos";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -470,8 +468,6 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("apple", Triple::Apple)
     .Case("pc", Triple::PC)
     .Case("scei", Triple::SCEI)
-    .Case("bgp", Triple::BGP)
-    .Case("bgq", Triple::BGQ)
     .Case("fsl", Triple::Freescale)
     .Case("ibm", Triple::IBM)
     .Case("img", Triple::ImaginationTechnologies)
@@ -504,11 +500,11 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("solaris", Triple::Solaris)
     .StartsWith("win32", Triple::Win32)
     .StartsWith("windows", Triple::Win32)
+    .StartsWith("zos", Triple::ZOS)
     .StartsWith("haiku", Triple::Haiku)
     .StartsWith("minix", Triple::Minix)
     .StartsWith("rtems", Triple::RTEMS)
     .StartsWith("nacl", Triple::NaCl)
-    .StartsWith("cnk", Triple::CNK)
     .StartsWith("aix", Triple::AIX)
     .StartsWith("cuda", Triple::CUDA)
     .StartsWith("nvcl", Triple::NVCL)
@@ -558,6 +554,7 @@ static Triple::ObjectFormatType parseFormat(StringRef EnvironmentName) {
     .EndsWith("xcoff", Triple::XCOFF)
     .EndsWith("coff", Triple::COFF)
     .EndsWith("elf", Triple::ELF)
+    .EndsWith("goff", Triple::GOFF)
     .EndsWith("macho", Triple::MachO)
     .EndsWith("wasm", Triple::Wasm)
     .Default(Triple::UnknownObjectFormat);
@@ -649,6 +646,7 @@ static StringRef getObjectFormatTypeName(Triple::ObjectFormatType Kind) {
   case Triple::UnknownObjectFormat: return "";
   case Triple::COFF:  return "coff";
   case Triple::ELF:   return "elf";
+  case Triple::GOFF:  return "goff";
   case Triple::MachO: return "macho";
   case Triple::Wasm:  return "wasm";
   case Triple::XCOFF: return "xcoff";
@@ -706,7 +704,6 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::sparcv9:
   case Triple::spir64:
   case Triple::spir:
-  case Triple::systemz:
   case Triple::tce:
   case Triple::tcele:
   case Triple::thumbeb:
@@ -718,6 +715,11 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::ppc:
     if (T.isOSAIX())
       return Triple::XCOFF;
+    return Triple::ELF;
+
+  case Triple::systemz:
+    if (T.isOSzOS())
+      return Triple::GOFF;
     return Triple::ELF;
 
   case Triple::wasm32:

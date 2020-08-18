@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/StackProtector.h"
@@ -222,8 +223,9 @@ ArrayRef<Register> IRTranslator::getOrCreateVRegs(const Value &Val) {
 }
 
 int IRTranslator::getOrCreateFrameIndex(const AllocaInst &AI) {
-  if (FrameIndices.find(&AI) != FrameIndices.end())
-    return FrameIndices[&AI];
+  auto MapEntry = FrameIndices.find(&AI);
+  if (MapEntry != FrameIndices.end())
+    return MapEntry->second;
 
   uint64_t ElementSize = DL->getTypeAllocSize(AI.getAllocatedType());
   uint64_t Size =
@@ -293,25 +295,8 @@ bool IRTranslator::translateBinaryOp(unsigned Opcode, const User &U,
   return true;
 }
 
-bool IRTranslator::translateFSub(const User &U, MachineIRBuilder &MIRBuilder) {
-  // -0.0 - X --> G_FNEG
-  if (isa<Constant>(U.getOperand(0)) &&
-      U.getOperand(0) == ConstantFP::getZeroValueForNegation(U.getType())) {
-    Register Op1 = getOrCreateVReg(*U.getOperand(1));
-    Register Res = getOrCreateVReg(U);
-    uint16_t Flags = 0;
-    if (isa<Instruction>(U)) {
-      const Instruction &I = cast<Instruction>(U);
-      Flags = MachineInstr::copyFlagsFromInstruction(I);
-    }
-    // Negate the last operand of the FSUB
-    MIRBuilder.buildFNeg(Res, Op1, Flags);
-    return true;
-  }
-  return translateBinaryOp(TargetOpcode::G_FSUB, U, MIRBuilder);
-}
-
-bool IRTranslator::translateFNeg(const User &U, MachineIRBuilder &MIRBuilder) {
+bool IRTranslator::translateUnaryOp(unsigned Opcode, const User &U,
+                                    MachineIRBuilder &MIRBuilder) {
   Register Op0 = getOrCreateVReg(*U.getOperand(0));
   Register Res = getOrCreateVReg(U);
   uint16_t Flags = 0;
@@ -319,8 +304,12 @@ bool IRTranslator::translateFNeg(const User &U, MachineIRBuilder &MIRBuilder) {
     const Instruction &I = cast<Instruction>(U);
     Flags = MachineInstr::copyFlagsFromInstruction(I);
   }
-  MIRBuilder.buildFNeg(Res, Op0, Flags);
+  MIRBuilder.buildInstr(Opcode, {Res}, {Op0}, Flags);
   return true;
+}
+
+bool IRTranslator::translateFNeg(const User &U, MachineIRBuilder &MIRBuilder) {
+  return translateUnaryOp(TargetOpcode::G_FNEG, U, MIRBuilder);
 }
 
 bool IRTranslator::translateCompare(const User &U,
@@ -457,6 +446,7 @@ bool IRTranslator::translateSwitch(const User &U, MachineIRBuilder &MIB) {
   }
 
   SL->findJumpTables(Clusters, &SI, DefaultMBB, nullptr, nullptr);
+  SL->findBitTestClusters(Clusters, &SI);
 
   LLVM_DEBUG({
     dbgs() << "Case clusters: ";
@@ -734,6 +724,156 @@ bool IRTranslator::lowerSwitchRangeWorkItem(SwitchCG::CaseClusterIt I,
   return true;
 }
 
+void IRTranslator::emitBitTestHeader(SwitchCG::BitTestBlock &B,
+                                     MachineBasicBlock *SwitchBB) {
+  MachineIRBuilder &MIB = *CurBuilder;
+  MIB.setMBB(*SwitchBB);
+
+  // Subtract the minimum value.
+  Register SwitchOpReg = getOrCreateVReg(*B.SValue);
+
+  LLT SwitchOpTy = MRI->getType(SwitchOpReg);
+  Register MinValReg = MIB.buildConstant(SwitchOpTy, B.First).getReg(0);
+  auto RangeSub = MIB.buildSub(SwitchOpTy, SwitchOpReg, MinValReg);
+
+  // Ensure that the type will fit the mask value.
+  LLT MaskTy = SwitchOpTy;
+  for (unsigned I = 0, E = B.Cases.size(); I != E; ++I) {
+    if (!isUIntN(SwitchOpTy.getSizeInBits(), B.Cases[I].Mask)) {
+      // Switch table case range are encoded into series of masks.
+      // Just use pointer type, it's guaranteed to fit.
+      MaskTy = LLT::scalar(64);
+      break;
+    }
+  }
+  Register SubReg = RangeSub.getReg(0);
+  if (SwitchOpTy != MaskTy)
+    SubReg = MIB.buildZExtOrTrunc(MaskTy, SubReg).getReg(0);
+
+  B.RegVT = getMVTForLLT(MaskTy);
+  B.Reg = SubReg;
+
+  MachineBasicBlock *MBB = B.Cases[0].ThisBB;
+
+  if (!B.OmitRangeCheck)
+    addSuccessorWithProb(SwitchBB, B.Default, B.DefaultProb);
+  addSuccessorWithProb(SwitchBB, MBB, B.Prob);
+
+  SwitchBB->normalizeSuccProbs();
+
+  if (!B.OmitRangeCheck) {
+    // Conditional branch to the default block.
+    auto RangeCst = MIB.buildConstant(SwitchOpTy, B.Range);
+    auto RangeCmp = MIB.buildICmp(CmpInst::Predicate::ICMP_UGT, LLT::scalar(1),
+                                  RangeSub, RangeCst);
+    MIB.buildBrCond(RangeCmp, *B.Default);
+  }
+
+  // Avoid emitting unnecessary branches to the next block.
+  if (MBB != SwitchBB->getNextNode())
+    MIB.buildBr(*MBB);
+}
+
+void IRTranslator::emitBitTestCase(SwitchCG::BitTestBlock &BB,
+                                   MachineBasicBlock *NextMBB,
+                                   BranchProbability BranchProbToNext,
+                                   Register Reg, SwitchCG::BitTestCase &B,
+                                   MachineBasicBlock *SwitchBB) {
+  MachineIRBuilder &MIB = *CurBuilder;
+  MIB.setMBB(*SwitchBB);
+
+  LLT SwitchTy = getLLTForMVT(BB.RegVT);
+  Register Cmp;
+  unsigned PopCount = countPopulation(B.Mask);
+  if (PopCount == 1) {
+    // Testing for a single bit; just compare the shift count with what it
+    // would need to be to shift a 1 bit in that position.
+    auto MaskTrailingZeros =
+        MIB.buildConstant(SwitchTy, countTrailingZeros(B.Mask));
+    Cmp =
+        MIB.buildICmp(ICmpInst::ICMP_EQ, LLT::scalar(1), Reg, MaskTrailingZeros)
+            .getReg(0);
+  } else if (PopCount == BB.Range) {
+    // There is only one zero bit in the range, test for it directly.
+    auto MaskTrailingOnes =
+        MIB.buildConstant(SwitchTy, countTrailingOnes(B.Mask));
+    Cmp = MIB.buildICmp(CmpInst::ICMP_NE, LLT::scalar(1), Reg, MaskTrailingOnes)
+              .getReg(0);
+  } else {
+    // Make desired shift.
+    auto CstOne = MIB.buildConstant(SwitchTy, 1);
+    auto SwitchVal = MIB.buildShl(SwitchTy, CstOne, Reg);
+
+    // Emit bit tests and jumps.
+    auto CstMask = MIB.buildConstant(SwitchTy, B.Mask);
+    auto AndOp = MIB.buildAnd(SwitchTy, SwitchVal, CstMask);
+    auto CstZero = MIB.buildConstant(SwitchTy, 0);
+    Cmp = MIB.buildICmp(CmpInst::ICMP_NE, LLT::scalar(1), AndOp, CstZero)
+              .getReg(0);
+  }
+
+  // The branch probability from SwitchBB to B.TargetBB is B.ExtraProb.
+  addSuccessorWithProb(SwitchBB, B.TargetBB, B.ExtraProb);
+  // The branch probability from SwitchBB to NextMBB is BranchProbToNext.
+  addSuccessorWithProb(SwitchBB, NextMBB, BranchProbToNext);
+  // It is not guaranteed that the sum of B.ExtraProb and BranchProbToNext is
+  // one as they are relative probabilities (and thus work more like weights),
+  // and hence we need to normalize them to let the sum of them become one.
+  SwitchBB->normalizeSuccProbs();
+
+  // Record the fact that the IR edge from the header to the bit test target
+  // will go through our new block. Neeeded for PHIs to have nodes added.
+  addMachineCFGPred({BB.Parent->getBasicBlock(), B.TargetBB->getBasicBlock()},
+                    SwitchBB);
+
+  MIB.buildBrCond(Cmp, *B.TargetBB);
+
+  // Avoid emitting unnecessary branches to the next block.
+  if (NextMBB != SwitchBB->getNextNode())
+    MIB.buildBr(*NextMBB);
+}
+
+bool IRTranslator::lowerBitTestWorkItem(
+    SwitchCG::SwitchWorkListItem W, MachineBasicBlock *SwitchMBB,
+    MachineBasicBlock *CurMBB, MachineBasicBlock *DefaultMBB,
+    MachineIRBuilder &MIB, MachineFunction::iterator BBI,
+    BranchProbability DefaultProb, BranchProbability UnhandledProbs,
+    SwitchCG::CaseClusterIt I, MachineBasicBlock *Fallthrough,
+    bool FallthroughUnreachable) {
+  using namespace SwitchCG;
+  MachineFunction *CurMF = SwitchMBB->getParent();
+  // FIXME: Optimize away range check based on pivot comparisons.
+  BitTestBlock *BTB = &SL->BitTestCases[I->BTCasesIndex];
+  // The bit test blocks haven't been inserted yet; insert them here.
+  for (BitTestCase &BTC : BTB->Cases)
+    CurMF->insert(BBI, BTC.ThisBB);
+
+  // Fill in fields of the BitTestBlock.
+  BTB->Parent = CurMBB;
+  BTB->Default = Fallthrough;
+
+  BTB->DefaultProb = UnhandledProbs;
+  // If the cases in bit test don't form a contiguous range, we evenly
+  // distribute the probability on the edge to Fallthrough to two
+  // successors of CurMBB.
+  if (!BTB->ContiguousRange) {
+    BTB->Prob += DefaultProb / 2;
+    BTB->DefaultProb -= DefaultProb / 2;
+  }
+
+  if (FallthroughUnreachable) {
+    // Skip the range check if the fallthrough block is unreachable.
+    BTB->OmitRangeCheck = true;
+  }
+
+  // If we're in the right place, emit the bit test header right now.
+  if (CurMBB == SwitchMBB) {
+    emitBitTestHeader(*BTB, SwitchMBB);
+    BTB->Emitted = true;
+  }
+  return true;
+}
+
 bool IRTranslator::lowerSwitchWorkItem(SwitchCG::SwitchWorkListItem W,
                                        Value *Cond,
                                        MachineBasicBlock *SwitchMBB,
@@ -794,9 +934,15 @@ bool IRTranslator::lowerSwitchWorkItem(SwitchCG::SwitchWorkListItem W,
 
     switch (I->Kind) {
     case CC_BitTests: {
-      LLVM_DEBUG(dbgs() << "Switch to bit test optimization unimplemented");
-      return false; // Bit tests currently unimplemented.
+      if (!lowerBitTestWorkItem(W, SwitchMBB, CurMBB, DefaultMBB, MIB, BBI,
+                                DefaultProb, UnhandledProbs, I, Fallthrough,
+                                FallthroughUnreachable)) {
+        LLVM_DEBUG(dbgs() << "Failed to lower bit test for switch");
+        return false;
+      }
+      break;
     }
+
     case CC_JumpTable: {
       if (!lowerJumpTableWorkItem(W, SwitchMBB, CurMBB, DefaultMBB, MIB, BBI,
                                   UnhandledProbs, I, Fallthrough,
@@ -1214,6 +1360,16 @@ bool IRTranslator::translateOverflowIntrinsic(const CallInst &CI, unsigned Op,
   return true;
 }
 
+bool IRTranslator::translateFixedPointIntrinsic(unsigned Op, const CallInst &CI,
+                                                MachineIRBuilder &MIRBuilder) {
+  Register Dst = getOrCreateVReg(CI);
+  Register Src0 = getOrCreateVReg(*CI.getOperand(0));
+  Register Src1 = getOrCreateVReg(*CI.getOperand(1));
+  uint64_t Scale = cast<ConstantInt>(CI.getOperand(2))->getZExtValue();
+  MIRBuilder.buildInstr(Op, {Dst}, { Src0, Src1, Scale });
+  return true;
+}
+
 unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
   switch (ID) {
     default:
@@ -1264,10 +1420,14 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_FNEARBYINT;
     case Intrinsic::pow:
       return TargetOpcode::G_FPOW;
+    case Intrinsic::powi:
+      return TargetOpcode::G_FPOWI;
     case Intrinsic::rint:
       return TargetOpcode::G_FRINT;
     case Intrinsic::round:
       return TargetOpcode::G_INTRINSIC_ROUND;
+    case Intrinsic::roundeven:
+      return TargetOpcode::G_INTRINSIC_ROUNDEVEN;
     case Intrinsic::sin:
       return TargetOpcode::G_FSIN;
     case Intrinsic::sqrt:
@@ -1278,6 +1438,8 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_READCYCLECOUNTER;
     case Intrinsic::ptrmask:
       return TargetOpcode::G_PTRMASK;
+    case Intrinsic::lrint:
+      return TargetOpcode::G_INTRINSIC_LRINT;
   }
   return Intrinsic::not_intrinsic;
 }
@@ -1370,7 +1532,7 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     // Get the underlying objects for the location passed on the lifetime
     // marker.
     SmallVector<const Value *, 4> Allocas;
-    GetUnderlyingObjects(CI.getArgOperand(1), Allocas, *DL);
+    getUnderlyingObjects(CI.getArgOperand(1), Allocas);
 
     // Iterate over each underlying object, creating lifetime markers for each
     // static alloca. Quit if we find a non-static alloca.
@@ -1484,6 +1646,37 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     return translateBinaryOp(TargetOpcode::G_USUBSAT, CI, MIRBuilder);
   case Intrinsic::ssub_sat:
     return translateBinaryOp(TargetOpcode::G_SSUBSAT, CI, MIRBuilder);
+  case Intrinsic::ushl_sat:
+    return translateBinaryOp(TargetOpcode::G_USHLSAT, CI, MIRBuilder);
+  case Intrinsic::sshl_sat:
+    return translateBinaryOp(TargetOpcode::G_SSHLSAT, CI, MIRBuilder);
+  case Intrinsic::umin:
+    return translateBinaryOp(TargetOpcode::G_UMIN, CI, MIRBuilder);
+  case Intrinsic::umax:
+    return translateBinaryOp(TargetOpcode::G_UMAX, CI, MIRBuilder);
+  case Intrinsic::smin:
+    return translateBinaryOp(TargetOpcode::G_SMIN, CI, MIRBuilder);
+  case Intrinsic::smax:
+    return translateBinaryOp(TargetOpcode::G_SMAX, CI, MIRBuilder);
+  case Intrinsic::abs:
+    // TODO: Preserve "int min is poison" arg in GMIR?
+    return translateUnaryOp(TargetOpcode::G_ABS, CI, MIRBuilder);
+  case Intrinsic::smul_fix:
+    return translateFixedPointIntrinsic(TargetOpcode::G_SMULFIX, CI, MIRBuilder);
+  case Intrinsic::umul_fix:
+    return translateFixedPointIntrinsic(TargetOpcode::G_UMULFIX, CI, MIRBuilder);
+  case Intrinsic::smul_fix_sat:
+    return translateFixedPointIntrinsic(TargetOpcode::G_SMULFIXSAT, CI, MIRBuilder);
+  case Intrinsic::umul_fix_sat:
+    return translateFixedPointIntrinsic(TargetOpcode::G_UMULFIXSAT, CI, MIRBuilder);
+  case Intrinsic::sdiv_fix:
+    return translateFixedPointIntrinsic(TargetOpcode::G_SDIVFIX, CI, MIRBuilder);
+  case Intrinsic::udiv_fix:
+    return translateFixedPointIntrinsic(TargetOpcode::G_UDIVFIX, CI, MIRBuilder);
+  case Intrinsic::sdiv_fix_sat:
+    return translateFixedPointIntrinsic(TargetOpcode::G_SDIVFIXSAT, CI, MIRBuilder);
+  case Intrinsic::udiv_fix_sat:
+    return translateFixedPointIntrinsic(TargetOpcode::G_UDIVFIXSAT, CI, MIRBuilder);
   case Intrinsic::fmuladd: {
     const TargetMachine &TM = MF->getTarget();
     const TargetLowering &TLI = *MF->getSubtarget().getTargetLowering();
@@ -1507,6 +1700,18 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     }
     return true;
   }
+  case Intrinsic::convert_from_fp16:
+    // FIXME: This intrinsic should probably be removed from the IR.
+    MIRBuilder.buildFPExt(getOrCreateVReg(CI),
+                          getOrCreateVReg(*CI.getArgOperand(0)),
+                          MachineInstr::copyFlagsFromInstruction(CI));
+    return true;
+  case Intrinsic::convert_to_fp16:
+    // FIXME: This intrinsic should probably be removed from the IR.
+    MIRBuilder.buildFPTrunc(getOrCreateVReg(CI),
+                            getOrCreateVReg(*CI.getArgOperand(0)),
+                            MachineInstr::copyFlagsFromInstruction(CI));
+    return true;
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset:
@@ -1593,11 +1798,22 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
   }
   case Intrinsic::invariant_end:
     return true;
+  case Intrinsic::expect:
+  case Intrinsic::annotation:
+  case Intrinsic::ptr_annotation:
+  case Intrinsic::launder_invariant_group:
+  case Intrinsic::strip_invariant_group: {
+    // Drop the intrinsic, but forward the value.
+    MIRBuilder.buildCopy(getOrCreateVReg(CI),
+                         getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
+  }
   case Intrinsic::assume:
   case Intrinsic::var_annotation:
   case Intrinsic::sideeffect:
     // Discard annotate attributes, assumptions, and artificial side-effects.
     return true;
+  case Intrinsic::read_volatile_register:
   case Intrinsic::read_register: {
     Value *Arg = CI.getArgOperand(0);
     MIRBuilder
@@ -1610,6 +1826,33 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     MIRBuilder.buildInstr(TargetOpcode::G_WRITE_REGISTER)
       .addMetadata(cast<MDNode>(cast<MetadataAsValue>(Arg)->getMetadata()))
       .addUse(getOrCreateVReg(*CI.getArgOperand(1)));
+    return true;
+  }
+  case Intrinsic::localescape: {
+    MachineBasicBlock &EntryMBB = MF->front();
+    StringRef EscapedName = GlobalValue::dropLLVMManglingEscape(MF->getName());
+
+    // Directly emit some LOCAL_ESCAPE machine instrs. Label assignment emission
+    // is the same on all targets.
+    for (unsigned Idx = 0, E = CI.getNumArgOperands(); Idx < E; ++Idx) {
+      Value *Arg = CI.getArgOperand(Idx)->stripPointerCasts();
+      if (isa<ConstantPointerNull>(Arg))
+        continue; // Skip null pointers. They represent a hole in index space.
+
+      int FI = getOrCreateFrameIndex(*cast<AllocaInst>(Arg));
+      MCSymbol *FrameAllocSym =
+          MF->getMMI().getContext().getOrCreateFrameAllocSymbol(EscapedName,
+                                                                Idx);
+
+      // This should be inserted at the start of the entry block.
+      auto LocalEscape =
+          MIRBuilder.buildInstrNoInsert(TargetOpcode::LOCAL_ESCAPE)
+              .addSym(FrameAllocSym)
+              .addFrameIndex(FI);
+
+      EntryMBB.insert(EntryMBB.begin(), LocalEscape);
+    }
+
     return true;
   }
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)  \
@@ -1721,10 +1964,6 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
     MIB->copyIRFlags(CI);
 
   for (auto &Arg : enumerate(CI.arg_operands())) {
-    // Some intrinsics take metadata parameters. Reject them.
-    if (isa<MetadataAsValue>(Arg.value()))
-      return false;
-
     // If this is required to be an immediate, don't materialize it in a
     // register.
     if (CI.paramHasAttr(Arg.index(), Attribute::ImmArg)) {
@@ -1737,6 +1976,11 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
       } else {
         MIB.addFPImm(cast<ConstantFP>(Arg.value()));
       }
+    } else if (auto MD = dyn_cast<MetadataAsValue>(Arg.value())) {
+      auto *MDN = dyn_cast<MDNode>(MD->getMetadata());
+      if (!MDN) // This was probably an MDString.
+        return false;
+      MIB.addMetadata(MDN);
     } else {
       ArrayRef<Register> VRegs = getOrCreateVRegs(*Arg.value());
       if (VRegs.size() > 1)
@@ -2262,6 +2506,57 @@ bool IRTranslator::translate(const Constant &C, Register Reg) {
 }
 
 void IRTranslator::finalizeBasicBlock() {
+  for (auto &BTB : SL->BitTestCases) {
+    // Emit header first, if it wasn't already emitted.
+    if (!BTB.Emitted)
+      emitBitTestHeader(BTB, BTB.Parent);
+
+    BranchProbability UnhandledProb = BTB.Prob;
+    for (unsigned j = 0, ej = BTB.Cases.size(); j != ej; ++j) {
+      UnhandledProb -= BTB.Cases[j].ExtraProb;
+      // Set the current basic block to the mbb we wish to insert the code into
+      MachineBasicBlock *MBB = BTB.Cases[j].ThisBB;
+      // If all cases cover a contiguous range, it is not necessary to jump to
+      // the default block after the last bit test fails. This is because the
+      // range check during bit test header creation has guaranteed that every
+      // case here doesn't go outside the range. In this case, there is no need
+      // to perform the last bit test, as it will always be true. Instead, make
+      // the second-to-last bit-test fall through to the target of the last bit
+      // test, and delete the last bit test.
+
+      MachineBasicBlock *NextMBB;
+      if (BTB.ContiguousRange && j + 2 == ej) {
+        // Second-to-last bit-test with contiguous range: fall through to the
+        // target of the final bit test.
+        NextMBB = BTB.Cases[j + 1].TargetBB;
+      } else if (j + 1 == ej) {
+        // For the last bit test, fall through to Default.
+        NextMBB = BTB.Default;
+      } else {
+        // Otherwise, fall through to the next bit test.
+        NextMBB = BTB.Cases[j + 1].ThisBB;
+      }
+
+      emitBitTestCase(BTB, NextMBB, UnhandledProb, BTB.Reg, BTB.Cases[j], MBB);
+
+      // FIXME delete this block below?
+      if (BTB.ContiguousRange && j + 2 == ej) {
+        // Since we're not going to use the final bit test, remove it.
+        BTB.Cases.pop_back();
+        break;
+      }
+    }
+    // This is "default" BB. We have two jumps to it. From "header" BB and from
+    // last "case" BB, unless the latter was skipped.
+    CFGEdge HeaderToDefaultEdge = {BTB.Parent->getBasicBlock(),
+                                   BTB.Default->getBasicBlock()};
+    addMachineCFGPred(HeaderToDefaultEdge, BTB.Parent);
+    if (!BTB.ContiguousRange) {
+      addMachineCFGPred(HeaderToDefaultEdge, BTB.Cases.back().ThisBB);
+    }
+  }
+  SL->BitTestCases.clear();
+
   for (auto &JTCase : SL->JTCases) {
     // Emit header first, if it wasn't already emitted.
     if (!JTCase.first.Emitted)

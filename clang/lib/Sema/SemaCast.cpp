@@ -510,12 +510,10 @@ static void diagnoseBadCast(Sema &S, unsigned msg, CastType castType,
     if (RecFrom && RecTo) {
       auto DeclFrom = RecFrom->getAsCXXRecordDecl();
       if (!DeclFrom->isCompleteDefinition())
-        S.Diag(DeclFrom->getLocation(), diag::note_type_incomplete)
-          << DeclFrom->getDeclName();
+        S.Diag(DeclFrom->getLocation(), diag::note_type_incomplete) << DeclFrom;
       auto DeclTo = RecTo->getAsCXXRecordDecl();
       if (!DeclTo->isCompleteDefinition())
-        S.Diag(DeclTo->getLocation(), diag::note_type_incomplete)
-          << DeclTo->getDeclName();
+        S.Diag(DeclTo->getLocation(), diag::note_type_incomplete) << DeclTo;
     }
   }
 }
@@ -2658,6 +2656,8 @@ static void DiagnoseBadFunctionCast(Sema &Self, const ExprResult &SrcExpr,
   if (SrcType->isComplexType() && DestType->isComplexType())
     return;
   if (SrcType->isComplexIntegerType() && DestType->isComplexIntegerType())
+    return;
+  if (SrcType->isFixedPointType() && DestType->isFixedPointType())
     return;
 
   Self.Diag(SrcExpr.get()->getExprLoc(),

@@ -2744,6 +2744,35 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
 
+  // Copy a Z register pair by copying the individual sub-registers.
+  if (AArch64::ZPR2RegClass.contains(DestReg) &&
+      AArch64::ZPR2RegClass.contains(SrcReg)) {
+    static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1};
+    copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
+                     Indices);
+    return;
+  }
+
+  // Copy a Z register triple by copying the individual sub-registers.
+  if (AArch64::ZPR3RegClass.contains(DestReg) &&
+      AArch64::ZPR3RegClass.contains(SrcReg)) {
+    static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1,
+                                       AArch64::zsub2};
+    copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
+                     Indices);
+    return;
+  }
+
+  // Copy a Z register quad by copying the individual sub-registers.
+  if (AArch64::ZPR4RegClass.contains(DestReg) &&
+      AArch64::ZPR4RegClass.contains(SrcReg)) {
+    static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1,
+                                       AArch64::zsub2, AArch64::zsub3};
+    copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
+                     Indices);
+    return;
+  }
+
   if (AArch64::GPR64spRegClass.contains(DestReg) &&
       (AArch64::GPR64spRegClass.contains(SrcReg) || SrcReg == AArch64::XZR)) {
     if (DestReg == AArch64::SP || SrcReg == AArch64::SP) {
@@ -3832,7 +3861,7 @@ static bool isCombineInstrCandidate64(unsigned Opc) {
   return false;
 }
 
-// FP Opcodes that can be combined with a FMUL
+// FP Opcodes that can be combined with a FMUL.
 static bool isCombineInstrCandidateFP(const MachineInstr &Inst) {
   switch (Inst.getOpcode()) {
   default:
@@ -3854,8 +3883,12 @@ static bool isCombineInstrCandidateFP(const MachineInstr &Inst) {
   case AArch64::FSUBv2f64:
   case AArch64::FSUBv4f32:
     TargetOptions Options = Inst.getParent()->getParent()->getTarget().Options;
-    return (Options.UnsafeFPMath ||
-            Options.AllowFPOpFusion == FPOpFusion::Fast);
+    // We can fuse FADD/FSUB with FMUL, if fusion is either allowed globally by
+    // the target options or if FADD/FSUB has the contract fast-math flag.
+    return Options.UnsafeFPMath ||
+           Options.AllowFPOpFusion == FPOpFusion::Fast ||
+           Inst.getFlag(MachineInstr::FmContract);
+    return true;
   }
   return false;
 }
@@ -6160,6 +6193,60 @@ outliner::OutlinedFunction AArch64InstrInfo::getOutliningCandidateInfo(
       FrameID = MachineOutlinerNoLRSave;
     } else {
       SetCandidateCallInfo(MachineOutlinerDefault, 12);
+
+      // Bugzilla ID: 46767
+      // TODO: Check if fixing up the stack more than once is safe so we can
+      // outline these.
+      //
+      // An outline resulting in a caller that requires stack fixups at the
+      // callsite to a callee that also requires stack fixups can happen when
+      // there are no available registers at the candidate callsite for a
+      // candidate that itself also has calls.
+      //
+      // In other words if function_containing_sequence in the following pseudo
+      // assembly requires that we save LR at the point of the call, but there
+      // are no available registers: in this case we save using SP and as a
+      // result the SP offsets requires stack fixups by multiples of 16.
+      //
+      // function_containing_sequence:
+      //   ...
+      //   save LR to SP <- Requires stack instr fixups in OUTLINED_FUNCTION_N
+      //   call OUTLINED_FUNCTION_N
+      //   restore LR from SP
+      //   ...
+      //
+      // OUTLINED_FUNCTION_N:
+      //   save LR to SP <- Requires stack instr fixups in OUTLINED_FUNCTION_N
+      //   ...
+      //   bl foo
+      //   restore LR from SP
+      //   ret
+      //
+      // Because the code to handle more than one stack fixup does not
+      // currently have the proper checks for legality, these cases will assert
+      // in the AArch64 MachineOutliner. This is because the code to do this
+      // needs more hardening, testing, better checks that generated code is
+      // legal, etc and because it is only verified to handle a single pass of
+      // stack fixup.
+      //
+      // The assert happens in AArch64InstrInfo::buildOutlinedFrame to catch
+      // these cases until they are known to be handled. Bugzilla 46767 is
+      // referenced in comments at the assert site.
+      //
+      // To avoid asserting (or generating non-legal code on noassert builds)
+      // we remove all candidates which would need more than one stack fixup by
+      // pruning the cases where the candidate has calls while also having no
+      // available LR and having no available general purpose registers to copy
+      // LR to (ie one extra stack save/restore).
+      //
+      if (FlagsSetInAll & MachineOutlinerMBBFlags::HasCalls) {
+        erase_if(RepeatedSequenceLocs, [this](outliner::Candidate &C) {
+          return (std::any_of(
+                     C.front(), std::next(C.back()),
+                     [](const MachineInstr &MI) { return MI.isCall(); })) &&
+                 (!C.LRU.available(AArch64::LR) || !findRegisterToSaveLRTo(C));
+        });
+      }
     }
 
     // If we dropped all of the candidates, bail out here.
@@ -6583,6 +6670,9 @@ void AArch64InstrInfo::buildOutlinedFrame(
   if (std::any_of(MBB.instr_begin(), MBB.instr_end(), IsNonTailCall)) {
     // Fix up the instructions in the range, since we're going to modify the
     // stack.
+
+    // Bugzilla ID: 46767
+    // TODO: Check if fixing up twice is safe so we can outline these.
     assert(OF.FrameConstructionID != MachineOutlinerDefault &&
            "Can only fix up stack references once");
     fixupPostOutline(MBB);
@@ -6818,10 +6908,9 @@ Optional<RegImmPair> AArch64InstrInfo::isAddImmediate(const MachineInstr &MI,
     if (!MI.getOperand(0).isReg() || !MI.getOperand(1).isReg() ||
         !MI.getOperand(2).isImm())
       return None;
-    Offset = MI.getOperand(2).getImm() * Sign;
     int Shift = MI.getOperand(3).getImm();
     assert((Shift == 0 || Shift == 12) && "Shift can be either 0 or 12");
-    Offset = Offset << Shift;
+    Offset = Sign * (MI.getOperand(2).getImm() << Shift);
   }
   }
   return RegImmPair{MI.getOperand(1).getReg(), Offset};

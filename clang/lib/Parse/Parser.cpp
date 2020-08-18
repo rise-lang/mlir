@@ -552,9 +552,10 @@ bool Parser::ParseFirstTopLevelDecl(DeclGroupPtrTy &Result) {
   // declaration. C++ doesn't have this restriction. We also don't want to
   // complain if we have a precompiled header, although technically if the PCH
   // is empty we should still emit the (pedantic) diagnostic.
+  // If the main file is a header, we're only pretending it's a TU; don't warn.
   bool NoTopLevelDecls = ParseTopLevelDecl(Result, true);
   if (NoTopLevelDecls && !Actions.getASTContext().getExternalSource() &&
-      !getLangOpts().CPlusPlus)
+      !getLangOpts().CPlusPlus && !getLangOpts().IsHeaderFile)
     Diag(diag::ext_empty_translation_unit);
 
   return NoTopLevelDecls;
@@ -1691,9 +1692,8 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC) {
     return ANK_Success;
   }
 
-  case Sema::NC_ContextIndependentExpr:
-    Tok.setKind(Actions.isUnevaluatedContext() ? tok::annot_uneval_primary_expr
-                                               : tok::annot_primary_expr);
+  case Sema::NC_OverloadSet:
+    Tok.setKind(tok::annot_overload_set);
     setExprAnnotation(Tok, Classification.getExpression());
     Tok.setAnnotationEndLoc(NameLoc);
     if (SS.isNotEmpty())

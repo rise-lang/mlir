@@ -847,13 +847,9 @@ define i32 @false_undef_false_freeze(i1 %cond, i32 %x) {
 
 @g = external global i32, align 1
 
-; Make sure we don't fold partial undef vectors when constexprs are involved.
-; We would need to prove the constexpr doesn't result in poison which we aren't
-; equiped to do yet.
 define <2 x i32> @false_undef_true_constextpr_vec(i1 %cond) {
 ; CHECK-LABEL: @false_undef_true_constextpr_vec(
-; CHECK-NEXT:    [[S:%.*]] = select i1 [[COND:%.*]], <2 x i32> <i32 undef, i32 ptrtoint (i32* @g to i32)>, <2 x i32> <i32 ptrtoint (i32* @g to i32), i32 undef>
-; CHECK-NEXT:    ret <2 x i32> [[S]]
+; CHECK-NEXT:    ret <2 x i32> <i32 ptrtoint (i32* @g to i32), i32 ptrtoint (i32* @g to i32)>
 ;
   %s = select i1 %cond, <2 x i32> <i32 undef, i32 ptrtoint (i32* @g to i32)>, <2 x i32> <i32 ptrtoint (i32* @g to i32), i32 undef>
   ret <2 x i32> %s
@@ -927,4 +923,21 @@ define <2 x i32> @all_constant_true_undef_false_constexpr_vec() {
 ;
   %s = select i1 ptrtoint (<2 x i32> ()* @all_constant_true_undef_false_constexpr_vec to i1), <2 x i32> undef, <2 x i32><i32 -1, i32 ptrtoint (<2 x i32> ()* @all_constant_true_undef_false_constexpr_vec to i32)>
   ret <2 x i32> %s
+}
+
+define i1 @expand_binop_undef(i32 %x, i32 %y) {
+; CHECK-LABEL: @expand_binop_undef(
+; CHECK-NEXT:    [[CMP9_NOT_1:%.*]] = icmp eq i32 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[CMP15:%.*]] = icmp slt i32 [[X]], [[Y]]
+; CHECK-NEXT:    [[SPEC_SELECT39:%.*]] = select i1 [[CMP9_NOT_1]], i1 undef, i1 [[CMP15]]
+; CHECK-NEXT:    [[SPEC_SELECT40:%.*]] = xor i1 [[CMP9_NOT_1]], true
+; CHECK-NEXT:    [[SPEC_SELECT:%.*]] = and i1 [[SPEC_SELECT39]], [[SPEC_SELECT40]]
+; CHECK-NEXT:    ret i1 [[SPEC_SELECT]]
+;
+  %cmp9.not.1 = icmp eq i32 %x, %y
+  %cmp15 = icmp slt i32 %x, %y
+  %spec.select39 = select i1 %cmp9.not.1, i1 undef, i1 %cmp15
+  %spec.select40 = xor i1 %cmp9.not.1, 1
+  %spec.select  = and i1 %spec.select39, %spec.select40
+  ret i1 %spec.select
 }

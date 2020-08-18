@@ -107,6 +107,11 @@ struct AttributeVariable
     Optional<Type> attrType = var->attr.getValueType();
     return attrType ? attrType->getBuilderCall() : llvm::None;
   }
+
+  /// Return if this attribute refers to a UnitAttr.
+  bool isUnitAttr() const {
+    return var->attr.getBaseAttr().getAttrDefName() == "UnitAttr";
+  }
 };
 
 /// This class represents a variable that refers to an operand argument.
@@ -373,6 +378,15 @@ const char *const attrParserCode = R"(
   if (parser.parseAttribute({1}Attr{2}, "{1}", result.attributes))
     return failure();
 )";
+const char *const optionalAttrParserCode = R"(
+  {0} {1}Attr;
+  {
+    ::mlir::OptionalParseResult parseResult =
+      parser.parseOptionalAttribute({1}Attr{2}, "{1}", result.attributes);
+    if (parseResult.hasValue() && failed(*parseResult))
+      return failure();
+  }
+)";
 
 /// The code snippet used to generate a parser call for an enum attribute.
 ///
@@ -395,6 +409,30 @@ const char *const enumAttrParserCode = R"(
              << "{0} attribute specification: " << attrVal;
 
     result.addAttribute("{0}", {3});
+  }
+)";
+const char *const optionalEnumAttrParserCode = R"(
+  Attribute {0}Attr;
+  {
+    ::mlir::StringAttr attrVal;
+    ::mlir::NamedAttrList attrStorage;
+    auto loc = parser.getCurrentLocation();
+
+    ::mlir::OptionalParseResult parseResult =
+      parser.parseOptionalAttribute(attrVal, parser.getBuilder().getNoneType(),
+                                    "{0}", attrStorage);
+    if (parseResult.hasValue()) {
+      if (failed(*parseResult))
+        return failure();
+
+      auto attrOptional = {1}::{2}(attrVal.getValue());
+      if (!attrOptional)
+        return parser.emitError(loc, "invalid ")
+               << "{0} attribute specification: " << attrVal;
+
+      {0}Attr = {3};
+      result.addAttribute("{0}", {0}Attr);
+    }
   }
 )";
 
@@ -599,18 +637,36 @@ static void genElementParser(Element *element, OpMethodBody &body,
 
     // Generate a special optional parser for the first element to gate the
     // parsing of the rest of the elements.
-    if (auto *literal = dyn_cast<LiteralElement>(&*elements.begin())) {
+    Element *firstElement = &*elements.begin();
+    if (auto *attrVar = dyn_cast<AttributeVariable>(firstElement)) {
+      genElementParser(attrVar, body, attrTypeCtx);
+      body << "  if (" << attrVar->getVar()->name << "Attr) {\n";
+    } else if (auto *literal = dyn_cast<LiteralElement>(firstElement)) {
       body << "  if (succeeded(parser.parseOptional";
       genLiteralParser(literal->getLiteral(), body);
       body << ")) {\n";
-    } else if (auto *opVar = dyn_cast<OperandVariable>(&*elements.begin())) {
+    } else if (auto *opVar = dyn_cast<OperandVariable>(firstElement)) {
       genElementParser(opVar, body, attrTypeCtx);
       body << "  if (!" << opVar->getVar()->name << "Operands.empty()) {\n";
     }
 
+    // If the anchor is a unit attribute, we don't need to print it. When
+    // parsing, we will add this attribute if this group is present.
+    Element *elidedAnchorElement = nullptr;
+    auto *anchorAttr = dyn_cast<AttributeVariable>(optional->getAnchor());
+    if (anchorAttr && anchorAttr != firstElement && anchorAttr->isUnitAttr()) {
+      elidedAnchorElement = anchorAttr;
+
+      // Add the anchor unit attribute to the operation state.
+      body << "    result.addAttribute(\"" << anchorAttr->getVar()->name
+           << "\", parser.getBuilder().getUnitAttr());\n";
+    }
+
     // Generate the rest of the elements normally.
-    for (auto &childElement : llvm::drop_begin(elements, 1))
-      genElementParser(&childElement, body, attrTypeCtx);
+    for (Element &childElement : llvm::drop_begin(elements, 1)) {
+      if (&childElement != elidedAnchorElement)
+        genElementParser(&childElement, body, attrTypeCtx);
+    }
     body << "  }\n";
 
     /// Literals.
@@ -635,7 +691,9 @@ static void genElementParser(Element *element, OpMethodBody &body,
                     "attrOptional.getValue()");
       }
 
-      body << formatv(enumAttrParserCode, var->name, enumAttr.getCppNamespace(),
+      body << formatv(var->attr.isOptional() ? optionalEnumAttrParserCode
+                                             : enumAttrParserCode,
+                      var->name, enumAttr.getCppNamespace(),
                       enumAttr.getStringToSymbolFnName(), attrBuilderStr);
       return;
     }
@@ -648,8 +706,9 @@ static void genElementParser(Element *element, OpMethodBody &body,
       os << ", " << tgfmt(*typeBuilder, &attrTypeCtx);
     }
 
-    body << formatv(attrParserCode, var->attr.getStorageType(), var->name,
-                    attrTypeStr);
+    body << formatv(var->attr.isOptional() ? optionalAttrParserCode
+                                           : attrParserCode,
+                    var->attr.getStorageType(), var->name, attrTypeStr);
   } else if (auto *operand = dyn_cast<OperandVariable>(element)) {
     ArgumentLengthKind lengthKind = getArgumentLengthKind(operand->getVar());
     StringRef name = operand->getVar()->name;
@@ -1018,10 +1077,23 @@ static void genElementPrinter(Element *element, OpMethodBody &body,
            << cast<AttributeVariable>(anchor)->getVar()->name << "\")) {\n";
     }
 
+    // If the anchor is a unit attribute, we don't need to print it. When
+    // parsing, we will add this attribute if this group is present.
+    auto elements = optional->getElements();
+    Element *elidedAnchorElement = nullptr;
+    auto *anchorAttr = dyn_cast<AttributeVariable>(anchor);
+    if (anchorAttr && anchorAttr != &*elements.begin() &&
+        anchorAttr->isUnitAttr()) {
+      elidedAnchorElement = anchorAttr;
+    }
+
     // Emit each of the elements.
-    for (Element &childElement : optional->getElements())
-      genElementPrinter(&childElement, body, fmt, op, shouldEmitSpace,
-                        lastWasPunctuation);
+    for (Element &childElement : elements) {
+      if (&childElement != elidedAnchorElement) {
+        genElementPrinter(&childElement, body, fmt, op, shouldEmitSpace,
+                          lastWasPunctuation);
+      }
+    }
     body << "  }\n";
     return;
   }
@@ -1910,10 +1982,11 @@ LogicalResult FormatParser::parseOptional(std::unique_ptr<Element> &element,
 
   // The first element of the group must be one that can be parsed/printed in an
   // optional fashion.
-  if (!isa<LiteralElement>(&*elements.front()) &&
-      !isa<OperandVariable>(&*elements.front()))
-    return emitError(curLoc, "first element of an operand group must be a "
-                             "literal or operand");
+  Element *firstElement = &*elements.front();
+  if (!isa<AttributeVariable>(firstElement) &&
+      !isa<LiteralElement>(firstElement) && !isa<OperandVariable>(firstElement))
+    return emitError(curLoc, "first element of an operand group must be an "
+                             "attribute, literal, or operand");
 
   // After parsing all of the elements, ensure that all type directives refer
   // only to elements within the group.

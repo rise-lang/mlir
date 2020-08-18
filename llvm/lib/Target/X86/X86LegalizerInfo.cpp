@@ -70,6 +70,11 @@ X86LegalizerInfo::X86LegalizerInfo(const X86Subtarget &STI,
   setLegalizerInfoAVX512DQ();
   setLegalizerInfoAVX512BW();
 
+  getActionDefinitionsBuilder(G_INTRINSIC_ROUNDEVEN)
+    .scalarize(0)
+    .minScalar(0, LLT::scalar(32))
+    .libcall();
+
   setLegalizeScalarToDifferentSizeStrategy(G_PHI, 0, widen_1);
   for (unsigned BinOp : {G_SUB, G_MUL, G_AND, G_OR, G_XOR})
     setLegalizeScalarToDifferentSizeStrategy(BinOp, 0, widen_1);
@@ -161,6 +166,11 @@ void X86LegalizerInfo::setLegalizerInfo32bit() {
       .legalFor({{s8, s8}, {s16, s8}, {s32, s8}})
       .clampScalar(0, s8, s32)
       .clampScalar(1, s8, s8);
+
+    // Comparison
+    getActionDefinitionsBuilder(G_ICMP)
+        .legalForCartesianProduct({s8}, {s8, s16, s32, p0})
+        .clampScalar(0, s8, s8);
   }
 
   // Control-flow
@@ -178,12 +188,6 @@ void X86LegalizerInfo::setLegalizerInfo32bit() {
   }
   setAction({G_ANYEXT, s128}, Legal);
   getActionDefinitionsBuilder(G_SEXT_INREG).lower();
-
-  // Comparison
-  setAction({G_ICMP, s1}, Legal);
-
-  for (auto Ty : {s8, s16, s32, p0})
-    setAction({G_ICMP, 1, Ty}, Legal);
 
   // Merge/Unmerge
   for (const auto &Ty : {s16, s32, s64}) {
@@ -253,7 +257,9 @@ void X86LegalizerInfo::setLegalizerInfo64bit() {
       .widenScalarToNextPow2(1);
 
   // Comparison
-  setAction({G_ICMP, 1, s64}, Legal);
+  getActionDefinitionsBuilder(G_ICMP)
+      .legalForCartesianProduct({s8}, {s8, s16, s32, s64, p0})
+      .clampScalar(0, s8, s8);
 
   getActionDefinitionsBuilder(G_FCMP)
       .legalForCartesianProduct({s8}, {s32, s64})

@@ -237,7 +237,7 @@ def GPU_GPUFuncOp : GPU_Op<"func", [HasParent<"GPUModuleOp">,
     /// the workgroup memory
     ArrayRef<BlockArgument> getWorkgroupAttributions() {
       auto begin =
-          std::next(getBody().front().args_begin(), getType().getNumInputs());
+          std::next(getBody().args_begin(), getType().getNumInputs());
       auto end = std::next(begin, getNumWorkgroupAttributions());
       return {begin, end};
     }
@@ -248,7 +248,7 @@ def GPU_GPUFuncOp : GPU_Op<"func", [HasParent<"GPUModuleOp">,
 
     /// Returns the number of buffers located in the private memory.
     unsigned getNumPrivateAttributions() {
-      return getBody().front().getNumArguments() - getType().getNumInputs() -
+      return getBody().getNumArguments() - getType().getNumInputs() -
           getNumWorkgroupAttributions();
     }
  
@@ -258,9 +258,9 @@ def GPU_GPUFuncOp : GPU_Op<"func", [HasParent<"GPUModuleOp">,
       // Buffers on the private memory always come after buffers on the workgroup
       // memory.
       auto begin =
-          std::next(getBody().front().args_begin(),
+          std::next(getBody().args_begin(),
                     getType().getNumInputs() + getNumWorkgroupAttributions());
-      return {begin, getBody().front().args_end()};
+      return {begin, getBody().args_end()};
     }
 
     /// Adds a new block argument that corresponds to buffers located in
@@ -739,6 +739,18 @@ def GPU_ModuleEndOp : GPU_Op<"module_end", [
 
   let parser = [{ return success(); }];
   let printer = [{ p << getOperationName(); }];
+}
+
+def GPU_HostRegisterOp : GPU_Op<"host_register">,
+    Arguments<(ins AnyUnrankedMemRef:$value)> {
+  let summary = "Registers a memref for access from device.";
+  let description = [{
+    This op registers the host memory pointed to by a memref to be accessed from
+    a device.
+  }];
+
+  let assemblyFormat = "$value attr-dict `:` type($value)";
+  let verifier = [{ return success(); }];
 }
 
 #endif // GPU_OPS

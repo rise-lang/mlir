@@ -4085,6 +4085,33 @@ INTERCEPTOR(int, sigfillset, __sanitizer_sigset_t *set) {
 #define INIT_SIGSETOPS
 #endif
 
+#if SANITIZER_INTERCEPT_SIGSET_LOGICOPS
+INTERCEPTOR(int, sigandset, __sanitizer_sigset_t *dst, __sanitizer_sigset_t *src1, __sanitizer_sigset_t *src2) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, sigandset, dst, src1, src2);
+  if (src1) COMMON_INTERCEPTOR_READ_RANGE(ctx, src1, sizeof(*src1));
+  if (src2) COMMON_INTERCEPTOR_READ_RANGE(ctx, src2, sizeof(*src2));
+  int res = REAL(sigandset)(dst, src1, src2);
+  if (!res && dst) COMMON_INTERCEPTOR_WRITE_RANGE(ctx, dst, sizeof(*dst));
+  return res;
+}
+
+INTERCEPTOR(int, sigorset, __sanitizer_sigset_t *dst, __sanitizer_sigset_t *src1, __sanitizer_sigset_t *src2) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, sigorset, dst, src1, src2);
+  if (src1) COMMON_INTERCEPTOR_READ_RANGE(ctx, src1, sizeof(*src1));
+  if (src2) COMMON_INTERCEPTOR_READ_RANGE(ctx, src2, sizeof(*src2));
+  int res = REAL(sigorset)(dst, src1, src2);
+  if (!res && dst) COMMON_INTERCEPTOR_WRITE_RANGE(ctx, dst, sizeof(*dst));
+  return res;
+}
+#define INIT_SIGSET_LOGICOPS                    \
+  COMMON_INTERCEPT_FUNCTION(sigandset);   \
+  COMMON_INTERCEPT_FUNCTION(sigorset);
+#else
+#define INIT_SIGSET_LOGICOPS
+#endif
+
 #if SANITIZER_INTERCEPT_SIGPENDING
 INTERCEPTOR(int, sigpending, __sanitizer_sigset_t *set) {
   void *ctx;
@@ -5808,6 +5835,79 @@ INTERCEPTOR(int, xdr_string, __sanitizer_XDR *xdrs, char **p,
 #else
 #define INIT_XDR
 #endif  // SANITIZER_INTERCEPT_XDR
+
+#if SANITIZER_INTERCEPT_XDRREC
+typedef int (*xdrrec_cb)(char*, char*, int);
+struct XdrRecWrapper {
+  char *handle;
+  xdrrec_cb rd, wr;
+};
+typedef AddrHashMap<XdrRecWrapper *, 11> XdrRecWrapMap;
+static XdrRecWrapMap *xdrrec_wrap_map;
+
+static int xdrrec_wr_wrap(char *handle, char *buf, int count) {
+  COMMON_INTERCEPTOR_UNPOISON_PARAM(3);
+  COMMON_INTERCEPTOR_INITIALIZE_RANGE(buf, count);
+  XdrRecWrapper *wrap = (XdrRecWrapper *)handle;
+  return wrap->wr(wrap->handle, buf, count);
+}
+
+static int xdrrec_rd_wrap(char *handle, char *buf, int count) {
+  COMMON_INTERCEPTOR_UNPOISON_PARAM(3);
+  XdrRecWrapper *wrap = (XdrRecWrapper *)handle;
+  return wrap->rd(wrap->handle, buf, count);
+}
+
+// This doesn't apply to the solaris version as it has a different function
+// signature.
+INTERCEPTOR(void, xdrrec_create, __sanitizer_XDR *xdr, unsigned sndsize,
+            unsigned rcvsize, char *handle, int (*rd)(char*, char*, int),
+            int (*wr)(char*, char*, int)) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, xdrrec_create, xdr, sndsize, rcvsize,
+                           handle, rd, wr);
+  COMMON_INTERCEPTOR_READ_RANGE(ctx, &xdr->x_op, sizeof xdr->x_op);
+  
+  // We can't allocate a wrapper on the stack, as the handle is used outside
+  // this stack frame. So we put it on the heap, and keep track of it with
+  // the HashMap (keyed by x_private). When we later need to xdr_destroy,
+  // we can index the map, free the wrapper, and then clean the map entry.
+  XdrRecWrapper *wrap_data =
+      (XdrRecWrapper *)InternalAlloc(sizeof(XdrRecWrapper));
+  wrap_data->handle = handle;
+  wrap_data->rd = rd;
+  wrap_data->wr = wr;
+  if (wr)
+    wr = xdrrec_wr_wrap;
+  if (rd)
+    rd = xdrrec_rd_wrap;
+  handle = (char *)wrap_data;
+
+  REAL(xdrrec_create)(xdr, sndsize, rcvsize, handle, rd, wr);
+  COMMON_INTERCEPTOR_WRITE_RANGE(ctx, xdr, sizeof *xdr);
+
+  XdrRecWrapMap::Handle wrap(xdrrec_wrap_map, xdr->x_private, false, true);
+  *wrap = wrap_data;
+}
+
+// We have to intercept this to be able to free wrapper memory;
+// otherwise it's not necessary.
+INTERCEPTOR(void, xdr_destroy, __sanitizer_XDR *xdr) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, xdr_destroy, xdr);
+
+  XdrRecWrapMap::Handle wrap(xdrrec_wrap_map, xdr->x_private, true);
+  InternalFree(*wrap);
+  REAL(xdr_destroy)(xdr);
+}
+#define INIT_XDRREC_LINUX \
+  static u64 xdrrec_wrap_mem[sizeof(XdrRecWrapMap) / sizeof(u64) + 1]; \
+  xdrrec_wrap_map = new ((void *)&xdrrec_wrap_mem) XdrRecWrapMap(); \
+  COMMON_INTERCEPT_FUNCTION(xdrrec_create); \
+  COMMON_INTERCEPT_FUNCTION(xdr_destroy);
+#else
+#define INIT_XDRREC_LINUX
+#endif
 
 #if SANITIZER_INTERCEPT_TSEARCH
 INTERCEPTOR(void *, tsearch, void *key, void **rootp,
@@ -9755,12 +9855,25 @@ INTERCEPTOR(void, qsort, void *base, SIZE_T nmemb, SIZE_T size,
     }
   }
   qsort_compar_f old_compar = qsort_compar;
-  qsort_compar = compar;
   SIZE_T old_size = qsort_size;
-  qsort_size = size;
+  // Handle qsort() implementations that recurse using an
+  // interposable function call:
+  bool already_wrapped = compar == wrapped_qsort_compar;
+  if (already_wrapped) {
+    // This case should only happen if the qsort() implementation calls itself
+    // using a preemptible function call (e.g. the FreeBSD libc version).
+    // Check that the size and comparator arguments are as expected.
+    CHECK_NE(compar, qsort_compar);
+    CHECK_EQ(qsort_size, size);
+  } else {
+    qsort_compar = compar;
+    qsort_size = size;
+  }
   REAL(qsort)(base, nmemb, size, wrapped_qsort_compar);
-  qsort_compar = old_compar;
-  qsort_size = old_size;
+  if (!already_wrapped) {
+    qsort_compar = old_compar;
+    qsort_size = old_size;
+  }
   COMMON_INTERCEPTOR_WRITE_RANGE(ctx, base, nmemb * size);
 }
 #define INIT_QSORT COMMON_INTERCEPT_FUNCTION(qsort)
@@ -9793,12 +9906,25 @@ INTERCEPTOR(void, qsort_r, void *base, SIZE_T nmemb, SIZE_T size,
     }
   }
   qsort_r_compar_f old_compar = qsort_r_compar;
-  qsort_r_compar = compar;
   SIZE_T old_size = qsort_r_size;
-  qsort_r_size = size;
+  // Handle qsort_r() implementations that recurse using an
+  // interposable function call:
+  bool already_wrapped = compar == wrapped_qsort_r_compar;
+  if (already_wrapped) {
+    // This case should only happen if the qsort() implementation calls itself
+    // using a preemptible function call (e.g. the FreeBSD libc version).
+    // Check that the size and comparator arguments are as expected.
+    CHECK_NE(compar, qsort_r_compar);
+    CHECK_EQ(qsort_r_size, size);
+  } else {
+    qsort_r_compar = compar;
+    qsort_r_size = size;
+  }
   REAL(qsort_r)(base, nmemb, size, wrapped_qsort_r_compar, arg);
-  qsort_r_compar = old_compar;
-  qsort_r_size = old_size;
+  if (!already_wrapped) {
+    qsort_r_compar = old_compar;
+    qsort_r_size = old_size;
+  }
   COMMON_INTERCEPTOR_WRITE_RANGE(ctx, base, nmemb * size);
 }
 #define INIT_QSORT_R COMMON_INTERCEPT_FUNCTION(qsort_r)
@@ -9996,6 +10122,7 @@ static void InitializeCommonInterceptors() {
   INIT_SIGWAITINFO;
   INIT_SIGTIMEDWAIT;
   INIT_SIGSETOPS;
+  INIT_SIGSET_LOGICOPS;
   INIT_SIGPENDING;
   INIT_SIGPROCMASK;
   INIT_PTHREAD_SIGMASK;
@@ -10066,6 +10193,7 @@ static void InitializeCommonInterceptors() {
   INIT_BZERO;
   INIT_FTIME;
   INIT_XDR;
+  INIT_XDRREC_LINUX;
   INIT_TSEARCH;
   INIT_LIBIO_INTERNALS;
   INIT_FOPEN;

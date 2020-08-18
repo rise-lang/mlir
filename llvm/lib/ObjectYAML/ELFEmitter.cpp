@@ -355,7 +355,7 @@ ELFState<ELFT>::ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH)
   if (Doc.Symbols)
     ImplicitSections.push_back(".symtab");
   if (Doc.DWARF)
-    for (StringRef DebugSecName : Doc.DWARF->getUsedSectionNames()) {
+    for (StringRef DebugSecName : Doc.DWARF->getNonEmptySectionNames()) {
       std::string SecName = ("." + DebugSecName).str();
       ImplicitSections.push_back(StringRef(SecName).copy(StringAlloc));
     }
@@ -417,21 +417,23 @@ void ELFState<ELFT>::writeELFHeader(raw_ostream &OS, uint64_t SHOff) {
   else
     Header.e_phnum = 0;
 
-  Header.e_shentsize =
-      Doc.Header.SHEntSize ? (uint16_t)*Doc.Header.SHEntSize : sizeof(Elf_Shdr);
+  Header.e_shentsize = Doc.Header.EShEntSize ? (uint16_t)*Doc.Header.EShEntSize
+                                             : sizeof(Elf_Shdr);
 
-  const bool NoShdrs = Doc.SectionHeaders && Doc.SectionHeaders->NoHeaders;
+  const bool NoShdrs =
+      Doc.SectionHeaders && Doc.SectionHeaders->NoHeaders.getValueOr(false);
 
-  if (Doc.Header.SHOff)
-    Header.e_shoff = *Doc.Header.SHOff;
+  if (Doc.Header.EShOff)
+    Header.e_shoff = *Doc.Header.EShOff;
   else if (NoShdrs)
     Header.e_shoff = 0;
   else
     Header.e_shoff = SHOff;
 
-  if (Doc.Header.SHNum)
-    Header.e_shnum = *Doc.Header.SHNum;
-  else if (!Doc.SectionHeaders)
+  if (Doc.Header.EShNum)
+    Header.e_shnum = *Doc.Header.EShNum;
+  else if (!Doc.SectionHeaders ||
+           (Doc.SectionHeaders->NoHeaders && !*Doc.SectionHeaders->NoHeaders))
     Header.e_shnum = Doc.getSections().size();
   else if (NoShdrs)
     Header.e_shnum = 0;
@@ -441,8 +443,8 @@ void ELFState<ELFT>::writeELFHeader(raw_ostream &OS, uint64_t SHOff) {
                                       : 0) +
         /*Null section*/ 1;
 
-  if (Doc.Header.SHStrNdx)
-    Header.e_shstrndx = *Doc.Header.SHStrNdx;
+  if (Doc.Header.EShStrNdx)
+    Header.e_shstrndx = *Doc.Header.EShStrNdx;
   else if (NoShdrs || ExcludedSectionHeaders.count(".shstrtab"))
     Header.e_shstrndx = 0;
   else
@@ -503,11 +505,12 @@ unsigned ELFState<ELFT>::toSectionIndex(StringRef S, StringRef LocSec,
     return 0;
   }
 
-  if (!Doc.SectionHeaders ||
-      (!Doc.SectionHeaders->NoHeaders && !Doc.SectionHeaders->Excluded))
+  if (!Doc.SectionHeaders || (Doc.SectionHeaders->NoHeaders &&
+                              !Doc.SectionHeaders->NoHeaders.getValue()))
     return Index;
 
-  assert(!Doc.SectionHeaders->NoHeaders || !Doc.SectionHeaders->Sections);
+  assert(!Doc.SectionHeaders->NoHeaders.getValueOr(false) ||
+         !Doc.SectionHeaders->Sections);
   size_t FirstExcluded =
       Doc.SectionHeaders->Sections ? Doc.SectionHeaders->Sections->size() : 0;
   if (Index >= FirstExcluded) {
@@ -548,6 +551,8 @@ static void overrideFields(ELFYAML::Section *From, typename ELFT::Shdr &To) {
     To.sh_offset = *From->ShOffset;
   if (From->ShSize)
     To.sh_size = *From->ShSize;
+  if (From->ShType)
+    To.sh_type = *From->ShType;
 }
 
 template <class ELFT>
@@ -928,7 +933,7 @@ void ELFState<ELFT>::initStrtabSectionHeader(Elf_Shdr &SHeader, StringRef Name,
 }
 
 static bool shouldEmitDWARF(DWARFYAML::Data &DWARF, StringRef Name) {
-  SetVector<StringRef> DebugSecNames = DWARF.getUsedSectionNames();
+  SetVector<StringRef> DebugSecNames = DWARF.getNonEmptySectionNames();
   return Name.consume_front(".") && DebugSecNames.count(Name);
 }
 
@@ -944,37 +949,9 @@ Expected<uint64_t> emitDWARF(typename ELFT::Shdr &SHeader, StringRef Name,
     return 0;
 
   uint64_t BeginOffset = CBA.tell();
-  Error Err = Error::success();
-  cantFail(std::move(Err));
 
-  if (Name == ".debug_str")
-    Err = DWARFYAML::emitDebugStr(*OS, DWARF);
-  else if (Name == ".debug_aranges")
-    Err = DWARFYAML::emitDebugAranges(*OS, DWARF);
-  else if (Name == ".debug_ranges")
-    Err = DWARFYAML::emitDebugRanges(*OS, DWARF);
-  else if (Name == ".debug_line")
-    Err = DWARFYAML::emitDebugLine(*OS, DWARF);
-  else if (Name == ".debug_addr")
-    Err = DWARFYAML::emitDebugAddr(*OS, DWARF);
-  else if (Name == ".debug_abbrev")
-    Err = DWARFYAML::emitDebugAbbrev(*OS, DWARF);
-  else if (Name == ".debug_info")
-    Err = DWARFYAML::emitDebugInfo(*OS, DWARF);
-  else if (Name == ".debug_pubnames")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.PubNames, DWARF.IsLittleEndian);
-  else if (Name == ".debug_pubtypes")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.PubTypes, DWARF.IsLittleEndian);
-  else if (Name == ".debug_gnu_pubnames")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.GNUPubNames,
-                                    DWARF.IsLittleEndian, /*IsGNUStyle=*/true);
-  else if (Name == ".debug_gnu_pubtypes")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.GNUPubTypes,
-                                    DWARF.IsLittleEndian, /*IsGNUStyle=*/true);
-  else
-    llvm_unreachable("unexpected emitDWARF() call");
-
-  if (Err)
+  auto EmitFunc = DWARFYAML::getDWARFEmitterByName(Name.substr(1));
+  if (Error Err = EmitFunc(*OS, DWARF))
     return std::move(Err);
 
   return CBA.tell() - BeginOffset;
@@ -1776,7 +1753,7 @@ template <class ELFT> void ELFState<ELFT>::buildSectionIndex() {
         if (!ExcludedSectionHeaders.insert(Hdr.Name).second)
           llvm_unreachable("buildSectionIndex() failed");
 
-    if (Doc.SectionHeaders->NoHeaders)
+    if (Doc.SectionHeaders->NoHeaders.getValueOr(false))
       for (const ELFYAML::Section *S : Sections)
         if (!ExcludedSectionHeaders.insert(S->Name).second)
           llvm_unreachable("buildSectionIndex() failed");

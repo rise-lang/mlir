@@ -21,6 +21,8 @@ import six
 import lldb
 from . import lldbtest_config
 
+# How often failed simulator process launches are retried.
+SIMULATOR_RETRY = 3
 
 # ===================================================
 # Utilities for locating/checking executable programs
@@ -502,6 +504,29 @@ def run_break_set_by_source_regexp(
 
     return get_bpno_from_match(break_results)
 
+def run_break_set_by_file_colon_line(
+        test,
+        specifier,
+        path,
+        line_number,
+        column_number = 0,
+        extra_options=None,
+        num_expected_locations=-1):
+    command = 'breakpoint set -y "%s"'%(specifier)
+    if extra_options:
+        command += " " + extra_options
+
+    print("About to run: '%s'", command)
+    break_results = run_break_set_command(test, command)
+    check_breakpoint_result(
+        test,
+        break_results,
+        num_locations = num_expected_locations,
+        file_name = path,
+        line_number = line_number,
+        column_number = column_number)
+    
+    return get_bpno_from_match(break_results)
 
 def run_break_set_command(test, command):
     """Run the command passed in - it must be some break set variant - and analyze the result.
@@ -515,6 +540,7 @@ def run_break_set_command(test, command):
     If there is only one location, the dictionary MAY contain:
         file          - source file name
         line_no       - source line number
+        column        - source column number
         symbol        - symbol name
         inline_symbol - inlined symbol name
         offset        - offset from the original symbol
@@ -566,6 +592,7 @@ def check_breakpoint_result(
         break_results,
         file_name=None,
         line_number=-1,
+        column_number=0,
         symbol_name=None,
         symbol_match_exact=True,
         module_name=None,
@@ -604,6 +631,17 @@ def check_breakpoint_result(
             "Breakpoint line number %s doesn't match resultant line %s." %
             (line_number,
              out_line_number))
+
+    if column_number != 0:
+        out_column_number = 0
+        if 'column' in break_results:
+            out_column_number = break_results['column']
+
+        test.assertTrue(
+            column_number == out_column_number,
+            "Breakpoint column number %s doesn't match resultant column %s." %
+            (column_number,
+             out_column_number))
 
     if symbol_name:
         out_symbol_name = ""
@@ -782,9 +820,20 @@ def run_to_breakpoint_do_run(test, target, bkpt, launch_info = None,
     error = lldb.SBError()
     process = target.Launch(launch_info, error)
 
+    # Unfortunate workaround for the iPhone simulator.
+    retry = SIMULATOR_RETRY
+    while (retry and error.Fail() and error.GetCString() and
+           "Unable to boot the Simulator" in error.GetCString()):
+        retry -= 1
+        print("** Simulator is unresponsive. Retrying %d more time(s)"%retry)
+        import time
+        time.sleep(60)
+        error = lldb.SBError()
+        process = target.Launch(launch_info, error)
+
     test.assertTrue(process,
-                    "Could not create a valid process for %s: %s"%(target.GetExecutable().GetFilename(),
-                    error.GetCString()))
+                    "Could not create a valid process for %s: %s" %
+                    (target.GetExecutable().GetFilename(), error.GetCString()))
     test.assertFalse(error.Fail(),
                      "Process launch failed: %s" % (error.GetCString()))
 
@@ -1422,3 +1471,40 @@ def wait_for_file_on_target(testcase, file_path, max_attempts=6):
             (file_path, max_attempts))
 
     return read_file_on_target(testcase, file_path)
+
+def packetlog_get_process_info(log):
+    """parse a gdb-remote packet log file and extract the response to qProcessInfo"""
+    process_info = dict()
+    with open(log, "r") as logfile:
+        process_info_ostype = None
+        expect_process_info_response = False
+        for line in logfile:
+            if expect_process_info_response:
+                for pair in line.split(';'):
+                    keyval = pair.split(':')
+                    if len(keyval) == 2:
+                        process_info[keyval[0]] = keyval[1]
+                break
+            if 'send packet: $qProcessInfo#' in line:
+                expect_process_info_response = True
+    return process_info
+
+def packetlog_get_dylib_info(log):
+    """parse a gdb-remote packet log file and extract the *last* response to jGetLoadedDynamicLibrariesInfos"""
+    import json
+    dylib_info = None
+    with open(log, "r") as logfile:
+        dylib_info = None
+        expect_dylib_info_response = False
+        for line in logfile:
+            if expect_dylib_info_response:
+                while line[0] != '$':
+                    line = line[1:]
+                line = line[1:]
+                # Unescape '}'.
+                dylib_info = json.loads(line.replace('}]','}')[:-4])
+                expect_dylib_info_response = False
+            if 'send packet: $jGetLoadedDynamicLibrariesInfos:{' in line:
+                expect_dylib_info_response = True
+
+    return dylib_info

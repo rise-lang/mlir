@@ -15,12 +15,12 @@ include "mlir/Pass/PassBase.td"
 // AffineToStandard
 //===----------------------------------------------------------------------===//
 
-def ConvertAffineToStandard : FunctionPass<"lower-affine"> {
+def ConvertAffineToStandard : Pass<"lower-affine"> {
   let summary = "Lower Affine operations to a combination of Standard and SCF "
                 "operations";
   let description = [{
 
-    Convert operations from the affine dialect into operations from the loop and
+    Convert operations from the affine dialect into operations from the SCF and
     standard dialects.
 
     `affine.for` operations are converted to `scf.for` operations that are free
@@ -82,14 +82,12 @@ def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm", "ModuleOp"> {
 // GPUCommon
 //===----------------------------------------------------------------------===//
 
-def ConvertGpuLaunchFuncToGpuRuntimeCalls : Pass<"launch-func-to-gpu-runtime",
-                                                 "ModuleOp"> {
-  let summary = "Convert all launch_func ops to GPU runtime calls";
-  let constructor = "mlir::createConvertGpuLaunchFuncToGpuRuntimeCallsPass()";
+def GpuToLLVMConversionPass : Pass<"gpu-to-llvm", "ModuleOp"> {
+  let summary = "Convert GPU dialect to LLVM dialect with GPU runtime calls";
+  let constructor = "mlir::createGpuToLLVMConversionPass()";
   let options = [
     Option<"gpuBinaryAnnotation", "gpu-binary-annotation", "std::string",
-           "\"nvvm.cubin\"",
-           "Annotation attribute string for GPU binary">,
+           "", "Annotation attribute string for GPU binary">,
   ];
 }
 
@@ -174,6 +172,15 @@ def ConvertLinalgToStandard : Pass<"convert-linalg-to-std", "ModuleOp"> {
 def ConvertLinalgToSPIRV : Pass<"convert-linalg-to-spirv", "ModuleOp"> {
   let summary = "Convert Linalg ops to SPIR-V ops";
   let constructor = "mlir::createLinalgToSPIRVPass()";
+}
+
+//===----------------------------------------------------------------------===//
+// RiseToImperative
+// ===----------------------------------------------------------------------===//
+
+def ConvertRiseToImperative : FunctionPass<"convert-rise-to-imperative"> {
+  let summary = "Lower all functional primitives of the rise dialect to imperative";
+  let constructor = "mlir::createConvertRiseToImperativePass()";
 }
 
 //===----------------------------------------------------------------------===//

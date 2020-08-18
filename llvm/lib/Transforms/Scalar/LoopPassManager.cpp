@@ -39,9 +39,6 @@ PassManager<Loop, LoopAnalysisManager, LoopStandardAnalysisResults &,
     if (!PI.runBeforePass<Loop>(*Pass, L))
       continue;
 
-    if (DebugLogging)
-      dbgs() << "Running pass: " << Pass->name() << " on " << L;
-
     PreservedAnalyses PassPA;
     {
       TimeTraceScope TimeScope(Pass->name(), L.getName());
@@ -59,13 +56,6 @@ PassManager<Loop, LoopAnalysisManager, LoopStandardAnalysisResults &,
       PA.intersect(std::move(PassPA));
       break;
     }
-
-#ifndef NDEBUG
-    // Verify the loop structure and LCSSA form before visiting the loop.
-    L.verifyLoop();
-    assert(L.isRecursivelyLCSSAForm(AR.DT, AR.LI) &&
-           "Loops must remain in LCSSA form!");
-#endif
 
     // Update the analysis manager as each pass runs and potentially
     // invalidates analyses.

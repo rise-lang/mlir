@@ -244,19 +244,18 @@ InlineSizeEstimatorAnalysis::InlineSizeEstimatorAnalysis() {
   if (!isEvaluatorRequested()) {
     return;
   }
-  std::vector<std::string> InputNames{"serving_default_input_1"};
-  std::vector<std::string> OutputName{"StatefulPartitionedCall"};
+  std::vector<TensorSpec> InputSpecs{TensorSpec::createSpec<int32_t>(
+      "serving_default_input_1",
+      {1, static_cast<int64_t>(
+              IRToNativeSizeLearning::FunctionFeatures::FeatureCount)})};
+  std::vector<TensorSpec> OutputSpecs{
+      TensorSpec::createSpec<float>("StatefulPartitionedCall", {1})};
   Evaluator = std::make_unique<TFModelEvaluator>(
-      TFIR2NativeModelPath.getValue().c_str(), InputNames, OutputName);
+      TFIR2NativeModelPath.getValue().c_str(), InputSpecs, OutputSpecs);
   if (!Evaluator || !Evaluator->isValid()) {
     Evaluator.reset();
     return;
   }
-  static const std::vector<int64_t> Dim{
-      1, static_cast<int64_t>(
-             IRToNativeSizeLearning::FunctionFeatures::FeatureCount)};
-
-  Evaluator->initInput(0, TF_INT32, Dim);
 }
 
 InlineSizeEstimatorAnalysis::Result
@@ -266,7 +265,7 @@ InlineSizeEstimatorAnalysis::run(const Function &F,
     return None;
   auto Features = IRToNativeSizeLearning::getFunctionFeatures(
       const_cast<Function &>(F), FAM);
-  int32_t *V = static_cast<int32_t *>(TF_TensorData(Evaluator->getInput()[0]));
+  int32_t *V = Evaluator->getInput<int32_t>(0);
   Features.fillTensor(V);
   auto ER = Evaluator->evaluate();
   if (!ER)
@@ -297,3 +296,11 @@ InlineSizeEstimatorAnalysis::run(const Function &F,
 }
 bool InlineSizeEstimatorAnalysis::isEvaluatorRequested() { return false; }
 #endif
+
+PreservedAnalyses
+InlineSizeEstimatorAnalysisPrinterPass::run(Function &F,
+                                            FunctionAnalysisManager &AM) {
+  OS << "[InlineSizeEstimatorAnalysis] size estimate for " << F.getName()
+     << ": " << AM.getResult<InlineSizeEstimatorAnalysis>(F) << "\n";
+  return PreservedAnalyses::all();
+}

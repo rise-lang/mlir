@@ -79,11 +79,6 @@ if(LLDB_BUILD_FRAMEWORK)
   if(NOT APPLE)
     message(FATAL_ERROR "LLDB.framework can only be generated when targeting Apple platforms")
   endif()
-  # CMake 3.6 did not correctly emit POST_BUILD commands for Apple Framework targets
-  # CMake < 3.8 did not have the BUILD_RPATH target property
-  if(CMAKE_VERSION VERSION_LESS 3.8)
-    message(FATAL_ERROR "LLDB_BUILD_FRAMEWORK is not supported on CMake < 3.8")
-  endif()
 
   set(LLDB_FRAMEWORK_VERSION A CACHE STRING "LLDB.framework version (default is A)")
   set(LLDB_FRAMEWORK_BUILD_DIR bin CACHE STRING "Output directory for LLDB.framework")
@@ -272,7 +267,7 @@ endif()
 
 # Find Apple-specific libraries or frameworks that may be needed.
 if (APPLE)
-  if(NOT IOS)
+  if(NOT APPLE_EMBEDDED)
     find_library(CARBON_LIBRARY Carbon)
     find_library(CORE_SERVICES_LIBRARY CoreServices)
   endif()

@@ -23,10 +23,6 @@ namespace Fortran::parser {
 constexpr auto startOmpLine = skipStuffBeforeStatement >> "!$OMP "_sptok;
 constexpr auto endOmpLine = space >> endOfLine;
 
-template <typename A> constexpr decltype(auto) verbatim(A x) {
-  return sourced(construct<Verbatim>(x));
-}
-
 // OpenMP Clauses
 // 2.15.3.1 DEFAULT (PRIVATE | FIRSTPRIVATE | SHARED | NONE)
 TYPE_PARSER(construct<OmpDefaultClause>(
@@ -107,6 +103,11 @@ TYPE_PARSER(construct<OmpReductionOperator>(Parser<DefinedOperator>{}) ||
 
 TYPE_PARSER(construct<OmpReductionClause>(
     Parser<OmpReductionOperator>{} / ":", nonemptyList(designator)))
+
+// OMP 5.0 2.11.4  ALLOCATE ([allocator:] variable-name-list)
+TYPE_PARSER(construct<OmpAllocateClause>(
+    maybe(construct<OmpAllocateClause::Allocator>(scalarIntExpr) / ":"),
+    Parser<OmpObjectList>{}))
 
 // 2.13.9 DEPEND (SOURCE | SINK : vec | (IN | OUT | INOUT) : list
 TYPE_PARSER(construct<OmpDependSinkVecLength>(
@@ -210,6 +211,8 @@ TYPE_PARSER("ALIGNED" >>
         construct<OmpClause>(parenthesized(Parser<OmpProcBindClause>{})) ||
     "REDUCTION" >>
         construct<OmpClause>(parenthesized(Parser<OmpReductionClause>{})) ||
+    "ALLOCATE" >>
+        construct<OmpClause>(parenthesized(Parser<OmpAllocateClause>{})) ||
     "SAFELEN" >> construct<OmpClause>(construct<OmpClause::Safelen>(
                      parenthesized(scalarIntConstantExpr))) ||
     "SCHEDULE" >>

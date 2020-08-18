@@ -40,11 +40,21 @@ namespace mlir {
 namespace rise {
 
 /// Dialect creation
-RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx) {
+RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx, TypeID::get<RiseDialect>()) {
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
       >();
+  ///      Types:                    Nats: Datatypes:
+  addTypes<FunType, DataTypeWrapper, Nat, Tuple, ArrayType, ScalarType>();
+  addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();
+}
+
+void mlir::rise::RiseDialect::initialize() {
+  addOperations<
+#define GET_OP_LIST
+#include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
+  >();
   ///      Types:                    Nats: Datatypes:
   addTypes<FunType, DataTypeWrapper, Nat, Tuple, ArrayType, ScalarType>();
   addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();

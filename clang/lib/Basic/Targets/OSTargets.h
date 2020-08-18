@@ -465,6 +465,8 @@ protected:
 public:
   OpenBSDTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
+    this->IntMaxType = TargetInfo::SignedLongLong;
+    this->Int64Type = TargetInfo::SignedLongLong;
     switch (Triple.getArch()) {
     case llvm::Triple::x86:
     case llvm::Triple::x86_64:
@@ -476,6 +478,8 @@ public:
     case llvm::Triple::mips64:
     case llvm::Triple::mips64el:
     case llvm::Triple::ppc:
+    case llvm::Triple::ppc64:
+    case llvm::Triple::ppc64le:
     case llvm::Triple::sparcv9:
       this->MCountName = "_mcount";
       break;
@@ -719,6 +723,8 @@ public:
   // AIX sets FLT_EVAL_METHOD to be 1.
   unsigned getFloatEvalMethod() const override { return 1; }
   bool hasInt128Type() const override { return false; }
+
+  bool defaultsToAIXPowerAlignment() const override { return true; }
 };
 
 void addWindowsDefines(const llvm::Triple &Triple, const LangOptions &Opts,
@@ -821,7 +827,7 @@ class LLVM_LIBRARY_VISIBILITY WebAssemblyOSTargetInfo
     : public OSTargetInfo<Target> {
 protected:
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const {
+                    MacroBuilder &Builder) const override {
     // A common platform macro.
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");

@@ -304,7 +304,8 @@ void Writer::layoutMemory() {
   if (WasmSym::heapBase)
     WasmSym::heapBase->setVirtualAddress(memoryPtr);
 
-  uint64_t maxMemorySetting = 1ULL << (config->is64 ? 48 : 32);
+  uint64_t maxMemorySetting = 1ULL
+                              << (config->is64.getValueOr(false) ? 48 : 32);
 
   if (config->initialMemory != 0) {
     if (config->initialMemory != alignTo(config->initialMemory, WasmPageSize))
@@ -353,8 +354,8 @@ static void addStartStopSymbols(const OutputSegment *seg) {
   if (!isValidCIdentifier(name))
     return;
   LLVM_DEBUG(dbgs() << "addStartStopSymbols: " << name << "\n");
-  uint32_t start = seg->startVA;
-  uint32_t stop = start + seg->size;
+  uint64_t start = seg->startVA;
+  uint64_t stop = start + seg->size;
   symtab->addOptionalDataSymbol(saver.save("__start_" + name), start);
   symtab->addOptionalDataSymbol(saver.save("__stop_" + name), stop);
 }
@@ -837,7 +838,12 @@ void Writer::createInitMemoryFunction() {
       for (const OutputSegment *s : segments) {
         if (needsPassiveInitialization(s)) {
           // destination address
-          writeI32Const(os, s->startVA, "destination address");
+          if (config->is64.getValueOr(false)) {
+            writeI64Const(os, s->startVA, "destination address");
+          } else {
+            writeI32Const(os, static_cast<int32_t>(s->startVA),
+                          "destination address");
+          }
           // source segment offset
           writeI32Const(os, 0, "segment offset");
           // memory region size
@@ -959,6 +965,7 @@ void Writer::createInitTLSFunction() {
       writeU8(os, WASM_OPCODE_GLOBAL_SET, "global.set");
       writeUleb128(os, WasmSym::tlsBase->getGlobalIndex(), "global index");
 
+      // FIXME(wvo): this local needs to be I64 in wasm64, or we need an extend op.
       writeU8(os, WASM_OPCODE_LOCAL_GET, "local.get");
       writeUleb128(os, 0, "local index");
 

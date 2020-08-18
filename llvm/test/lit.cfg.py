@@ -141,6 +141,7 @@ tools = [
     ToolSubst('%llvm-objcopy', FindTool('llvm-objcopy')),
     ToolSubst('%llvm-strip', FindTool('llvm-strip')),
     ToolSubst('%llvm-install-name-tool', FindTool('llvm-install-name-tool')),
+    ToolSubst('%split-file', FindTool('split-file')),
 ]
 
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
@@ -221,6 +222,9 @@ if not config.build_shared_libs and not config.link_llvm_dylib:
 
 if config.have_tf_aot:
     config.available_features.add("have_tf_aot")
+
+if config.have_tf_api:
+    config.available_features.add("have_tf_api")
 
 def have_cxx_shared_library():
     readobj_exe = lit.util.which('llvm-readobj', config.llvm_tools_dir)

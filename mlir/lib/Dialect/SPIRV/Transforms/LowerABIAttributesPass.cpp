@@ -119,8 +119,17 @@ static LogicalResult lowerEntryPointABIAttr(spirv::FuncOp funcOp,
   if (failed(getInterfaceVariables(funcOp, interfaceVars))) {
     return failure();
   }
+
+  spirv::TargetEnvAttr targetEnv = spirv::lookupTargetEnv(funcOp);
+  FailureOr<spirv::ExecutionModel> executionModel =
+      spirv::getExecutionModel(targetEnv);
+  if (failed(executionModel))
+    return funcOp.emitRemark("lower entry point failure: could not select "
+                             "execution model based on 'spv.target_env'");
+
   builder.create<spirv::EntryPointOp>(
-      funcOp.getLoc(), spirv::ExecutionModel::GLCompute, funcOp, interfaceVars);
+      funcOp.getLoc(), executionModel.getValue(), funcOp, interfaceVars);
+
   // Specifies the spv.ExecutionModeOp.
   auto localSizeAttr = entryPointAttr.local_size();
   SmallVector<int32_t, 3> localSize(localSizeAttr.getValues<int32_t>());
@@ -222,6 +231,16 @@ void LowerABIAttributesPass::runOnOperation() {
   spirv::TargetEnv targetEnv(spirv::lookupTargetEnv(module));
 
   SPIRVTypeConverter typeConverter(targetEnv);
+
+  // Insert a bitcast in the case of a pointer type change.
+  typeConverter.addSourceMaterialization([](OpBuilder &builder,
+                                            spirv::PointerType type,
+                                            ValueRange inputs, Location loc) {
+    if (inputs.size() != 1 || !inputs[0].getType().isa<spirv::PointerType>())
+      return Value();
+    return builder.create<spirv::BitcastOp>(loc, type, inputs[0]).getResult();
+  });
+
   OwningRewritePatternList patterns;
   patterns.insert<ProcessInterfaceVarABI>(context, typeConverter);
 

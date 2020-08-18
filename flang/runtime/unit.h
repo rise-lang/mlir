@@ -35,25 +35,33 @@ class ExternalFileUnit : public ConnectionState,
 public:
   explicit ExternalFileUnit(int unitNumber) : unitNumber_{unitNumber} {}
   int unitNumber() const { return unitNumber_; }
+  bool swapEndianness() const { return swapEndianness_; }
 
   static ExternalFileUnit *LookUp(int unit);
   static ExternalFileUnit &LookUpOrCrash(int unit, const Terminator &);
   static ExternalFileUnit &LookUpOrCreate(
-      int unit, const Terminator &, bool *wasExtant = nullptr);
+      int unit, const Terminator &, bool &wasExtant);
+  static ExternalFileUnit &LookUpOrCreateAnonymous(
+      int unit, Direction, bool isUnformatted, const Terminator &);
+  static ExternalFileUnit *LookUp(const char *path);
+  static ExternalFileUnit &CreateNew(int unit, const Terminator &);
   static ExternalFileUnit *LookUpForClose(int unit);
   static int NewUnit(const Terminator &);
   static void CloseAll(IoErrorHandler &);
   static void FlushAll(IoErrorHandler &);
 
-  void OpenUnit(OpenStatus, Position, OwningPtr<char> &&path,
-      std::size_t pathLength, IoErrorHandler &);
+  void OpenUnit(OpenStatus, std::optional<Action>, Position,
+      OwningPtr<char> &&path, std::size_t pathLength, Convert,
+      IoErrorHandler &);
+  void OpenAnonymousUnit(
+      OpenStatus, std::optional<Action>, Position, Convert, IoErrorHandler &);
   void CloseUnit(CloseStatus, IoErrorHandler &);
   void DestroyClosed();
 
   bool SetDirection(Direction, IoErrorHandler &);
 
   template <typename A, typename... X>
-  IoStatementState &BeginIoStatement(X &&... xs) {
+  IoStatementState &BeginIoStatement(X &&...xs) {
     // TODO: Child data transfer statements vs. locking
     lock_.Take(); // dropped in EndIoStatement()
     A &state{u_.emplace<A>(std::forward<X>(xs)...)};
@@ -64,8 +72,9 @@ public:
     return *io_;
   }
 
-  bool Emit(const char *, std::size_t, IoErrorHandler &);
-  bool Receive(char *, std::size_t, IoErrorHandler &);
+  bool Emit(
+      const char *, std::size_t, std::size_t elementBytes, IoErrorHandler &);
+  bool Receive(char *, std::size_t, std::size_t elementBytes, IoErrorHandler &);
   std::optional<char32_t> GetCurrentChar(IoErrorHandler &);
   void SetLeftTabLimit();
   void BeginReadingRecord(IoErrorHandler &);
@@ -106,7 +115,7 @@ private:
       ExternalListIoStatementState<Direction::Output>,
       ExternalListIoStatementState<Direction::Input>,
       UnformattedIoStatementState<Direction::Output>,
-      UnformattedIoStatementState<Direction::Input>,
+      UnformattedIoStatementState<Direction::Input>, InquireUnitState,
       ExternalMiscIoStatementState>
       u_;
 
@@ -119,6 +128,8 @@ private:
   // manage the frame and the current record therein separately.
   std::int64_t frameOffsetInFile_{0};
   std::size_t recordOffsetInFrame_{0}; // of currentRecordNumber
+
+  bool swapEndianness_{false};
 };
 
 } // namespace Fortran::runtime::io

@@ -539,19 +539,18 @@ DWARF:
         - Attribute:       DW_AT_type
           Form:            DW_FORM_ref_addr
   debug_aranges:
-    - Length:          60
-      Version:         2
-      CuOffset:        0
-      AddrSize:        8
-      SegSize:         0
+    - Length:              60
+      Version:             2
+      CuOffset:            0
+      AddressSize:         8
+      SegmentSelectorSize: 0
       Descriptors:
         - Address:         0x0000000100000F70
           Length:          17
         - Address:         0x0000000100000F90
           Length:          37
   debug_pubnames:
-    Length:
-      TotalLength:     43
+    Length:          43
     Version:         2
     UnitOffset:      0
     UnitSize:        224
@@ -563,8 +562,7 @@ DWARF:
       - DieOffset:       0x00000069
         Name:            main
   debug_pubtypes:
-    Length:
-      TotalLength:     31
+    Length:          31
     Version:         2
     UnitOffset:      0
     UnitSize:        224

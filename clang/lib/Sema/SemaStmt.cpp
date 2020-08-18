@@ -574,11 +574,11 @@ public:
 };
 }
 
-StmtResult
-Sema::ActOnIfStmt(SourceLocation IfLoc, bool IsConstexpr, Stmt *InitStmt,
-                  ConditionResult Cond,
-                  Stmt *thenStmt, SourceLocation ElseLoc,
-                  Stmt *elseStmt) {
+StmtResult Sema::ActOnIfStmt(SourceLocation IfLoc, bool IsConstexpr,
+                             SourceLocation LParenLoc, Stmt *InitStmt,
+                             ConditionResult Cond, SourceLocation RParenLoc,
+                             Stmt *thenStmt, SourceLocation ElseLoc,
+                             Stmt *elseStmt) {
   if (Cond.isInvalid())
     Cond = ConditionResult(
         *this, nullptr,
@@ -597,12 +597,13 @@ Sema::ActOnIfStmt(SourceLocation IfLoc, bool IsConstexpr, Stmt *InitStmt,
     DiagnoseEmptyStmtBody(CondExpr->getEndLoc(), thenStmt,
                           diag::warn_empty_if_body);
 
-  return BuildIfStmt(IfLoc, IsConstexpr, InitStmt, Cond, thenStmt, ElseLoc,
-                     elseStmt);
+  return BuildIfStmt(IfLoc, IsConstexpr, LParenLoc, InitStmt, Cond, RParenLoc,
+                     thenStmt, ElseLoc, elseStmt);
 }
 
 StmtResult Sema::BuildIfStmt(SourceLocation IfLoc, bool IsConstexpr,
-                             Stmt *InitStmt, ConditionResult Cond,
+                             SourceLocation LParenLoc, Stmt *InitStmt,
+                             ConditionResult Cond, SourceLocation RParenLoc,
                              Stmt *thenStmt, SourceLocation ElseLoc,
                              Stmt *elseStmt) {
   if (Cond.isInvalid())
@@ -612,7 +613,8 @@ StmtResult Sema::BuildIfStmt(SourceLocation IfLoc, bool IsConstexpr,
     setFunctionHasBranchProtectedScope();
 
   return IfStmt::Create(Context, IfLoc, IsConstexpr, InitStmt, Cond.get().first,
-                        Cond.get().second, thenStmt, ElseLoc, elseStmt);
+                        Cond.get().second, LParenLoc, RParenLoc, thenStmt,
+                        ElseLoc, elseStmt);
 }
 
 namespace {
@@ -739,7 +741,9 @@ ExprResult Sema::CheckSwitchCondition(SourceLocation SwitchLoc, Expr *Cond) {
 }
 
 StmtResult Sema::ActOnStartOfSwitchStmt(SourceLocation SwitchLoc,
-                                        Stmt *InitStmt, ConditionResult Cond) {
+                                        SourceLocation LParenLoc,
+                                        Stmt *InitStmt, ConditionResult Cond,
+                                        SourceLocation RParenLoc) {
   Expr *CondExpr = Cond.get().second;
   assert((Cond.isInvalid() || CondExpr) && "switch with no condition");
 
@@ -761,7 +765,8 @@ StmtResult Sema::ActOnStartOfSwitchStmt(SourceLocation SwitchLoc,
 
   setFunctionHasBranchIntoScope();
 
-  auto *SS = SwitchStmt::Create(Context, InitStmt, Cond.get().first, CondExpr);
+  auto *SS = SwitchStmt::Create(Context, InitStmt, Cond.get().first, CondExpr,
+                                LParenLoc, RParenLoc);
   getCurFunction()->SwitchStack.push_back(
       FunctionScopeInfo::SwitchInfo(SS, false));
   return SS;
@@ -3625,12 +3630,11 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
     if (FD->hasAttrs())
       Attrs = &FD->getAttrs();
     if (FD->isNoReturn())
-      Diag(ReturnLoc, diag::warn_noreturn_function_has_return_expr)
-        << FD->getDeclName();
+      Diag(ReturnLoc, diag::warn_noreturn_function_has_return_expr) << FD;
     if (FD->isMain() && RetValExp)
       if (isa<CXXBoolLiteralExpr>(RetValExp))
         Diag(ReturnLoc, diag::warn_main_returns_bool_literal)
-          << RetValExp->getSourceRange();
+            << RetValExp->getSourceRange();
     if (FD->hasAttr<CmseNSEntryAttr>() && RetValExp) {
       if (const auto *RT = dyn_cast<RecordType>(FnRetType.getCanonicalType())) {
         if (RT->getDecl()->isOrContainsUnion())
@@ -3701,8 +3705,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
           FunctionKind = 3;
 
         Diag(ReturnLoc, diag::err_return_init_list)
-          << CurDecl->getDeclName() << FunctionKind
-          << RetValExp->getSourceRange();
+            << CurDecl << FunctionKind << RetValExp->getSourceRange();
 
         // Drop the expression.
         RetValExp = nullptr;
@@ -3729,9 +3732,8 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
         // return of void in constructor/destructor is illegal in C++.
         if (D == diag::err_ctor_dtor_returns_void) {
           NamedDecl *CurDecl = getCurFunctionOrMethodDecl();
-          Diag(ReturnLoc, D)
-            << CurDecl->getDeclName() << isa<CXXDestructorDecl>(CurDecl)
-            << RetValExp->getSourceRange();
+          Diag(ReturnLoc, D) << CurDecl << isa<CXXDestructorDecl>(CurDecl)
+                             << RetValExp->getSourceRange();
         }
         // return (some void expression); is legal in C++.
         else if (D != diag::ext_return_has_void_expr ||
@@ -3747,8 +3749,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
             FunctionKind = 3;
 
           Diag(ReturnLoc, D)
-            << CurDecl->getDeclName() << FunctionKind
-            << RetValExp->getSourceRange();
+              << CurDecl << FunctionKind << RetValExp->getSourceRange();
         }
       }
 
@@ -3766,24 +3767,25 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   } else if (!RetValExp && !HasDependentReturnType) {
     FunctionDecl *FD = getCurFunctionDecl();
 
-    unsigned DiagID;
     if (getLangOpts().CPlusPlus11 && FD && FD->isConstexpr()) {
       // C++11 [stmt.return]p2
-      DiagID = diag::err_constexpr_return_missing_expr;
+      Diag(ReturnLoc, diag::err_constexpr_return_missing_expr)
+          << FD << FD->isConsteval();
       FD->setInvalidDecl();
-    } else if (getLangOpts().C99) {
-      // C99 6.8.6.4p1 (ext_ since GCC warns)
-      DiagID = diag::ext_return_missing_expr;
     } else {
+      // C99 6.8.6.4p1 (ext_ since GCC warns)
       // C90 6.6.6.4p4
-      DiagID = diag::warn_return_missing_expr;
+      unsigned DiagID = getLangOpts().C99 ? diag::ext_return_missing_expr
+                                          : diag::warn_return_missing_expr;
+      // Note that at this point one of getCurFunctionDecl() or
+      // getCurMethodDecl() must be non-null (see above).
+      assert((getCurFunctionDecl() || getCurMethodDecl()) &&
+             "Not in a FunctionDecl or ObjCMethodDecl?");
+      bool IsMethod = FD == nullptr;
+      const NamedDecl *ND =
+          IsMethod ? cast<NamedDecl>(getCurMethodDecl()) : cast<NamedDecl>(FD);
+      Diag(ReturnLoc, DiagID) << ND << IsMethod;
     }
-
-    if (FD)
-      Diag(ReturnLoc, DiagID)
-          << FD->getIdentifier() << 0 /*fn*/ << FD->isConsteval();
-    else
-      Diag(ReturnLoc, DiagID) << getCurMethodDecl()->getDeclName() << 1/*meth*/;
 
     Result = ReturnStmt::Create(Context, ReturnLoc, /* RetExpr=*/nullptr,
                                 /* NRVOCandidate=*/nullptr);

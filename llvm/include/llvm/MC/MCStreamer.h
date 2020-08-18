@@ -777,6 +777,9 @@ public:
   virtual void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                         SMLoc Loc = SMLoc());
 
+  virtual void emitNops(int64_t NumBytes, int64_t ControlledNopLength,
+                        SMLoc Loc);
+
   /// Emit NumBytes worth of zeros.
   /// This function properly handles data in virtual sections.
   void emitZeros(uint64_t NumBytes);
@@ -1014,13 +1017,12 @@ public:
 
   virtual void emitSyntaxDirective();
 
-  /// Emit a .reloc directive.
-  /// Returns true if the relocation could not be emitted because Name is not
-  /// known.
-  virtual bool emitRelocDirective(const MCExpr &Offset, StringRef Name,
-                                  const MCExpr *Expr, SMLoc Loc,
-                                  const MCSubtargetInfo &STI) {
-    return true;
+  /// Record a relocation described by the .reloc directive. Return None if
+  /// succeeded. Otherwise, return a pair (Name is invalid, error message).
+  virtual Optional<std::pair<bool, std::string>>
+  emitRelocDirective(const MCExpr &Offset, StringRef Name, const MCExpr *Expr,
+                     SMLoc Loc, const MCSubtargetInfo &STI) {
+    return None;
   }
 
   virtual void emitAddrsig() {}

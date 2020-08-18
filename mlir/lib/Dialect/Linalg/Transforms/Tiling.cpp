@@ -223,10 +223,10 @@ static bool isTiled(AffineMap map, ArrayRef<Value> tileSizes) {
 }
 
 static SmallVector<Value, 4> makeTiledViews(OpBuilder &b, Location loc,
-                                            LinalgOp linalgOp,
+                                            LinalgOp linalgOp, AffineMap map,
                                             ArrayRef<Value> ivs,
                                             ArrayRef<Value> tileSizes,
-                                            ArrayRef<Value> viewSizes) {
+                                            ArrayRef<Value> allViewSizes) {
   assert(linalgOp.hasBufferSemantics() &&
          "expected linalg op with buffer semantics");
   assert(ivs.size() == static_cast<size_t>(llvm::count_if(
@@ -236,6 +236,7 @@ static SmallVector<Value, 4> makeTiledViews(OpBuilder &b, Location loc,
 
   using namespace edsc::op;
 
+  auto viewSizes = applyMapToValues(b, loc, map, allViewSizes);
   // Construct (potentially temporary) mins and maxes on which to apply maps
   // that define tile subviews.
   SmallVector<Value, 8> lbs, subViewSizes;
@@ -356,7 +357,7 @@ Optional<TiledLinalgOp> static tileLinalgOpImpl(
     return llvm::None;
 
   // 2. Build the tiled loop ranges.
-  auto viewSizes = getViewSizes(b, op);
+  auto allViewSizes = getViewSizes(b, op);
   // The flattened loopToOperandRangesMaps is expected to be an invertible
   // permutation map (asserted in the inverse calculation).
   auto mapsRange = op.indexing_maps().getAsRange<AffineMapAttr>();
@@ -369,7 +370,7 @@ Optional<TiledLinalgOp> static tileLinalgOpImpl(
   SmallVector<SubViewOp::Range, 4> loopRanges;
   LoopIndexToRangeIndexMap loopIndexToRangeIndex;
   std::tie(loopRanges, loopIndexToRangeIndex) = makeTiledLoopRanges(
-      b, scope.getLocation(), viewSizesToLoopsMap, viewSizes, tileSizes);
+      b, scope.getLocation(), viewSizesToLoopsMap, allViewSizes, tileSizes);
   if (!options.interchangeVector.empty())
     applyPermutationToVector(loopRanges, options.interchangeVector);
 
@@ -381,7 +382,8 @@ Optional<TiledLinalgOp> static tileLinalgOpImpl(
   if (!options.interchangeVector.empty())
     applyPermutationToVector(iteratorTypes, options.interchangeVector);
   GenerateLoopNest<LoopTy>::doit(
-      loopRanges, iteratorTypes, [&](ValueRange localIvs) {
+      loopRanges, iteratorTypes,
+      [&](ValueRange localIvs) {
         auto &b = ScopedContext::getBuilderRef();
         auto loc = ScopedContext::getLocation();
         ivs.assign(localIvs.begin(), localIvs.end());
@@ -395,11 +397,13 @@ Optional<TiledLinalgOp> static tileLinalgOpImpl(
         if (!options.interchangeVector.empty())
           ivValues = applyMapToValues(b, loc, invPermutationMap, ivValues);
 
-        auto views = makeTiledViews(b, loc, op, ivValues, tileSizes, viewSizes);
+        auto views = makeTiledViews(b, loc, op, viewSizesToLoopsMap, ivValues,
+                                    tileSizes, allViewSizes);
         auto operands = getAssumedNonViewOperands(op);
         views.append(operands.begin(), operands.end());
         res = op.clone(b, loc, views);
-      });
+      },
+      options.distribution);
 
   // 4. Transforms index arguments of `linalg.generic` w.r.t. to the tiling.
   transformIndexedGenericOpIndices(b, res, ivs, loopIndexToRangeIndex);
@@ -408,8 +412,14 @@ Optional<TiledLinalgOp> static tileLinalgOpImpl(
   SmallVector<Operation *, 8> loops;
   loops.reserve(ivs.size());
   for (auto iv : ivs) {
-    loops.push_back(iv.cast<BlockArgument>().getOwner()->getParentOp());
-    assert(loops.back() && "no owner found for induction variable!");
+    if (iv.isa<BlockArgument>()) {
+      loops.push_back(iv.cast<BlockArgument>().getOwner()->getParentOp());
+      assert(loops.back() && "no owner found for induction variable!");
+    } else {
+      // TODO: Instead of doing this, try to recover the ops used instead of the
+      // loop.
+      loops.push_back(nullptr);
+    }
   }
   return TiledLinalgOp{res, loops};
 }

@@ -44,9 +44,7 @@ from . import configuration
 from . import dotest_args
 from . import lldbtest_config
 from . import test_categories
-from lldbsuite.test_event import formatter
 from . import test_result
-from lldbsuite.test_event.event_builder import EventBuilder
 from ..support import seven
 
 
@@ -243,7 +241,7 @@ def parseOptionsAndInitTestdirs():
         do_help = True
 
     if args.compiler:
-        configuration.compiler = os.path.realpath(args.compiler)
+        configuration.compiler = os.path.abspath(args.compiler)
         if not is_exe(configuration.compiler):
             configuration.compiler = which(args.compiler)
         if not is_exe(configuration.compiler):
@@ -428,6 +426,8 @@ def parseOptionsAndInitTestdirs():
         configuration.lldb_platform_url = args.lldb_platform_url
     if args.lldb_platform_working_dir:
         configuration.lldb_platform_working_dir = args.lldb_platform_working_dir
+    if platform_system == 'Darwin'  and args.apple_sdk:
+        configuration.apple_sdk = args.apple_sdk
     if args.test_build_dir:
         configuration.test_build_dir = args.test_build_dir
     if args.lldb_module_cache_dir:
@@ -453,27 +453,6 @@ def parseOptionsAndInitTestdirs():
 
     lldbtest_config.codesign_identity = args.codesign_identity
 
-
-def setupTestResults():
-    """Sets up test results-related objects based on arg settings."""
-
-    # Create the results formatter.
-    formatter_spec = formatter.create_results_formatter(
-            "lldbsuite.test_event.formatter.results_formatter.ResultsFormatter")
-    if formatter_spec is not None and formatter_spec.formatter is not None:
-        configuration.results_formatter_object = formatter_spec.formatter
-
-        # Send an initialize message to the formatter.
-        initialize_event = EventBuilder.bare_event("initialize")
-        initialize_event["worker_count"] = 1
-
-        formatter_spec.formatter.handle_event(initialize_event)
-
-        # Make sure we clean up the formatter on shutdown.
-        if formatter_spec.cleanup_func is not None:
-            atexit.register(formatter_spec.cleanup_func)
-
-
 def setupSysPath():
     """
     Add LLDB.framework/Resources/Python to the search paths for modules.
@@ -484,13 +463,12 @@ def setupSysPath():
     if "DOTEST_PROFILE" in os.environ and "DOTEST_SCRIPT_DIR" in os.environ:
         scriptPath = os.environ["DOTEST_SCRIPT_DIR"]
     else:
-        scriptPath = os.path.dirname(os.path.realpath(__file__))
+        scriptPath = os.path.dirname(os.path.abspath(__file__))
     if not scriptPath.endswith('test'):
         print("This script expects to reside in lldb's test directory.")
         sys.exit(-1)
 
     os.environ["LLDB_TEST"] = scriptPath
-    os.environ["LLDB_TEST_SRC"] = lldbsuite.lldb_test_root
 
     # Set up the root build directory.
     if not configuration.test_build_dir:
@@ -732,31 +710,17 @@ def visit(prefix, dir, names):
 
     # Visit all the python test files.
     for name in python_test_files:
-        try:
-            # Ensure we error out if we have multiple tests with the same
-            # base name.
-            # Future improvement: find all the places where we work with base
-            # names and convert to full paths.  We have directory structure
-            # to disambiguate these, so we shouldn't need this constraint.
-            if name in configuration.all_tests:
-                raise Exception("Found multiple tests with the name %s" % name)
-            configuration.all_tests.add(name)
+        # Ensure we error out if we have multiple tests with the same
+        # base name.
+        # Future improvement: find all the places where we work with base
+        # names and convert to full paths.  We have directory structure
+        # to disambiguate these, so we shouldn't need this constraint.
+        if name in configuration.all_tests:
+            raise Exception("Found multiple tests with the name %s" % name)
+        configuration.all_tests.add(name)
 
-            # Run the relevant tests in the python file.
-            visit_file(dir, name)
-        except Exception as ex:
-            # Convert this exception to a test event error for the file.
-            test_filename = os.path.abspath(os.path.join(dir, name))
-            if configuration.results_formatter_object is not None:
-                # Grab the backtrace for the exception.
-                import traceback
-                backtrace = traceback.format_exc()
-
-                # Generate the test event.
-                configuration.results_formatter_object.handle_event(
-                    EventBuilder.event_for_job_test_add_error(
-                        test_filename, ex, backtrace))
-            raise
+        # Run the relevant tests in the python file.
+        visit_file(dir, name)
 
 
 # ======================================== #
@@ -932,9 +896,6 @@ def run_suite():
     # then, we walk the directory trees and collect the tests into our test suite.
     #
     parseOptionsAndInitTestdirs()
-
-    # Setup test results (test results formatter and output handling).
-    setupTestResults()
 
     setupSysPath()
 

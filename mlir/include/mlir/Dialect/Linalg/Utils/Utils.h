@@ -101,10 +101,31 @@ template <typename ConcreteOp>
 SmallVector<Value, 8> getViewSizes(OpBuilder &builder, ConcreteOp linalgOp) {
   auto loc = linalgOp.getLoc();
   SmallVector<Value, 8> res;
+  SmallVector<unsigned, 4> ranks;
   for (auto v : linalgOp.getInputsAndOutputBuffers()) {
     MemRefType t = v.getType().template cast<MemRefType>();
+    ranks.push_back(t.getRank());
     for (unsigned i = 0; i < t.getRank(); ++i)
       res.push_back(builder.create<DimOp>(loc, v, i));
+  }
+
+  auto attr = linalgOp.template getAttrOfType<IntegerAttr>("symbol_source");
+  if (attr) {
+    // Find the correct position for inserting values for symbols.
+    unsigned numSymb = ranks[attr.getInt()], symbolsPos = 0;
+    for (unsigned idx = 0; idx < attr.getInt(); idx++)
+      symbolsPos += ranks[idx];
+
+    // Append the end of the value list that corresponds to the
+    // values mapping to symbols. Since inside concatinated map symbols are
+    // repeated we have to repeat the sizes as well.
+
+    // Reserve is mandatory to avoid a potential undefined behavior with
+    // pushing back to smallvector from itself.
+    res.reserve(res.size() + ranks.size() * numSymb);
+    for (unsigned idx = 0, s = ranks.size(); idx < s; ++idx)
+      for (unsigned idx2 = 0; idx2 < numSymb; ++idx2)
+        res.push_back(res[symbolsPos + idx2]);
   }
   return res;
 }
@@ -114,7 +135,7 @@ SmallVector<Value, 8> getViewSizes(OpBuilder &builder, ConcreteOp linalgOp) {
 /// `createAndFold` builder method. If `folder` is null, the regular `create`
 /// method is called.
 SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
-                                       AffineMap map, ArrayRef<Value> values,
+                                       AffineMap map, ValueRange values,
                                        OperationFolder *folder = nullptr);
 
 /// Returns all the operands of `linalgOp` that are not views.
@@ -135,6 +156,70 @@ void applyPermutationToVector(SmallVector<T, N> &inVec,
   inVec = auxVec;
 }
 
+/// Scheme used to distribute loops to processors.
+enum class DistributionMethod {
+  /// Cyclic distribution where no assumption is made about the dynamic
+  /// relationship between number of processors and number of iterations of the
+  /// distributed loop. Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// scf.parallel(%iv)= (%lb + %procId * %step) to (%ub) step (%step * %nprocs)
+  Cyclic = 0,
+
+  /// Cyclic distribtuion where the number of processors can be assumed to be
+  /// more than or equal to the number of iterations of the distributed loop. In
+  /// such cases, a simple in-bounds check is enough (instead of materializing a
+  /// loop). Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// %iv = %lb + %procId * %step
+  /// %cond = cmpi "slt", %iv, %ub
+  /// scf.if %cond {
+  ///   ...
+  /// }
+  CyclicNumProcsGeNumIters = 1,
+
+  /// Cyclic distribtuion where the number of processors can be assumed to be
+  ///  equal to the number of iterations of the distributed loop. In such cases,
+  ///  no bounds check is needed. Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// %iv = %lb + %procId * %step
+  CyclicNumProcsEqNumIters = 2
+};
+
+/// Callback function type used to get processor ID, and number of processors
+/// used for distribution.
+struct ProcInfo {
+  Value procId;
+  Value nprocs;
+};
+using ProcInfoCallBackFn =
+    std::function<ProcInfo(OpBuilder &b, Location loc, unsigned loopNum)>;
+
+/// Options that allow distribution of loops generated in Linalg transforms to
+/// processors while generating the loops.
+struct LinalgLoopDistributionOptions {
+  /// Callback function that returns the Value for processor ID, and number of
+  /// processors used to execute a given loop.
+  ProcInfoCallBackFn procInfo;
+  /// Specification of how to distribute the `scf.parallel` loops that are
+  /// generated. As the `scf.parallel` loop is generated, the elements of this
+  /// vector is used (from left to right) and the specified distribution is
+  /// applied. If the vector is less than the number of `scf.parallel` loops
+  /// generated, then no distribution is applied.
+  SmallVector<DistributionMethod, 0> distributionMethod = {};
+};
+
 /// Utility class used to generate nested loops with ranges described by
 /// `loopRanges` and loop type described by the `iteratorTypes`. `bodyBuilderFn`
 /// is used to generate the body of the innermost loop. It is passed a range
@@ -147,7 +232,8 @@ struct GenerateLoopNest {
 
   static void doit(ArrayRef<SubViewOp::Range> loopRanges,
                    ArrayRef<Attribute> iteratorTypes,
-                   function_ref<void(ValueRange)> bodyBuilderFn);
+                   function_ref<void(ValueRange)> bodyBuilderFn,
+                   Optional<LinalgLoopDistributionOptions> = None);
 };
 
 } // namespace linalg

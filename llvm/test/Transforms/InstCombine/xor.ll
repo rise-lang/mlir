@@ -600,10 +600,10 @@ define i8 @xor_or_not(i8 %x, i8* %p) {
 
 define i8 @xor_or_not_uses(i8 %x, i8* %p) {
 ; CHECK-LABEL: @xor_or_not_uses(
-; CHECK-NEXT:    [[TMP1:%.*]] = or i8 [[X:%.*]], 7
-; CHECK-NEXT:    [[OR:%.*]] = xor i8 [[TMP1]], -8
+; CHECK-NEXT:    [[NX:%.*]] = xor i8 [[X:%.*]], -1
+; CHECK-NEXT:    [[OR:%.*]] = or i8 [[NX]], 7
 ; CHECK-NEXT:    store i8 [[OR]], i8* [[P:%.*]], align 1
-; CHECK-NEXT:    [[R:%.*]] = xor i8 [[TMP1]], -12
+; CHECK-NEXT:    [[R:%.*]] = xor i8 [[OR]], 12
 ; CHECK-NEXT:    ret i8 [[R]]
 ;
   %nx = xor i8 %x, -1
@@ -911,4 +911,102 @@ define <2 x i32> @test51vec(<2 x i32> %x, <2 x i32> %y) {
   %d = select <2 x i1> %c, <2 x i32> %a, <2 x i32> %b
   %e = xor <2 x i32> %d, <i32 -1, i32 -1>
   ret <2 x i32> %e
+}
+
+define i4 @or_or_xor(i4 %x, i4 %y, i4 %z) {
+; CHECK-LABEL: @or_or_xor(
+; CHECK-NEXT:    [[TMP1:%.*]] = xor i4 [[Z:%.*]], -1
+; CHECK-NEXT:    [[TMP2:%.*]] = xor i4 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = and i4 [[TMP2]], [[TMP1]]
+; CHECK-NEXT:    ret i4 [[R]]
+;
+  %o1 = or i4 %z, %x
+  %o2 = or i4 %z, %y
+  %r = xor i4 %o1, %o2
+  ret i4 %r
+}
+
+define i4 @or_or_xor_commute1(i4 %x, i4 %y, i4 %z) {
+; CHECK-LABEL: @or_or_xor_commute1(
+; CHECK-NEXT:    [[TMP1:%.*]] = xor i4 [[Z:%.*]], -1
+; CHECK-NEXT:    [[TMP2:%.*]] = xor i4 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = and i4 [[TMP2]], [[TMP1]]
+; CHECK-NEXT:    ret i4 [[R]]
+;
+  %o1 = or i4 %x, %z
+  %o2 = or i4 %z, %y
+  %r = xor i4 %o1, %o2
+  ret i4 %r
+}
+
+define i4 @or_or_xor_commute2(i4 %x, i4 %y, i4 %z) {
+; CHECK-LABEL: @or_or_xor_commute2(
+; CHECK-NEXT:    [[TMP1:%.*]] = xor i4 [[Z:%.*]], -1
+; CHECK-NEXT:    [[TMP2:%.*]] = xor i4 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = and i4 [[TMP2]], [[TMP1]]
+; CHECK-NEXT:    ret i4 [[R]]
+;
+  %o1 = or i4 %z, %x
+  %o2 = or i4 %y, %z
+  %r = xor i4 %o1, %o2
+  ret i4 %r
+}
+
+define <2 x i4> @or_or_xor_commute3(<2 x i4> %x, <2 x i4> %y, <2 x i4> %z) {
+; CHECK-LABEL: @or_or_xor_commute3(
+; CHECK-NEXT:    [[TMP1:%.*]] = xor <2 x i4> [[Z:%.*]], <i4 -1, i4 -1>
+; CHECK-NEXT:    [[TMP2:%.*]] = xor <2 x i4> [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = and <2 x i4> [[TMP2]], [[TMP1]]
+; CHECK-NEXT:    ret <2 x i4> [[R]]
+;
+  %o1 = or <2 x i4> %x, %z
+  %o2 = or <2 x i4> %y, %z
+  %r = xor <2 x i4> %o1, %o2
+  ret <2 x i4> %r
+}
+
+define i4 @or_or_xor_use1(i4 %x, i4 %y, i4 %z, i4* %p) {
+; CHECK-LABEL: @or_or_xor_use1(
+; CHECK-NEXT:    [[O1:%.*]] = or i4 [[Z:%.*]], [[X:%.*]]
+; CHECK-NEXT:    store i4 [[O1]], i4* [[P:%.*]], align 1
+; CHECK-NEXT:    [[O2:%.*]] = or i4 [[Z]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = xor i4 [[O1]], [[O2]]
+; CHECK-NEXT:    ret i4 [[R]]
+;
+  %o1 = or i4 %z, %x
+  store i4 %o1, i4* %p
+  %o2 = or i4 %z, %y
+  %r = xor i4 %o1, %o2
+  ret i4 %r
+}
+
+define i4 @or_or_xor_use2(i4 %x, i4 %y, i4 %z, i4* %p) {
+; CHECK-LABEL: @or_or_xor_use2(
+; CHECK-NEXT:    [[O1:%.*]] = or i4 [[Z:%.*]], [[X:%.*]]
+; CHECK-NEXT:    [[O2:%.*]] = or i4 [[Z]], [[Y:%.*]]
+; CHECK-NEXT:    store i4 [[O2]], i4* [[P:%.*]], align 1
+; CHECK-NEXT:    [[R:%.*]] = xor i4 [[O1]], [[O2]]
+; CHECK-NEXT:    ret i4 [[R]]
+;
+  %o1 = or i4 %z, %x
+  %o2 = or i4 %z, %y
+  store i4 %o2, i4* %p
+  %r = xor i4 %o1, %o2
+  ret i4 %r
+}
+
+; PR32706 - https://bugs.llvm.org/show_bug.cgi?id=32706
+; TODO: Pin an xor constant operand to -1 if possible because 'not' is better for SCEV and codegen.
+
+define i32 @not_is_canonical(i32 %x, i32 %y) {
+; CHECK-LABEL: @not_is_canonical(
+; CHECK-NEXT:    [[SUB:%.*]] = xor i32 [[X:%.*]], -1
+; CHECK-NEXT:    [[ADD:%.*]] = add i32 [[SUB]], [[Y:%.*]]
+; CHECK-NEXT:    [[MUL:%.*]] = shl i32 [[ADD]], 2
+; CHECK-NEXT:    ret i32 [[MUL]]
+;
+  %sub = xor i32 %x, 1073741823
+  %add = add i32 %sub, %y
+  %mul = shl i32 %add, 2
+  ret i32 %mul
 }

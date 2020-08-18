@@ -267,7 +267,7 @@ static CallExpr *create_call_once_funcptr_call(ASTContext &C, ASTMaker M,
   }
 
   return CallExpr::Create(C, SubExpr, CallArgs, C.VoidTy, VK_RValue,
-                          SourceLocation());
+                          SourceLocation(), FPOptionsOverride());
 }
 
 static CallExpr *create_call_once_lambda_call(ASTContext &C, ASTMaker M,
@@ -468,6 +468,8 @@ static Stmt *create_call_once(ASTContext &C, const FunctionDecl *D) {
                      /* Init=*/nullptr,
                      /* Var=*/nullptr,
                      /* Cond=*/FlagCheck,
+                     /* LPL=*/SourceLocation(),
+                     /* RPL=*/SourceLocation(),
                      /* Then=*/M.makeCompound({CallbackCall, FlagAssignment}));
 
   return Out;
@@ -514,7 +516,7 @@ static Stmt *create_dispatch_once(ASTContext &C, const FunctionDecl *D) {
       /*Args=*/None,
       /*QualType=*/C.VoidTy,
       /*ExprValueType=*/VK_RValue,
-      /*SourceLocation=*/SourceLocation());
+      /*SourceLocation=*/SourceLocation(), FPOptionsOverride());
 
   // (2) Create the assignment to the predicate.
   Expr *DoneValue =
@@ -552,6 +554,8 @@ static Stmt *create_dispatch_once(ASTContext &C, const FunctionDecl *D) {
                             /* Init=*/nullptr,
                             /* Var=*/nullptr,
                             /* Cond=*/GuardCondition,
+                            /* LPL=*/SourceLocation(),
+                            /* RPL=*/SourceLocation(),
                             /* Then=*/CS);
   return If;
 }
@@ -578,8 +582,8 @@ static Stmt *create_dispatch_sync(ASTContext &C, const FunctionDecl *D) {
   ASTMaker M(C);
   DeclRefExpr *DR = M.makeDeclRefExpr(PV);
   ImplicitCastExpr *ICE = M.makeLvalueToRvalue(DR, Ty);
-  CallExpr *CE =
-      CallExpr::Create(C, ICE, None, C.VoidTy, VK_RValue, SourceLocation());
+  CallExpr *CE = CallExpr::Create(C, ICE, None, C.VoidTy, VK_RValue,
+                                  SourceLocation(), FPOptionsOverride());
   return CE;
 }
 
@@ -655,11 +659,13 @@ static Stmt *create_OSAtomicCompareAndSwap(ASTContext &C, const FunctionDecl *D)
   Stmt *Else = M.makeReturn(RetVal);
 
   /// Construct the If.
-  auto *If = IfStmt::Create(C, SourceLocation(),
-                            /* IsConstexpr=*/false,
-                            /* Init=*/nullptr,
-                            /* Var=*/nullptr, Comparison, Body,
-                            SourceLocation(), Else);
+  auto *If =
+      IfStmt::Create(C, SourceLocation(),
+                     /* IsConstexpr=*/false,
+                     /* Init=*/nullptr,
+                     /* Var=*/nullptr, Comparison,
+                     /* LPL=*/SourceLocation(),
+                     /* RPL=*/SourceLocation(), Body, SourceLocation(), Else);
 
   return If;
 }

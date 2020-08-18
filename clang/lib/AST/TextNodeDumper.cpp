@@ -661,7 +661,7 @@ void TextNodeDumper::dumpBareDeclRef(const Decl *D) {
 void TextNodeDumper::dumpName(const NamedDecl *ND) {
   if (ND->getDeclName()) {
     ColorScope Color(OS, ShowColors, DeclNameColor);
-    OS << ' ' << ND->getNameAsString();
+    OS << ' ' << ND->getDeclName();
   }
 }
 
@@ -708,6 +708,13 @@ const char *TextNodeDumper::getCommandName(unsigned CommandID) {
   if (Info)
     return Info->Name;
   return "<not a builtin command>";
+}
+
+void TextNodeDumper::printFPOptions(FPOptionsOverride FPO) {
+#define OPTION(NAME, TYPE, WIDTH, PREVIOUS)                                    \
+  if (FPO.has##NAME##Override())                                               \
+    OS << " " #NAME "=" << FPO.get##NAME##Override();
+#include "clang/Basic/FPOptions.def"
 }
 
 void TextNodeDumper::visitTextComment(const comments::TextComment *C,
@@ -937,6 +944,8 @@ void TextNodeDumper::VisitConstantExpr(const ConstantExpr *Node) {
 void TextNodeDumper::VisitCallExpr(const CallExpr *Node) {
   if (Node->usesADL())
     OS << " adl";
+  if (Node->hasStoredFPFeatures())
+    printFPOptions(Node->getFPFeatures());
 }
 
 void TextNodeDumper::VisitCXXOperatorCallExpr(const CXXOperatorCallExpr *Node) {
@@ -1053,6 +1062,8 @@ void TextNodeDumper::VisitUnaryOperator(const UnaryOperator *Node) {
      << UnaryOperator::getOpcodeStr(Node->getOpcode()) << "'";
   if (!Node->canOverflow())
     OS << " cannot overflow";
+  if (Node->hasStoredFPFeatures())
+    printFPOptions(Node->getStoredFPFeatures());
 }
 
 void TextNodeDumper::VisitUnaryExprOrTypeTraitExpr(
@@ -1081,6 +1092,8 @@ void TextNodeDumper::VisitExtVectorElementExpr(
 
 void TextNodeDumper::VisitBinaryOperator(const BinaryOperator *Node) {
   OS << " '" << BinaryOperator::getOpcodeStr(Node->getOpcode()) << "'";
+  if (Node->hasStoredFPFeatures())
+    printFPOptions(Node->getStoredFPFeatures());
 }
 
 void TextNodeDumper::VisitCompoundAssignOperator(
@@ -1325,6 +1338,12 @@ void TextNodeDumper::VisitOMPIteratorExpr(const OMPIteratorExpr *Node) {
       Visit(Range.Step);
     }
   }
+}
+
+void TextNodeDumper::VisitConceptSpecializationExpr(
+    const ConceptSpecializationExpr *Node) {
+  OS << " ";
+  dumpBareDeclRef(Node->getFoundDecl());
 }
 
 void TextNodeDumper::VisitRValueReferenceType(const ReferenceType *T) {
@@ -1581,9 +1600,8 @@ void TextNodeDumper::VisitFunctionDecl(const FunctionDecl *D) {
     if (MD->size_overridden_methods() != 0) {
       auto dumpOverride = [=](const CXXMethodDecl *D) {
         SplitQualType T_split = D->getType().split();
-        OS << D << " " << D->getParent()->getName()
-           << "::" << D->getNameAsString() << " '"
-           << QualType::getAsString(T_split, PrintPolicy) << "'";
+        OS << D << " " << D->getParent()->getName() << "::" << D->getDeclName()
+           << " '" << QualType::getAsString(T_split, PrintPolicy) << "'";
       };
 
       AddChild([=] {
@@ -1981,7 +1999,6 @@ void TextNodeDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
       dumpBareDeclRef(TC->getFoundDecl());
       OS << ")";
     }
-    Visit(TC->getImmediatelyDeclaredConstraint());
   } else if (D->wasDeclaredWithTypename())
     OS << " typename";
   else
@@ -2013,7 +2030,7 @@ void TextNodeDumper::VisitUsingDecl(const UsingDecl *D) {
   OS << ' ';
   if (D->getQualifier())
     D->getQualifier()->print(OS, D->getASTContext().getPrintingPolicy());
-  OS << D->getNameAsString();
+  OS << D->getDeclName();
 }
 
 void TextNodeDumper::VisitUnresolvedUsingTypenameDecl(
@@ -2021,7 +2038,7 @@ void TextNodeDumper::VisitUnresolvedUsingTypenameDecl(
   OS << ' ';
   if (D->getQualifier())
     D->getQualifier()->print(OS, D->getASTContext().getPrintingPolicy());
-  OS << D->getNameAsString();
+  OS << D->getDeclName();
 }
 
 void TextNodeDumper::VisitUnresolvedUsingValueDecl(
@@ -2029,7 +2046,7 @@ void TextNodeDumper::VisitUnresolvedUsingValueDecl(
   OS << ' ';
   if (D->getQualifier())
     D->getQualifier()->print(OS, D->getASTContext().getPrintingPolicy());
-  OS << D->getNameAsString();
+  OS << D->getDeclName();
   dumpType(D->getType());
 }
 

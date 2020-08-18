@@ -265,6 +265,12 @@ static cl::opt<unsigned> MaxNestedScalarReductionIC(
     cl::desc("The maximum interleave count to use when interleaving a scalar "
              "reduction in a nested loop."));
 
+static cl::opt<bool>
+    PreferInLoopReductions("prefer-inloop-reductions", cl::init(false),
+                           cl::Hidden,
+                           cl::desc("Prefer in-loop vector reductions, "
+                                    "overriding the targets preference."));
+
 cl::opt<bool> EnableVPlanNativePath(
     "enable-vplan-native-path", cl::init(false), cl::Hidden,
     cl::desc("Enable VPlan-native vectorization path with "
@@ -395,15 +401,26 @@ public:
                       const TargetTransformInfo *TTI, AssumptionCache *AC,
                       OptimizationRemarkEmitter *ORE, unsigned VecWidth,
                       unsigned UnrollFactor, LoopVectorizationLegality *LVL,
-                      LoopVectorizationCostModel *CM)
+                      LoopVectorizationCostModel *CM, BlockFrequencyInfo *BFI,
+                      ProfileSummaryInfo *PSI)
       : OrigLoop(OrigLoop), PSE(PSE), LI(LI), DT(DT), TLI(TLI), TTI(TTI),
         AC(AC), ORE(ORE), VF(VecWidth), UF(UnrollFactor),
         Builder(PSE.getSE()->getContext()),
-        VectorLoopValueMap(UnrollFactor, VecWidth), Legal(LVL), Cost(CM) {}
+        VectorLoopValueMap(UnrollFactor, VecWidth), Legal(LVL), Cost(CM),
+        BFI(BFI), PSI(PSI) {
+    // Query this against the original loop and save it here because the profile
+    // of the original loop header may change as the transformation happens.
+    OptForSizeBasedOnProfile = llvm::shouldOptimizeForSize(
+        OrigLoop->getHeader(), PSI, BFI, PGSOQueryType::IRPass);
+  }
+
   virtual ~InnerLoopVectorizer() = default;
 
-  /// Create a new empty loop. Unlink the old loop and connect the new one.
-  /// Return the pre-header block of the new loop.
+  /// Create a new empty loop that will contain vectorized instructions later
+  /// on, while the old loop will be used as the scalar remainder. Control flow
+  /// is generated around the vectorized (and scalar epilogue) loops consisting
+  /// of various checks and bypasses. Return the pre-header block of the new
+  /// loop.
   BasicBlock *createVectorizedLoopSkeleton();
 
   /// Widen a single instruction within the innermost loop.
@@ -654,6 +671,22 @@ protected:
                               const DataLayout &DL,
                               const InductionDescriptor &ID) const;
 
+  /// Emit basic blocks (prefixed with \p Prefix) for the iteration check,
+  /// vector loop preheader, middle block and scalar preheader. Also
+  /// allocate a loop object for the new vector loop and return it.
+  Loop *createVectorLoopSkeleton(StringRef Prefix);
+
+  /// Create new phi nodes for the induction variables to resume iteration count
+  /// in the scalar epilogue, from where the vectorized loop left off (given by
+  /// \p VectorTripCount).
+  void createInductionResumeValues(Loop *L, Value *VectorTripCount);
+
+  /// Complete the loop skeleton by adding debug MDs, creating appropriate
+  /// conditional branches in the middle block, preparing the builder and
+  /// running the verifier. Take in the vector loop \p L as argument, and return
+  /// the preheader of the completed vector loop.
+  BasicBlock *completeLoopSkeleton(Loop *L, MDNode *OrigLoopID);
+
   /// Add additional metadata to \p To that was not present on \p Orig.
   ///
   /// Currently this is used to add the noalias annotations based on the
@@ -779,6 +812,14 @@ protected:
   // Vector of original scalar PHIs whose corresponding widened PHIs need to be
   // fixed up at the end of vector code generation.
   SmallVector<PHINode *, 8> OrigPHIsToFix;
+
+  /// BFI and PSI are used to check for profile guided size optimizations.
+  BlockFrequencyInfo *BFI;
+  ProfileSummaryInfo *PSI;
+
+  // Whether this loop should be optimized for size based on profile guided size
+  // optimizatios.
+  bool OptForSizeBasedOnProfile;
 };
 
 class InnerLoopUnroller : public InnerLoopVectorizer {
@@ -789,9 +830,10 @@ public:
                     const TargetTransformInfo *TTI, AssumptionCache *AC,
                     OptimizationRemarkEmitter *ORE, unsigned UnrollFactor,
                     LoopVectorizationLegality *LVL,
-                    LoopVectorizationCostModel *CM)
+                    LoopVectorizationCostModel *CM, BlockFrequencyInfo *BFI,
+                    ProfileSummaryInfo *PSI)
       : InnerLoopVectorizer(OrigLoop, PSE, LI, DT, TLI, TTI, AC, ORE, 1,
-                            UnrollFactor, LVL, CM) {}
+                            UnrollFactor, LVL, CM, BFI, PSI) {}
 
 private:
   Value *getBroadcastInstrs(Value *V) override;
@@ -1034,6 +1076,10 @@ public:
 
   /// Collect values we want to ignore in the cost model.
   void collectValuesToIgnore();
+
+  /// Split reductions into those that happen in the loop, and those that happen
+  /// outside. In loop reductions are collected into InLoopReductionChains.
+  void collectInLoopReductions();
 
   /// \returns The smallest bitwidth each instruction can be represented with.
   /// The vector equivalents of these instructions should be truncated to this
@@ -1302,6 +1348,22 @@ public:
     return foldTailByMasking() || Legal->blockNeedsPredication(BB);
   }
 
+  /// A SmallMapVector to store the InLoop reduction op chains, mapping phi
+  /// nodes to the chain of instructions representing the reductions. Uses a
+  /// MapVector to ensure deterministic iteration order.
+  using ReductionChainMap =
+      SmallMapVector<PHINode *, SmallVector<Instruction *, 4>, 4>;
+
+  /// Return the chain of instructions representing an inloop reduction.
+  const ReductionChainMap &getInLoopReductionChains() const {
+    return InLoopReductionChains;
+  }
+
+  /// Returns true if the Phi is part of an inloop reduction.
+  bool isInLoopReduction(PHINode *Phi) const {
+    return InLoopReductionChains.count(Phi);
+  }
+
   /// Estimate cost of an intrinsic call instruction CI if it were vectorized
   /// with factor VF.  Return the cost of the instruction, including
   /// scalarization overhead if it's needed.
@@ -1429,6 +1491,11 @@ private:
   /// Holds the instructions (address computations) that are forced to be
   /// scalarized.
   DenseMap<unsigned, SmallPtrSet<Instruction *, 4>> ForcedScalars;
+
+  /// PHINodes of the reductions that should be expanded in-loop along with
+  /// their associated chains of reduction operations, in program order from top
+  /// (PHI) to bottom
+  ReductionChainMap InLoopReductionChains;
 
   /// Returns the expected difference in cost from scalarizing the expression
   /// feeding a predicated instruction \p PredInst. The instructions to
@@ -2754,7 +2821,8 @@ void InnerLoopVectorizer::emitSCEVChecks(Loop *L, BasicBlock *Bypass) {
     if (C->isZero())
       return;
 
-  assert(!SCEVCheckBlock->getParent()->hasOptSize() &&
+  assert(!(SCEVCheckBlock->getParent()->hasOptSize() ||
+           OptForSizeBasedOnProfile) &&
          "Cannot SCEV check stride or overflow when optimizing for size");
 
   SCEVCheckBlock->setName("vector.scevcheck");
@@ -2800,7 +2868,7 @@ void InnerLoopVectorizer::emitMemRuntimeChecks(Loop *L, BasicBlock *Bypass) {
   assert(MemRuntimeCheck && "no RT checks generated although RtPtrChecking "
                             "claimed checks are required");
 
-  if (MemCheckBlock->getParent()->hasOptSize()) {
+  if (MemCheckBlock->getParent()->hasOptSize() || OptForSizeBasedOnProfile) {
     assert(Cost->Hints->getForce() == LoopVectorizeHints::FK_Enabled &&
            "Cannot emit memory checks when optimizing for size, unless forced "
            "to vectorize.");
@@ -2939,6 +3007,163 @@ Value *InnerLoopVectorizer::emitTransformedIndex(
   llvm_unreachable("invalid enum");
 }
 
+Loop *InnerLoopVectorizer::createVectorLoopSkeleton(StringRef Prefix) {
+  LoopScalarBody = OrigLoop->getHeader();
+  LoopVectorPreHeader = OrigLoop->getLoopPreheader();
+  LoopExitBlock = OrigLoop->getExitBlock();
+  assert(LoopExitBlock && "Must have an exit block");
+  assert(LoopVectorPreHeader && "Invalid loop structure");
+
+  LoopMiddleBlock =
+      SplitBlock(LoopVectorPreHeader, LoopVectorPreHeader->getTerminator(), DT,
+                 LI, nullptr, Twine(Prefix) + "middle.block");
+  LoopScalarPreHeader =
+      SplitBlock(LoopMiddleBlock, LoopMiddleBlock->getTerminator(), DT, LI,
+                 nullptr, Twine(Prefix) + "scalar.ph");
+  // We intentionally don't let SplitBlock to update LoopInfo since
+  // LoopVectorBody should belong to another loop than LoopVectorPreHeader.
+  // LoopVectorBody is explicitly added to the correct place few lines later.
+  LoopVectorBody =
+      SplitBlock(LoopVectorPreHeader, LoopVectorPreHeader->getTerminator(), DT,
+                 nullptr, nullptr, Twine(Prefix) + "vector.body");
+
+  // Update dominator for loop exit.
+  DT->changeImmediateDominator(LoopExitBlock, LoopMiddleBlock);
+
+  // Create and register the new vector loop.
+  Loop *Lp = LI->AllocateLoop();
+  Loop *ParentLoop = OrigLoop->getParentLoop();
+
+  // Insert the new loop into the loop nest and register the new basic blocks
+  // before calling any utilities such as SCEV that require valid LoopInfo.
+  if (ParentLoop) {
+    ParentLoop->addChildLoop(Lp);
+  } else {
+    LI->addTopLevelLoop(Lp);
+  }
+  Lp->addBasicBlockToLoop(LoopVectorBody, *LI);
+  return Lp;
+}
+
+void InnerLoopVectorizer::createInductionResumeValues(Loop *L,
+                                                      Value *VectorTripCount) {
+  assert(VectorTripCount && L && "Expected valid arguments");
+  // We are going to resume the execution of the scalar loop.
+  // Go over all of the induction variables that we found and fix the
+  // PHIs that are left in the scalar version of the loop.
+  // The starting values of PHI nodes depend on the counter of the last
+  // iteration in the vectorized loop.
+  // If we come from a bypass edge then we need to start from the original
+  // start value.
+  for (auto &InductionEntry : Legal->getInductionVars()) {
+    PHINode *OrigPhi = InductionEntry.first;
+    InductionDescriptor II = InductionEntry.second;
+
+    // Create phi nodes to merge from the  backedge-taken check block.
+    PHINode *BCResumeVal =
+        PHINode::Create(OrigPhi->getType(), 3, "bc.resume.val",
+                        LoopScalarPreHeader->getTerminator());
+    // Copy original phi DL over to the new one.
+    BCResumeVal->setDebugLoc(OrigPhi->getDebugLoc());
+    Value *&EndValue = IVEndValues[OrigPhi];
+    if (OrigPhi == OldInduction) {
+      // We know what the end value is.
+      EndValue = VectorTripCount;
+    } else {
+      IRBuilder<> B(L->getLoopPreheader()->getTerminator());
+      Type *StepType = II.getStep()->getType();
+      Instruction::CastOps CastOp =
+          CastInst::getCastOpcode(VectorTripCount, true, StepType, true);
+      Value *CRD = B.CreateCast(CastOp, VectorTripCount, StepType, "cast.crd");
+      const DataLayout &DL = LoopScalarBody->getModule()->getDataLayout();
+      EndValue = emitTransformedIndex(B, CRD, PSE.getSE(), DL, II);
+      EndValue->setName("ind.end");
+    }
+
+    // The new PHI merges the original incoming value, in case of a bypass,
+    // or the value at the end of the vectorized loop.
+    BCResumeVal->addIncoming(EndValue, LoopMiddleBlock);
+
+    // Fix the scalar body counter (PHI node).
+    // The old induction's phi node in the scalar body needs the truncated
+    // value.
+    for (BasicBlock *BB : LoopBypassBlocks)
+      BCResumeVal->addIncoming(II.getStartValue(), BB);
+    OrigPhi->setIncomingValueForBlock(LoopScalarPreHeader, BCResumeVal);
+  }
+}
+
+BasicBlock *InnerLoopVectorizer::completeLoopSkeleton(Loop *L,
+                                                      MDNode *OrigLoopID) {
+  assert(L && "Expected valid loop.");
+
+  // The trip counts should be cached by now.
+  Value *Count = getOrCreateTripCount(L);
+  Value *VectorTripCount = getOrCreateVectorTripCount(L);
+
+  // We need the OrigLoop (scalar loop part) latch terminator to help
+  // produce correct debug info for the middle block BB instructions.
+  // The legality check stage guarantees that the loop will have a single
+  // latch.
+  assert(isa<BranchInst>(OrigLoop->getLoopLatch()->getTerminator()) &&
+         "Scalar loop latch terminator isn't a branch");
+  BranchInst *ScalarLatchBr =
+      cast<BranchInst>(OrigLoop->getLoopLatch()->getTerminator());
+
+  // Add a check in the middle block to see if we have completed
+  // all of the iterations in the first vector loop.
+  // If (N - N%VF) == N, then we *don't* need to run the remainder.
+  // If tail is to be folded, we know we don't need to run the remainder.
+  Value *CmpN = Builder.getTrue();
+  if (!Cost->foldTailByMasking()) {
+    CmpN = CmpInst::Create(Instruction::ICmp, CmpInst::ICMP_EQ, Count,
+                           VectorTripCount, "cmp.n",
+                           LoopMiddleBlock->getTerminator());
+
+    // Here we use the same DebugLoc as the scalar loop latch branch instead
+    // of the corresponding compare because they may have ended up with
+    // different line numbers and we want to avoid awkward line stepping while
+    // debugging. Eg. if the compare has got a line number inside the loop.
+    cast<Instruction>(CmpN)->setDebugLoc(ScalarLatchBr->getDebugLoc());
+  }
+
+  BranchInst *BrInst =
+      BranchInst::Create(LoopExitBlock, LoopScalarPreHeader, CmpN);
+  BrInst->setDebugLoc(ScalarLatchBr->getDebugLoc());
+  ReplaceInstWithInst(LoopMiddleBlock->getTerminator(), BrInst);
+
+  // Get ready to start creating new instructions into the vectorized body.
+  assert(LoopVectorPreHeader == L->getLoopPreheader() &&
+         "Inconsistent vector loop preheader");
+  Builder.SetInsertPoint(&*LoopVectorBody->getFirstInsertionPt());
+
+  Optional<MDNode *> VectorizedLoopID =
+      makeFollowupLoopID(OrigLoopID, {LLVMLoopVectorizeFollowupAll,
+                                      LLVMLoopVectorizeFollowupVectorized});
+  if (VectorizedLoopID.hasValue()) {
+    L->setLoopID(VectorizedLoopID.getValue());
+
+    // Do not setAlreadyVectorized if loop attributes have been defined
+    // explicitly.
+    return LoopVectorPreHeader;
+  }
+
+  // Keep all loop hints from the original loop on the vector loop (we'll
+  // replace the vectorizer-specific hints below).
+  if (MDNode *LID = OrigLoop->getLoopID())
+    L->setLoopID(LID);
+
+  LoopVectorizeHints Hints(L, true, *ORE);
+  Hints.setAlreadyVectorized();
+
+#ifdef EXPENSIVE_CHECKS
+  assert(DT->verify(DominatorTree::VerificationLevel::Fast));
+  LI->verify(*DT);
+#endif
+
+  return LoopVectorPreHeader;
+}
+
 BasicBlock *InnerLoopVectorizer::createVectorizedLoopSkeleton() {
   /*
    In this function we generate a new loop. The new loop will contain
@@ -2972,62 +3197,12 @@ BasicBlock *InnerLoopVectorizer::createVectorizedLoopSkeleton() {
    ...
    */
 
+  // Get the metadata of the original loop before it gets modified.
   MDNode *OrigLoopID = OrigLoop->getLoopID();
 
-  // Some loops have a single integer induction variable, while other loops
-  // don't. One example is c++ iterators that often have multiple pointer
-  // induction variables. In the code below we also support a case where we
-  // don't have a single induction variable.
-  //
-  // We try to obtain an induction variable from the original loop as hard
-  // as possible. However if we don't find one that:
-  //   - is an integer
-  //   - counts from zero, stepping by one
-  //   - is the size of the widest induction variable type
-  // then we create a new one.
-  OldInduction = Legal->getPrimaryInduction();
-  Type *IdxTy = Legal->getWidestInductionType();
-
-  // Split the single block loop into the two loop structure described above.
-  LoopScalarBody = OrigLoop->getHeader();
-  LoopVectorPreHeader = OrigLoop->getLoopPreheader();
-  LoopExitBlock = OrigLoop->getExitBlock();
-  assert(LoopExitBlock && "Must have an exit block");
-  assert(LoopVectorPreHeader && "Invalid loop structure");
-
-  LoopMiddleBlock =
-      SplitBlock(LoopVectorPreHeader, LoopVectorPreHeader->getTerminator(), DT,
-                 LI, nullptr, "middle.block");
-  LoopScalarPreHeader =
-      SplitBlock(LoopMiddleBlock, LoopMiddleBlock->getTerminator(), DT, LI,
-                 nullptr, "scalar.ph");
-  // We intentionally don't let SplitBlock to update LoopInfo since
-  // LoopVectorBody should belong to another loop than LoopVectorPreHeader.
-  // LoopVectorBody is explicitly added to the correct place few lines later.
-  LoopVectorBody =
-      SplitBlock(LoopVectorPreHeader, LoopVectorPreHeader->getTerminator(), DT,
-                 nullptr, nullptr, "vector.body");
-
-  // Update dominator for loop exit.
-  DT->changeImmediateDominator(LoopExitBlock, LoopMiddleBlock);
-
-  // Create and register the new vector loop.
-  Loop *Lp = LI->AllocateLoop();
-  Loop *ParentLoop = OrigLoop->getParentLoop();
-
-  // Insert the new loop into the loop nest and register the new basic blocks
-  // before calling any utilities such as SCEV that require valid LoopInfo.
-  if (ParentLoop) {
-    ParentLoop->addChildLoop(Lp);
-  } else {
-    LI->addTopLevelLoop(Lp);
-  }
-  Lp->addBasicBlockToLoop(LoopVectorBody, *LI);
-
-  // Find the loop boundaries.
-  Value *Count = getOrCreateTripCount(Lp);
-
-  Value *StartIdx = ConstantInt::get(IdxTy, 0);
+  // Create an empty vector loop, and prepare basic blocks for the runtime
+  // checks.
+  Loop *Lp = createVectorLoopSkeleton("");
 
   // Now, compare the new count to zero. If it is zero skip the vector loop and
   // jump to the scalar loop. This check also covers the case where the
@@ -3045,124 +3220,32 @@ BasicBlock *InnerLoopVectorizer::createVectorizedLoopSkeleton() {
   // faster.
   emitMemRuntimeChecks(Lp, LoopScalarPreHeader);
 
-  // Generate the induction variable.
+  // Some loops have a single integer induction variable, while other loops
+  // don't. One example is c++ iterators that often have multiple pointer
+  // induction variables. In the code below we also support a case where we
+  // don't have a single induction variable.
+  //
+  // We try to obtain an induction variable from the original loop as hard
+  // as possible. However if we don't find one that:
+  //   - is an integer
+  //   - counts from zero, stepping by one
+  //   - is the size of the widest induction variable type
+  // then we create a new one.
+  OldInduction = Legal->getPrimaryInduction();
+  Type *IdxTy = Legal->getWidestInductionType();
+  Value *StartIdx = ConstantInt::get(IdxTy, 0);
   // The loop step is equal to the vectorization factor (num of SIMD elements)
   // times the unroll factor (num of SIMD instructions).
-  Value *CountRoundDown = getOrCreateVectorTripCount(Lp);
   Constant *Step = ConstantInt::get(IdxTy, VF * UF);
+  Value *CountRoundDown = getOrCreateVectorTripCount(Lp);
   Induction =
       createInductionVariable(Lp, StartIdx, CountRoundDown, Step,
                               getDebugLocFromInstOrOperands(OldInduction));
 
-  // We are going to resume the execution of the scalar loop.
-  // Go over all of the induction variables that we found and fix the
-  // PHIs that are left in the scalar version of the loop.
-  // The starting values of PHI nodes depend on the counter of the last
-  // iteration in the vectorized loop.
-  // If we come from a bypass edge then we need to start from the original
-  // start value.
+  // Emit phis for the new starting index of the scalar loop.
+  createInductionResumeValues(Lp, CountRoundDown);
 
-  // This variable saves the new starting index for the scalar loop. It is used
-  // to test if there are any tail iterations left once the vector loop has
-  // completed.
-  for (auto &InductionEntry : Legal->getInductionVars()) {
-    PHINode *OrigPhi = InductionEntry.first;
-    InductionDescriptor II = InductionEntry.second;
-
-    // Create phi nodes to merge from the  backedge-taken check block.
-    PHINode *BCResumeVal =
-        PHINode::Create(OrigPhi->getType(), 3, "bc.resume.val",
-                        LoopScalarPreHeader->getTerminator());
-    // Copy original phi DL over to the new one.
-    BCResumeVal->setDebugLoc(OrigPhi->getDebugLoc());
-    Value *&EndValue = IVEndValues[OrigPhi];
-    if (OrigPhi == OldInduction) {
-      // We know what the end value is.
-      EndValue = CountRoundDown;
-    } else {
-      IRBuilder<> B(Lp->getLoopPreheader()->getTerminator());
-      Type *StepType = II.getStep()->getType();
-      Instruction::CastOps CastOp =
-          CastInst::getCastOpcode(CountRoundDown, true, StepType, true);
-      Value *CRD = B.CreateCast(CastOp, CountRoundDown, StepType, "cast.crd");
-      const DataLayout &DL = LoopScalarBody->getModule()->getDataLayout();
-      EndValue = emitTransformedIndex(B, CRD, PSE.getSE(), DL, II);
-      EndValue->setName("ind.end");
-    }
-
-    // The new PHI merges the original incoming value, in case of a bypass,
-    // or the value at the end of the vectorized loop.
-    BCResumeVal->addIncoming(EndValue, LoopMiddleBlock);
-
-    // Fix the scalar body counter (PHI node).
-    // The old induction's phi node in the scalar body needs the truncated
-    // value.
-    for (BasicBlock *BB : LoopBypassBlocks)
-      BCResumeVal->addIncoming(II.getStartValue(), BB);
-    OrigPhi->setIncomingValueForBlock(LoopScalarPreHeader, BCResumeVal);
-  }
-
-  // We need the OrigLoop (scalar loop part) latch terminator to help
-  // produce correct debug info for the middle block BB instructions.
-  // The legality check stage guarantees that the loop will have a single
-  // latch.
-  assert(isa<BranchInst>(OrigLoop->getLoopLatch()->getTerminator()) &&
-         "Scalar loop latch terminator isn't a branch");
-  BranchInst *ScalarLatchBr =
-      cast<BranchInst>(OrigLoop->getLoopLatch()->getTerminator());
-
-  // Add a check in the middle block to see if we have completed
-  // all of the iterations in the first vector loop.
-  // If (N - N%VF) == N, then we *don't* need to run the remainder.
-  // If tail is to be folded, we know we don't need to run the remainder.
-  Value *CmpN = Builder.getTrue();
-  if (!Cost->foldTailByMasking()) {
-    CmpN = CmpInst::Create(Instruction::ICmp, CmpInst::ICMP_EQ, Count,
-                           CountRoundDown, "cmp.n",
-                           LoopMiddleBlock->getTerminator());
-
-    // Here we use the same DebugLoc as the scalar loop latch branch instead
-    // of the corresponding compare because they may have ended up with
-    // different line numbers and we want to avoid awkward line stepping while
-    // debugging. Eg. if the compare has got a line number inside the loop.
-    cast<Instruction>(CmpN)->setDebugLoc(ScalarLatchBr->getDebugLoc());
-  }
-
-  BranchInst *BrInst =
-      BranchInst::Create(LoopExitBlock, LoopScalarPreHeader, CmpN);
-  BrInst->setDebugLoc(ScalarLatchBr->getDebugLoc());
-  ReplaceInstWithInst(LoopMiddleBlock->getTerminator(), BrInst);
-
-  // Get ready to start creating new instructions into the vectorized body.
-  assert(LoopVectorPreHeader == Lp->getLoopPreheader() &&
-         "Inconsistent vector loop preheader");
-  Builder.SetInsertPoint(&*LoopVectorBody->getFirstInsertionPt());
-
-  Optional<MDNode *> VectorizedLoopID =
-      makeFollowupLoopID(OrigLoopID, {LLVMLoopVectorizeFollowupAll,
-                                      LLVMLoopVectorizeFollowupVectorized});
-  if (VectorizedLoopID.hasValue()) {
-    Lp->setLoopID(VectorizedLoopID.getValue());
-
-    // Do not setAlreadyVectorized if loop attributes have been defined
-    // explicitly.
-    return LoopVectorPreHeader;
-  }
-
-  // Keep all loop hints from the original loop on the vector loop (we'll
-  // replace the vectorizer-specific hints below).
-  if (MDNode *LID = OrigLoop->getLoopID())
-    Lp->setLoopID(LID);
-
-  LoopVectorizeHints Hints(Lp, true, *ORE);
-  Hints.setAlreadyVectorized();
-
-#ifdef EXPENSIVE_CHECKS
-  assert(DT->verify(DominatorTree::VerificationLevel::Fast));
-  LI->verify(*DT);
-#endif
-
-  return LoopVectorPreHeader;
+  return completeLoopSkeleton(Lp, OrigLoopID);
 }
 
 // Fix up external users of the induction variable. At this point, we are
@@ -3743,6 +3826,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   RecurrenceDescriptor::MinMaxRecurrenceKind MinMaxKind =
     RdxDesc.getMinMaxRecurrenceKind();
   setDebugLocFromInst(Builder, ReductionStartValue);
+  bool IsInLoopReductionPhi = Cost->isInLoopReduction(Phi);
 
   // We need to generate a reduction vector from the incoming scalar.
   // To do so, we need to generate the 'identity' vector and override
@@ -3760,7 +3844,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   if (RK == RecurrenceDescriptor::RK_IntegerMinMax ||
       RK == RecurrenceDescriptor::RK_FloatMinMax) {
     // MinMax reduction have the start value as their identify.
-    if (VF == 1) {
+    if (VF == 1 || IsInLoopReductionPhi) {
       VectorStart = Identity = ReductionStartValue;
     } else {
       VectorStart = Identity =
@@ -3770,7 +3854,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
     // Handle other reduction kinds:
     Constant *Iden = RecurrenceDescriptor::getRecurrenceIdentity(
         RK, VecTy->getScalarType());
-    if (VF == 1) {
+    if (VF == 1 || IsInLoopReductionPhi) {
       Identity = Iden;
       // This vector is the Identity vector where the first element is the
       // incoming scalar reduction.
@@ -3838,6 +3922,7 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   // then extend the loop exit value to enable InstCombine to evaluate the
   // entire expression in the smaller type.
   if (VF > 1 && Phi->getType() != RdxDesc.getRecurrenceType()) {
+    assert(!IsInLoopReductionPhi && "Unexpected truncated inloop reduction!");
     Type *RdxVecTy = FixedVectorType::get(RdxDesc.getRecurrenceType(), VF);
     Builder.SetInsertPoint(
         LI->getLoopFor(LoopVectorBody)->getLoopLatch()->getTerminator());
@@ -3888,7 +3973,9 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
                                       RdxPart);
   }
 
-  if (VF > 1) {
+  // Create the reduction after the loop. Note that inloop reductions create the
+  // target reduction in the loop using a Reduction recipe.
+  if (VF > 1 && !IsInLoopReductionPhi) {
     bool NoNaN = Legal->hasFunNoNaNAttr();
     ReducedPartRdx =
         createTargetReduction(Builder, TTI, RdxDesc, ReducedPartRdx, NoNaN);
@@ -4184,8 +4271,9 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
   if (Legal->isReductionVariable(P) || Legal->isFirstOrderRecurrence(P)) {
     for (unsigned Part = 0; Part < UF; ++Part) {
       // This is phase one of vectorizing PHIs.
+      bool ScalarPHI = (VF == 1) || Cost->isInLoopReduction(cast<PHINode>(PN));
       Type *VecTy =
-          (VF == 1) ? PN->getType() : FixedVectorType::get(PN->getType(), VF);
+          ScalarPHI ? PN->getType() : FixedVectorType::get(PN->getType(), VF);
       Value *EntryPart = PHINode::Create(
           VecTy, 2, "vec.phi", &*LoopVectorBody->getFirstInsertionPt());
       VectorLoopValueMap.setVectorValue(P, Part, EntryPart);
@@ -4213,26 +4301,68 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
   case InductionDescriptor::IK_PtrInduction: {
     // Handle the pointer induction variable case.
     assert(P->getType()->isPointerTy() && "Unexpected type.");
-    // This is the normalized GEP that starts counting at zero.
-    Value *PtrInd = Induction;
-    PtrInd = Builder.CreateSExtOrTrunc(PtrInd, II.getStep()->getType());
-    // Determine the number of scalars we need to generate for each unroll
-    // iteration. If the instruction is uniform, we only need to generate the
-    // first lane. Otherwise, we generate all VF values.
-    unsigned Lanes = Cost->isUniformAfterVectorization(P, VF) ? 1 : VF;
-    // These are the scalar results. Notice that we don't generate vector GEPs
-    // because scalar GEPs result in better code.
-    for (unsigned Part = 0; Part < UF; ++Part) {
-      for (unsigned Lane = 0; Lane < Lanes; ++Lane) {
-        Constant *Idx = ConstantInt::get(PtrInd->getType(), Lane + Part * VF);
-        Value *GlobalIdx = Builder.CreateAdd(PtrInd, Idx);
-        Value *SclrGep =
-            emitTransformedIndex(Builder, GlobalIdx, PSE.getSE(), DL, II);
-        SclrGep->setName("next.gep");
-        VectorLoopValueMap.setScalarValue(P, {Part, Lane}, SclrGep);
+
+    if (Cost->isScalarAfterVectorization(P, VF)) {
+      // This is the normalized GEP that starts counting at zero.
+      Value *PtrInd =
+          Builder.CreateSExtOrTrunc(Induction, II.getStep()->getType());
+      // Determine the number of scalars we need to generate for each unroll
+      // iteration. If the instruction is uniform, we only need to generate the
+      // first lane. Otherwise, we generate all VF values.
+      unsigned Lanes = Cost->isUniformAfterVectorization(P, VF) ? 1 : VF;
+      for (unsigned Part = 0; Part < UF; ++Part) {
+        for (unsigned Lane = 0; Lane < Lanes; ++Lane) {
+          Constant *Idx = ConstantInt::get(PtrInd->getType(), Lane + Part * VF);
+          Value *GlobalIdx = Builder.CreateAdd(PtrInd, Idx);
+          Value *SclrGep =
+              emitTransformedIndex(Builder, GlobalIdx, PSE.getSE(), DL, II);
+          SclrGep->setName("next.gep");
+          VectorLoopValueMap.setScalarValue(P, {Part, Lane}, SclrGep);
+        }
       }
+      return;
     }
-    return;
+    assert(isa<SCEVConstant>(II.getStep()) &&
+           "Induction step not a SCEV constant!");
+    Type *PhiType = II.getStep()->getType();
+
+    // Build a pointer phi
+    Value *ScalarStartValue = II.getStartValue();
+    Type *ScStValueType = ScalarStartValue->getType();
+    PHINode *NewPointerPhi =
+        PHINode::Create(ScStValueType, 2, "pointer.phi", Induction);
+    NewPointerPhi->addIncoming(ScalarStartValue, LoopVectorPreHeader);
+
+    // A pointer induction, performed by using a gep
+    BasicBlock *LoopLatch = LI->getLoopFor(LoopVectorBody)->getLoopLatch();
+    Instruction *InductionLoc = LoopLatch->getTerminator();
+    const SCEV *ScalarStep = II.getStep();
+    SCEVExpander Exp(*PSE.getSE(), DL, "induction");
+    Value *ScalarStepValue =
+        Exp.expandCodeFor(ScalarStep, PhiType, InductionLoc);
+    Value *InductionGEP = GetElementPtrInst::Create(
+        ScStValueType->getPointerElementType(), NewPointerPhi,
+        Builder.CreateMul(ScalarStepValue, ConstantInt::get(PhiType, VF * UF)),
+        "ptr.ind", InductionLoc);
+    NewPointerPhi->addIncoming(InductionGEP, LoopLatch);
+
+    // Create UF many actual address geps that use the pointer
+    // phi as base and a vectorized version of the step value
+    // (<step*0, ..., step*N>) as offset.
+    for (unsigned Part = 0; Part < UF; ++Part) {
+      SmallVector<Constant *, 8> Indices;
+      // Create a vector of consecutive numbers from zero to VF.
+      for (unsigned i = 0; i < VF; ++i)
+        Indices.push_back(ConstantInt::get(PhiType, i + Part * VF));
+      Constant *StartOffset = ConstantVector::get(Indices);
+
+      Value *GEP = Builder.CreateGEP(
+          ScStValueType->getPointerElementType(), NewPointerPhi,
+          Builder.CreateMul(StartOffset,
+                            Builder.CreateVectorSplat(VF, ScalarStepValue),
+                            "vector.gep"));
+      VectorLoopValueMap.setVectorValue(P, Part, GEP);
+    }
   }
   }
 }
@@ -4468,6 +4598,7 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
   // accesses that will remain scalar.
   SmallSetVector<Instruction *, 8> ScalarPtrs;
   SmallPtrSet<Instruction *, 8> PossibleNonScalarPtrs;
+  auto *Latch = TheLoop->getLoopLatch();
 
   // A helper that returns true if the use of Ptr by MemAccess will be scalar.
   // The pointer operands of loads and stores will be scalar as long as the
@@ -4493,11 +4624,33 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
            !TheLoop->isLoopInvariant(V);
   };
 
-  // A helper that evaluates a memory access's use of a pointer. If the use
-  // will be a scalar use, and the pointer is only used by memory accesses, we
-  // place the pointer in ScalarPtrs. Otherwise, the pointer is placed in
-  // PossibleNonScalarPtrs.
+  auto isScalarPtrInduction = [&](Instruction *MemAccess, Value *Ptr) {
+    if (!isa<PHINode>(Ptr) ||
+        !Legal->getInductionVars().count(cast<PHINode>(Ptr)))
+      return false;
+    auto &Induction = Legal->getInductionVars()[cast<PHINode>(Ptr)];
+    if (Induction.getKind() != InductionDescriptor::IK_PtrInduction)
+      return false;
+    return isScalarUse(MemAccess, Ptr);
+  };
+
+  // A helper that evaluates a memory access's use of a pointer. If the
+  // pointer is actually the pointer induction of a loop, it is being
+  // inserted into Worklist. If the use will be a scalar use, and the
+  // pointer is only used by memory accesses, we place the pointer in
+  // ScalarPtrs. Otherwise, the pointer is placed in PossibleNonScalarPtrs.
   auto evaluatePtrUse = [&](Instruction *MemAccess, Value *Ptr) {
+    if (isScalarPtrInduction(MemAccess, Ptr)) {
+      Worklist.insert(cast<Instruction>(Ptr));
+      Instruction *Update = cast<Instruction>(
+          cast<PHINode>(Ptr)->getIncomingValueForBlock(Latch));
+      Worklist.insert(Update);
+      LLVM_DEBUG(dbgs() << "LV: Found new scalar instruction: " << *Ptr
+                        << "\n");
+      LLVM_DEBUG(dbgs() << "LV: Found new scalar instruction: " << *Update
+                        << "\n");
+      return;
+    }
     // We only care about bitcast and getelementptr instructions contained in
     // the loop.
     if (!isLoopVaryingBitCastOrGEP(Ptr))
@@ -4521,10 +4674,9 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
   };
 
   // We seed the scalars analysis with three classes of instructions: (1)
-  // instructions marked uniform-after-vectorization, (2) bitcast and
-  // getelementptr instructions used by memory accesses requiring a scalar use,
-  // and (3) pointer induction variables and their update instructions (we
-  // currently only scalarize these).
+  // instructions marked uniform-after-vectorization and (2) bitcast,
+  // getelementptr and (pointer) phi instructions used by memory accesses
+  // requiring a scalar use.
   //
   // (1) Add to the worklist all instructions that have been identified as
   // uniform-after-vectorization.
@@ -4549,24 +4701,6 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
       LLVM_DEBUG(dbgs() << "LV: Found scalar instruction: " << *I << "\n");
       Worklist.insert(I);
     }
-
-  // (3) Add to the worklist all pointer induction variables and their update
-  // instructions.
-  //
-  // TODO: Once we are able to vectorize pointer induction variables we should
-  //       no longer insert them into the worklist here.
-  auto *Latch = TheLoop->getLoopLatch();
-  for (auto &Induction : Legal->getInductionVars()) {
-    auto *Ind = Induction.first;
-    auto *IndUpdate = cast<Instruction>(Ind->getIncomingValueForBlock(Latch));
-    if (Induction.second.getKind() != InductionDescriptor::IK_PtrInduction)
-      continue;
-    Worklist.insert(Ind);
-    Worklist.insert(IndUpdate);
-    LLVM_DEBUG(dbgs() << "LV: Found scalar instruction: " << *Ind << "\n");
-    LLVM_DEBUG(dbgs() << "LV: Found scalar instruction: " << *IndUpdate
-                      << "\n");
-  }
 
   // Insert the forced scalars.
   // FIXME: Currently widenPHIInstruction() often creates a dead vector
@@ -4602,14 +4736,6 @@ void LoopVectorizationCostModel::collectLoopScalars(unsigned VF) {
   for (auto &Induction : Legal->getInductionVars()) {
     auto *Ind = Induction.first;
     auto *IndUpdate = cast<Instruction>(Ind->getIncomingValueForBlock(Latch));
-
-    // We already considered pointer induction variables, so there's no reason
-    // to look at their users again.
-    //
-    // TODO: Once we are able to vectorize pointer induction variables we
-    //       should no longer skip over them here.
-    if (Induction.second.getKind() == InductionDescriptor::IK_PtrInduction)
-      continue;
 
     // If tail-folding is applied, the primary induction variable will be used
     // to feed a vector compare.
@@ -6402,13 +6528,54 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
   case Instruction::Trunc:
   case Instruction::FPTrunc:
   case Instruction::BitCast: {
+    // Computes the CastContextHint from a Load/Store instruction.
+    auto ComputeCCH = [&](Instruction *I) -> TTI::CastContextHint {
+      assert((isa<LoadInst>(I) || isa<StoreInst>(I)) &&
+             "Expected a load or a store!");
+
+      if (VF == 1 || !TheLoop->contains(I))
+        return TTI::CastContextHint::Normal;
+
+      switch (getWideningDecision(I, VF)) {
+      case LoopVectorizationCostModel::CM_GatherScatter:
+        return TTI::CastContextHint::GatherScatter;
+      case LoopVectorizationCostModel::CM_Interleave:
+        return TTI::CastContextHint::Interleave;
+      case LoopVectorizationCostModel::CM_Scalarize:
+      case LoopVectorizationCostModel::CM_Widen:
+        return Legal->isMaskRequired(I) ? TTI::CastContextHint::Masked
+                                        : TTI::CastContextHint::Normal;
+      case LoopVectorizationCostModel::CM_Widen_Reverse:
+        return TTI::CastContextHint::Reversed;
+      case LoopVectorizationCostModel::CM_Unknown:
+        llvm_unreachable("Instr did not go through cost modelling?");
+      }
+
+      llvm_unreachable("Unhandled case!");
+    };
+
+    unsigned Opcode = I->getOpcode();
+    TTI::CastContextHint CCH = TTI::CastContextHint::None;
+    // For Trunc, the context is the only user, which must be a StoreInst.
+    if (Opcode == Instruction::Trunc || Opcode == Instruction::FPTrunc) {
+      if (I->hasOneUse())
+        if (StoreInst *Store = dyn_cast<StoreInst>(*I->user_begin()))
+          CCH = ComputeCCH(Store);
+    }
+    // For Z/Sext, the context is the operand, which must be a LoadInst.
+    else if (Opcode == Instruction::ZExt || Opcode == Instruction::SExt ||
+             Opcode == Instruction::FPExt) {
+      if (LoadInst *Load = dyn_cast<LoadInst>(I->getOperand(0)))
+        CCH = ComputeCCH(Load);
+    }
+
     // We optimize the truncation of induction variables having constant
     // integer steps. The cost of these truncations is the same as the scalar
     // operation.
     if (isOptimizableIVTruncate(I, VF)) {
       auto *Trunc = cast<TruncInst>(I);
       return TTI.getCastInstrCost(Instruction::Trunc, Trunc->getDestTy(),
-                                  Trunc->getSrcTy(), CostKind, Trunc);
+                                  Trunc->getSrcTy(), CCH, CostKind, Trunc);
     }
 
     Type *SrcScalarTy = I->getOperand(0)->getType();
@@ -6421,12 +6588,11 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
       //
       // Calculate the modified src and dest types.
       Type *MinVecTy = VectorTy;
-      if (I->getOpcode() == Instruction::Trunc) {
+      if (Opcode == Instruction::Trunc) {
         SrcVecTy = smallestIntegerVectorType(SrcVecTy, MinVecTy);
         VectorTy =
             largestIntegerVectorType(ToVectorTy(I->getType(), VF), MinVecTy);
-      } else if (I->getOpcode() == Instruction::ZExt ||
-                 I->getOpcode() == Instruction::SExt) {
+      } else if (Opcode == Instruction::ZExt || Opcode == Instruction::SExt) {
         SrcVecTy = largestIntegerVectorType(SrcVecTy, MinVecTy);
         VectorTy =
             smallestIntegerVectorType(ToVectorTy(I->getType(), VF), MinVecTy);
@@ -6434,8 +6600,8 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
     }
 
     unsigned N = isScalarAfterVectorization(I, VF) ? VF : 1;
-    return N * TTI.getCastInstrCost(I->getOpcode(), VectorTy, SrcVecTy,
-                                    CostKind, I);
+    return N *
+           TTI.getCastInstrCost(Opcode, VectorTy, SrcVecTy, CCH, CostKind, I);
   }
   case Instruction::Call: {
     bool NeedToScalarize;
@@ -6511,6 +6677,34 @@ void LoopVectorizationCostModel::collectValuesToIgnore() {
     InductionDescriptor &IndDes = Induction.second;
     const SmallVectorImpl<Instruction *> &Casts = IndDes.getCastInsts();
     VecValuesToIgnore.insert(Casts.begin(), Casts.end());
+  }
+}
+
+void LoopVectorizationCostModel::collectInLoopReductions() {
+  // For the moment, without predicated reduction instructions, we do not
+  // support inloop reductions whilst folding the tail, and hence in those cases
+  // all reductions are currently out of the loop.
+  if (!PreferInLoopReductions || foldTailByMasking())
+    return;
+
+  for (auto &Reduction : Legal->getReductionVars()) {
+    PHINode *Phi = Reduction.first;
+    RecurrenceDescriptor &RdxDesc = Reduction.second;
+
+    // We don't collect reductions that are type promoted (yet).
+    if (RdxDesc.getRecurrenceType() != Phi->getType())
+      continue;
+
+    // Check that we can correctly put the reductions into the loop, by
+    // finding the chain of operations that leads from the phi to the loop
+    // exit value.
+    SmallVector<Instruction *, 4> ReductionOperations =
+        RdxDesc.getReductionOpChain(Phi, TheLoop);
+    bool InLoop = !ReductionOperations.empty();
+    if (InLoop)
+      InLoopReductionChains[Phi] = ReductionOperations;
+    LLVM_DEBUG(dbgs() << "LV: Using " << (InLoop ? "inloop" : "out of loop")
+                      << " reduction for phi: " << *Phi << "\n");
   }
 }
 
@@ -6593,6 +6787,7 @@ Optional<VectorizationFactor> LoopVectorizationPlanner::plan(unsigned UserVF,
     // Collect the instructions (and their associated costs) that will be more
     // profitable to scalarize.
     CM.selectUserVectorizationFactor(UserVF);
+    CM.collectInLoopReductions();
     buildVPlansWithVPRecipes(UserVF, UserVF);
     LLVM_DEBUG(printPlans(dbgs()));
     return {{UserVF, 0}};
@@ -6610,6 +6805,8 @@ Optional<VectorizationFactor> LoopVectorizationPlanner::plan(unsigned UserVF,
     if (VF > 1)
       CM.collectInstsToScalarize(VF);
   }
+
+  CM.collectInLoopReductions();
 
   buildVPlansWithVPRecipes(1, MaxVF);
   LLVM_DEBUG(printPlans(dbgs()));
@@ -7249,6 +7446,23 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
     RecipeBuilder.recordRecipeOf(Entry.first);
     RecipeBuilder.recordRecipeOf(Entry.second);
   }
+  for (auto &Reduction : CM.getInLoopReductionChains()) {
+    PHINode *Phi = Reduction.first;
+    RecurrenceDescriptor::RecurrenceKind Kind =
+        Legal->getReductionVars()[Phi].getRecurrenceKind();
+    const SmallVector<Instruction *, 4> &ReductionOperations = Reduction.second;
+
+    RecipeBuilder.recordRecipeOf(Phi);
+    for (auto &R : ReductionOperations) {
+      RecipeBuilder.recordRecipeOf(R);
+      // For min/max reducitons, where we have a pair of icmp/select, we also
+      // need to record the ICmp recipe, so it can be removed later.
+      if (Kind == RecurrenceDescriptor::RK_IntegerMinMax ||
+          Kind == RecurrenceDescriptor::RK_FloatMinMax) {
+        RecipeBuilder.recordRecipeOf(cast<Instruction>(R->getOperand(0)));
+      }
+    }
+  }
 
   // For each interleave group which is relevant for this (possibly trimmed)
   // Range, add it to the set of groups to be later applied to the VPlan and add
@@ -7361,12 +7575,18 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
       }
   }
 
+  // Adjust the recipes for any inloop reductions.
+  if (Range.Start > 1)
+    adjustRecipesForInLoopReductions(Plan, RecipeBuilder);
+
   // Finally, if tail is folded by masking, introduce selects between the phi
   // and the live-out instruction of each reduction, at the end of the latch.
-  if (CM.foldTailByMasking()) {
+  if (CM.foldTailByMasking() && !Legal->getReductionVars().empty()) {
     Builder.setInsertPoint(VPBB);
     auto *Cond = RecipeBuilder.createBlockInMask(OrigLoop->getHeader(), Plan);
     for (auto &Reduction : Legal->getReductionVars()) {
+      assert(!CM.isInLoopReduction(Reduction.first) &&
+             "Didn't expect inloop tail folded reduction yet!");
       VPValue *Phi = Plan->getVPValue(Reduction.first);
       VPValue *Red = Plan->getVPValue(Reduction.second.getLoopExitInstr());
       Builder.createNaryOp(Instruction::Select, {Cond, Red, Phi});
@@ -7420,6 +7640,60 @@ VPlanPtr LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
   VPlanTransforms::VPInstructionsToVPRecipes(
       OrigLoop, Plan, Legal->getInductionVars(), DeadInstructions);
   return Plan;
+}
+
+// Adjust the recipes for any inloop reductions. The chain of instructions
+// leading from the loop exit instr to the phi need to be converted to
+// reductions, with one operand being vector and the other being the scalar
+// reduction chain.
+void LoopVectorizationPlanner::adjustRecipesForInLoopReductions(
+    VPlanPtr &Plan, VPRecipeBuilder &RecipeBuilder) {
+  for (auto &Reduction : CM.getInLoopReductionChains()) {
+    PHINode *Phi = Reduction.first;
+    RecurrenceDescriptor &RdxDesc = Legal->getReductionVars()[Phi];
+    const SmallVector<Instruction *, 4> &ReductionOperations = Reduction.second;
+
+    // ReductionOperations are orders top-down from the phi's use to the
+    // LoopExitValue. We keep a track of the previous item (the Chain) to tell
+    // which of the two operands will remain scalar and which will be reduced.
+    // For minmax the chain will be the select instructions.
+    Instruction *Chain = Phi;
+    for (Instruction *R : ReductionOperations) {
+      VPRecipeBase *WidenRecipe = RecipeBuilder.getRecipe(R);
+      RecurrenceDescriptor::RecurrenceKind Kind = RdxDesc.getRecurrenceKind();
+
+      VPValue *ChainOp = Plan->getVPValue(Chain);
+      unsigned FirstOpId;
+      if (Kind == RecurrenceDescriptor::RK_IntegerMinMax ||
+          Kind == RecurrenceDescriptor::RK_FloatMinMax) {
+        assert(WidenRecipe->getVPRecipeID() == VPRecipeBase::VPWidenSelectSC &&
+               "Expected to replace a VPWidenSelectSC");
+        FirstOpId = 1;
+      } else {
+        assert(WidenRecipe->getVPRecipeID() == VPRecipeBase::VPWidenSC &&
+               "Expected to replace a VPWidenSC");
+        FirstOpId = 0;
+      }
+      unsigned VecOpId =
+          R->getOperand(FirstOpId) == Chain ? FirstOpId + 1 : FirstOpId;
+      VPValue *VecOp = Plan->getVPValue(R->getOperand(VecOpId));
+
+      VPReductionRecipe *RedRecipe = new VPReductionRecipe(
+          &RdxDesc, R, ChainOp, VecOp, Legal->hasFunNoNaNAttr(), TTI);
+      WidenRecipe->getParent()->insert(RedRecipe, WidenRecipe->getIterator());
+      WidenRecipe->eraseFromParent();
+
+      if (Kind == RecurrenceDescriptor::RK_IntegerMinMax ||
+          Kind == RecurrenceDescriptor::RK_FloatMinMax) {
+        VPRecipeBase *CompareRecipe =
+            RecipeBuilder.getRecipe(cast<Instruction>(R->getOperand(0)));
+        assert(CompareRecipe->getVPRecipeID() == VPRecipeBase::VPWidenSC &&
+               "Expected to replace a VPWidenSC");
+        CompareRecipe->eraseFromParent();
+      }
+      Chain = R;
+    }
+  }
 }
 
 Value* LoopVectorizationPlanner::VPCallbackILV::
@@ -7516,6 +7790,28 @@ void VPBlendRecipe::execute(VPTransformState &State) {
 void VPInterleaveRecipe::execute(VPTransformState &State) {
   assert(!State.Instance && "Interleave group being replicated.");
   State.ILV->vectorizeInterleaveGroup(IG, State, getAddr(), getMask());
+}
+
+void VPReductionRecipe::execute(VPTransformState &State) {
+  assert(!State.Instance && "Reduction being replicated.");
+  for (unsigned Part = 0; Part < State.UF; ++Part) {
+    unsigned Kind = RdxDesc->getRecurrenceKind();
+    Value *NewVecOp = State.get(VecOp, Part);
+    Value *NewRed =
+        createTargetReduction(State.Builder, TTI, *RdxDesc, NewVecOp, NoNaN);
+    Value *PrevInChain = State.get(ChainOp, Part);
+    Value *NextInChain;
+    if (Kind == RecurrenceDescriptor::RK_IntegerMinMax ||
+        Kind == RecurrenceDescriptor::RK_FloatMinMax) {
+      NextInChain =
+          createMinMaxOp(State.Builder, RdxDesc->getMinMaxRecurrenceKind(),
+                         NewRed, PrevInChain);
+    } else {
+      NextInChain = State.Builder.CreateBinOp(
+          (Instruction::BinaryOps)I->getOpcode(), NewRed, PrevInChain);
+    }
+    State.ValueMap.setVectorValue(I, Part, NextInChain);
+  }
 }
 
 void VPReplicateRecipe::execute(VPTransformState &State) {
@@ -7691,7 +7987,7 @@ static bool processLoopInVPlanNativePath(
   LVP.setBestPlan(VF.Width, 1);
 
   InnerLoopVectorizer LB(L, PSE, LI, DT, TLI, TTI, AC, ORE, VF.Width, 1, LVL,
-                         &CM);
+                         &CM, BFI, PSI);
   LLVM_DEBUG(dbgs() << "Vectorizing outer loop in \""
                     << L->getHeader()->getParent()->getName() << "\"\n");
   LVP.executePlan(LB, DT);
@@ -7755,7 +8051,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   // Check if it is legal to vectorize the loop.
   LoopVectorizationRequirements Requirements(*ORE);
   LoopVectorizationLegality LVL(L, PSE, DT, TTI, TLI, AA, F, GetLAA, LI, ORE,
-                                &Requirements, &Hints, DB, AC);
+                                &Requirements, &Hints, DB, AC, BFI, PSI);
   if (!LVL.canVectorize(EnableVPlanNativePath)) {
     LLVM_DEBUG(dbgs() << "LV: Not vectorizing: Cannot prove legality.\n");
     Hints.emitRemarkWithHints();
@@ -7955,8 +8251,8 @@ bool LoopVectorizePass::processLoop(Loop *L) {
     assert(IC > 1 && "interleave count should not be 1 or 0");
     // If we decided that it is not legal to vectorize the loop, then
     // interleave it.
-    InnerLoopUnroller Unroller(L, PSE, LI, DT, TLI, TTI, AC, ORE, IC, &LVL,
-                               &CM);
+    InnerLoopUnroller Unroller(L, PSE, LI, DT, TLI, TTI, AC, ORE, IC, &LVL, &CM,
+                               BFI, PSI);
     LVP.executePlan(Unroller, DT);
 
     ORE->emit([&]() {
@@ -7968,7 +8264,7 @@ bool LoopVectorizePass::processLoop(Loop *L) {
   } else {
     // If we decided that it is *legal* to vectorize the loop, then do it.
     InnerLoopVectorizer LB(L, PSE, LI, DT, TLI, TTI, AC, ORE, VF.Width, IC,
-                           &LVL, &CM);
+                           &LVL, &CM, BFI, PSI);
     LVP.executePlan(LB, DT);
     ++LoopsVectorized;
 

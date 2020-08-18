@@ -13,6 +13,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/TypeUtilities.h"
+#include "mlir/Interfaces/FoldInterfaces.h"
 #include <numeric>
 
 using namespace mlir;
@@ -570,11 +571,11 @@ LogicalResult Operation::fold(ArrayRef<Attribute> operands,
   if (!dialect)
     return failure();
 
-  SmallVector<Attribute, 8> constants;
-  if (failed(dialect->constantFoldHook(this, operands, constants)))
+  auto *interface = dialect->getRegisteredInterface<DialectFoldInterface>();
+  if (!interface)
     return failure();
-  results.assign(constants.begin(), constants.end());
-  return success();
+
+  return interface->Fold(this, operands, results);
 }
 
 /// Emit an error with the op name prefixed, like "'dim' op " which is
@@ -1022,7 +1023,7 @@ LogicalResult OpTrait::impl::verifyNoRegionArguments(Operation *op) {
     if (region.empty())
       continue;
 
-    if (region.front().getNumArguments() != 0) {
+    if (region.getNumArguments() != 0) {
       if (op->getNumRegions() > 1)
         return op->emitOpError("region #")
                << region.getRegionNumber() << " should have no arguments";

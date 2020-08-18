@@ -156,6 +156,7 @@ public:
   /// Generator for '#omp parallel'
   ///
   /// \param Loc The insert and source location description.
+  /// \param AllocaIP The insertion points to be used for alloca instructions.
   /// \param BodyGenCB Callback that will generate the region code.
   /// \param PrivCB Callback to copy a given variable (think copy constructor).
   /// \param FiniCB Callback to finalize variable copies.
@@ -166,10 +167,11 @@ public:
   ///
   /// \returns The insertion position *after* the parallel.
   IRBuilder<>::InsertPoint
-  CreateParallel(const LocationDescription &Loc, BodyGenCallbackTy BodyGenCB,
-                 PrivatizeCallbackTy PrivCB, FinalizeCallbackTy FiniCB,
-                 Value *IfCondition, Value *NumThreads,
-                 omp::ProcBindKind ProcBind, bool IsCancellable);
+  CreateParallel(const LocationDescription &Loc, InsertPointTy AllocaIP,
+                 BodyGenCallbackTy BodyGenCB, PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB, Value *IfCondition,
+                 Value *NumThreads, omp::ProcBindKind ProcBind,
+                 bool IsCancellable);
 
   /// Generator for '#omp flush'
   ///
@@ -210,12 +212,19 @@ public:
   /// Return the (LLVM-IR) string describing the default source location.
   Constant *getOrCreateDefaultSrcLocStr();
 
+  /// Return the (LLVM-IR) string describing the source location identified by
+  /// the arguments.
+  Constant *getOrCreateSrcLocStr(StringRef FunctionName, StringRef FileName,
+                                 unsigned Line, unsigned Column);
+
   /// Return the (LLVM-IR) string describing the source location \p Loc.
   Constant *getOrCreateSrcLocStr(const LocationDescription &Loc);
 
   /// Return an ident_t* encoding the source location \p SrcLocStr and \p Flags.
+  /// TODO: Create a enum class for the Reserve2Flags
   Value *getOrCreateIdent(Constant *SrcLocStr,
-                          omp::IdentFlag Flags = omp::IdentFlag(0));
+                          omp::IdentFlag Flags = omp::IdentFlag(0),
+                          unsigned Reserve2Flags = 0);
 
   /// Generate control flow and cleanup for cancellation.
   ///
@@ -280,14 +289,19 @@ public:
   StringMap<Constant *> SrcLocStrMap;
 
   /// Map to remember existing ident_t*.
-  DenseMap<std::pair<Constant *, uint64_t>, GlobalVariable *> IdentMap;
+  DenseMap<std::pair<Constant *, uint64_t>, Value *> IdentMap;
 
   /// Helper that contains information about regions we need to outline
   /// during finalization.
   struct OutlineInfo {
-    SmallVector<BasicBlock *, 32> Blocks;
     using PostOutlineCBTy = std::function<void(Function &)>;
     PostOutlineCBTy PostOutlineCB;
+    BasicBlock *EntryBB, *ExitBB;
+
+    /// Collect all blocks in between EntryBB and ExitBB in both the given
+    /// vector and set.
+    void collectBlocks(SmallPtrSetImpl<BasicBlock *> &BlockSet,
+                       SmallVectorImpl<BasicBlock *> &BlockVector);
   };
 
   /// Collection of regions that need to be outlined during finalization.

@@ -8,8 +8,10 @@
 
 #include "flang/Semantics/semantics.h"
 #include "assignment.h"
+#include "canonicalize-acc.h"
 #include "canonicalize-do.h"
 #include "canonicalize-omp.h"
+#include "check-acc-structure.h"
 #include "check-allocate.h"
 #include "check-arithmeticif.h"
 #include "check-case.h"
@@ -154,12 +156,12 @@ private:
 };
 
 using StatementSemanticsPass1 = ExprChecker;
-using StatementSemanticsPass2 = SemanticsVisitor<AllocateChecker,
-    ArithmeticIfStmtChecker, AssignmentChecker, CaseChecker, CoarrayChecker,
-    DataChecker, DeallocateChecker, DoForallChecker, IfStmtChecker, IoChecker,
-    MiscChecker, NamelistChecker, NullifyChecker, OmpStructureChecker,
-    PurityChecker, ReturnStmtChecker, SelectRankConstructChecker,
-    SelectTypeChecker, StopChecker>;
+using StatementSemanticsPass2 = SemanticsVisitor<AccStructureChecker,
+    AllocateChecker, ArithmeticIfStmtChecker, AssignmentChecker, CaseChecker,
+    CoarrayChecker, DataChecker, DeallocateChecker, DoForallChecker,
+    IfStmtChecker, IoChecker, MiscChecker, NamelistChecker, NullifyChecker,
+    OmpStructureChecker, PurityChecker, ReturnStmtChecker,
+    SelectRankConstructChecker, SelectTypeChecker, StopChecker>;
 
 static bool PerformStatementSemantics(
     SemanticsContext &context, parser::Program &program) {
@@ -322,9 +324,22 @@ SymbolVector SemanticsContext::GetIndexVars(IndexVarKind kind) {
   return result;
 }
 
+SourceName SemanticsContext::GetTempName(const Scope &scope) {
+  for (const auto &str : tempNames_) {
+    SourceName name{str};
+    if (scope.find(name) == scope.end()) {
+      return name;
+    }
+  }
+  tempNames_.emplace_back(".F18.");
+  tempNames_.back() += std::to_string(tempNames_.size());
+  return {tempNames_.back()};
+}
+
 bool Semantics::Perform() {
   return ValidateLabels(context_, program_) &&
       parser::CanonicalizeDo(program_) && // force line break
+      CanonicalizeAcc(context_.messages(), program_) &&
       CanonicalizeOmp(context_.messages(), program_) &&
       PerformStatementSemantics(context_, program_) &&
       ModFileWriter{context_}.WriteAll();

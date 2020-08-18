@@ -84,7 +84,6 @@ class CXXOperatorCallExpr final : public CallExpr {
   friend class ASTStmtWriter;
 
   SourceRange Range;
-  FPOptionsOverride Overrides;
 
   // CXXOperatorCallExpr has some trailing objects belonging
   // to CallExpr. See CallExpr for the details.
@@ -96,7 +95,7 @@ class CXXOperatorCallExpr final : public CallExpr {
                       SourceLocation OperatorLoc, FPOptionsOverride FPFeatures,
                       ADLCallKind UsesADL);
 
-  CXXOperatorCallExpr(unsigned NumArgs, EmptyShell Empty);
+  CXXOperatorCallExpr(unsigned NumArgs, bool HasFPFeatures, EmptyShell Empty);
 
 public:
   static CXXOperatorCallExpr *
@@ -106,7 +105,8 @@ public:
          ADLCallKind UsesADL = NotADL);
 
   static CXXOperatorCallExpr *CreateEmpty(const ASTContext &Ctx,
-                                          unsigned NumArgs, EmptyShell Empty);
+                                          unsigned NumArgs, bool HasFPFeatures,
+                                          EmptyShell Empty);
 
   /// Returns the kind of overloaded operator that this expression refers to.
   OverloadedOperatorKind getOperator() const {
@@ -164,11 +164,6 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CXXOperatorCallExprClass;
   }
-
-  // Set the FPFeatures status of this operator. Only meaningful for
-  // operations on floating point types.
-  void setFPFeatures(FPOptionsOverride F) { Overrides = F; }
-  FPOptionsOverride getFPFeatures() const { return Overrides; }
 };
 
 /// Represents a call to a member function that
@@ -184,18 +179,20 @@ class CXXMemberCallExpr final : public CallExpr {
   // to CallExpr. See CallExpr for the details.
 
   CXXMemberCallExpr(Expr *Fn, ArrayRef<Expr *> Args, QualType Ty,
-                    ExprValueKind VK, SourceLocation RP, unsigned MinNumArgs);
+                    ExprValueKind VK, SourceLocation RP,
+                    FPOptionsOverride FPOptions, unsigned MinNumArgs);
 
-  CXXMemberCallExpr(unsigned NumArgs, EmptyShell Empty);
+  CXXMemberCallExpr(unsigned NumArgs, bool HasFPFeatures, EmptyShell Empty);
 
 public:
   static CXXMemberCallExpr *Create(const ASTContext &Ctx, Expr *Fn,
                                    ArrayRef<Expr *> Args, QualType Ty,
                                    ExprValueKind VK, SourceLocation RP,
+                                   FPOptionsOverride FPFeatures,
                                    unsigned MinNumArgs = 0);
 
   static CXXMemberCallExpr *CreateEmpty(const ASTContext &Ctx, unsigned NumArgs,
-                                        EmptyShell Empty);
+                                        bool HasFPFeatures, EmptyShell Empty);
 
   /// Retrieve the implicit object argument for the member call.
   ///
@@ -242,18 +239,21 @@ class CUDAKernelCallExpr final : public CallExpr {
 
   CUDAKernelCallExpr(Expr *Fn, CallExpr *Config, ArrayRef<Expr *> Args,
                      QualType Ty, ExprValueKind VK, SourceLocation RP,
-                     unsigned MinNumArgs);
+                     FPOptionsOverride FPFeatures, unsigned MinNumArgs);
 
-  CUDAKernelCallExpr(unsigned NumArgs, EmptyShell Empty);
+  CUDAKernelCallExpr(unsigned NumArgs, bool HasFPFeatures, EmptyShell Empty);
 
 public:
   static CUDAKernelCallExpr *Create(const ASTContext &Ctx, Expr *Fn,
                                     CallExpr *Config, ArrayRef<Expr *> Args,
                                     QualType Ty, ExprValueKind VK,
-                                    SourceLocation RP, unsigned MinNumArgs = 0);
+                                    SourceLocation RP,
+                                    FPOptionsOverride FPFeatures,
+                                    unsigned MinNumArgs = 0);
 
   static CUDAKernelCallExpr *CreateEmpty(const ASTContext &Ctx,
-                                         unsigned NumArgs, EmptyShell Empty);
+                                         unsigned NumArgs, bool HasFPFeatures,
+                                         EmptyShell Empty);
 
   const CallExpr *getConfig() const {
     return cast_or_null<CallExpr>(getPreArg(CONFIG));
@@ -619,18 +619,20 @@ class UserDefinedLiteral final : public CallExpr {
 
   UserDefinedLiteral(Expr *Fn, ArrayRef<Expr *> Args, QualType Ty,
                      ExprValueKind VK, SourceLocation LitEndLoc,
-                     SourceLocation SuffixLoc);
+                     SourceLocation SuffixLoc, FPOptionsOverride FPFeatures);
 
-  UserDefinedLiteral(unsigned NumArgs, EmptyShell Empty);
+  UserDefinedLiteral(unsigned NumArgs, bool HasFPFeatures, EmptyShell Empty);
 
 public:
   static UserDefinedLiteral *Create(const ASTContext &Ctx, Expr *Fn,
                                     ArrayRef<Expr *> Args, QualType Ty,
                                     ExprValueKind VK, SourceLocation LitEndLoc,
-                                    SourceLocation SuffixLoc);
+                                    SourceLocation SuffixLoc,
+                                    FPOptionsOverride FPFeatures);
 
   static UserDefinedLiteral *CreateEmpty(const ASTContext &Ctx,
-                                         unsigned NumArgs, EmptyShell Empty);
+                                         unsigned NumArgs, bool HasFPOptions,
+                                         EmptyShell Empty);
 
   /// The kind of literal operator which is invoked.
   enum LiteralOperatorKind {
@@ -4517,31 +4519,38 @@ class CXXFoldExpr : public Expr {
   friend class ASTStmtReader;
   friend class ASTStmtWriter;
 
+  enum SubExpr { Callee, LHS, RHS, Count };
+
   SourceLocation LParenLoc;
   SourceLocation EllipsisLoc;
   SourceLocation RParenLoc;
   // When 0, the number of expansions is not known. Otherwise, this is one more
   // than the number of expansions.
   unsigned NumExpansions;
-  Stmt *SubExprs[2];
+  Stmt *SubExprs[SubExpr::Count];
   BinaryOperatorKind Opcode;
 
 public:
-  CXXFoldExpr(QualType T, SourceLocation LParenLoc, Expr *LHS,
-              BinaryOperatorKind Opcode, SourceLocation EllipsisLoc, Expr *RHS,
-              SourceLocation RParenLoc, Optional<unsigned> NumExpansions)
+  CXXFoldExpr(QualType T, UnresolvedLookupExpr *Callee,
+              SourceLocation LParenLoc, Expr *LHS, BinaryOperatorKind Opcode,
+              SourceLocation EllipsisLoc, Expr *RHS, SourceLocation RParenLoc,
+              Optional<unsigned> NumExpansions)
       : Expr(CXXFoldExprClass, T, VK_RValue, OK_Ordinary), LParenLoc(LParenLoc),
         EllipsisLoc(EllipsisLoc), RParenLoc(RParenLoc),
         NumExpansions(NumExpansions ? *NumExpansions + 1 : 0), Opcode(Opcode) {
-    SubExprs[0] = LHS;
-    SubExprs[1] = RHS;
+    SubExprs[SubExpr::Callee] = Callee;
+    SubExprs[SubExpr::LHS] = LHS;
+    SubExprs[SubExpr::RHS] = RHS;
     setDependence(computeDependence(this));
   }
 
   CXXFoldExpr(EmptyShell Empty) : Expr(CXXFoldExprClass, Empty) {}
 
-  Expr *getLHS() const { return static_cast<Expr*>(SubExprs[0]); }
-  Expr *getRHS() const { return static_cast<Expr*>(SubExprs[1]); }
+  UnresolvedLookupExpr *getCallee() const {
+    return static_cast<UnresolvedLookupExpr *>(SubExprs[SubExpr::Callee]);
+  }
+  Expr *getLHS() const { return static_cast<Expr*>(SubExprs[SubExpr::LHS]); }
+  Expr *getRHS() const { return static_cast<Expr*>(SubExprs[SubExpr::RHS]); }
 
   /// Does this produce a right-associated sequence of operators?
   bool isRightFold() const {
@@ -4566,19 +4575,33 @@ public:
     return None;
   }
 
-  SourceLocation getBeginLoc() const LLVM_READONLY { return LParenLoc; }
+  SourceLocation getBeginLoc() const LLVM_READONLY {
+    if (LParenLoc.isValid())
+      return LParenLoc;
+    if (isLeftFold())
+      return getEllipsisLoc();
+    return getLHS()->getBeginLoc();
+  }
 
-  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    if (RParenLoc.isValid())
+      return RParenLoc;
+    if (isRightFold())
+      return getEllipsisLoc();
+    return getRHS()->getEndLoc();
+  }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CXXFoldExprClass;
   }
 
   // Iterators
-  child_range children() { return child_range(SubExprs, SubExprs + 2); }
+  child_range children() {
+    return child_range(SubExprs, SubExprs + SubExpr::Count);
+  }
 
   const_child_range children() const {
-    return const_child_range(SubExprs, SubExprs + 2);
+    return const_child_range(SubExprs, SubExprs + SubExpr::Count);
   }
 };
 

@@ -12,9 +12,15 @@ test.format_literal_op keyword_$. -> :, = <> () [] {foo.some_attr}
 // CHECK-NOT: {attr
 test.format_attr_op 10
 
-// CHECK: test.format_opt_attr_op(10)
+// CHECK: test.format_opt_attr_op_a(10)
 // CHECK-NOT: {opt_attr
-test.format_opt_attr_op(10)
+test.format_opt_attr_op_a(10)
+test.format_opt_attr_op_a
+
+// CHECK: test.format_opt_attr_op_b 10
+// CHECK-NOT: {opt_attr
+test.format_opt_attr_op_b 10
+test.format_opt_attr_op_b
 
 // CHECK: test.format_attr_dict_w_keyword attributes {attr = 10 : i64}
 test.format_attr_dict_w_keyword attributes {attr = 10 : i64}
@@ -75,6 +81,20 @@ test.format_operand_e_op %i64, %memref : i64, memref<1xf64>
     test.format_successor_a_op {attr}
 
 }) { arg_names = ["i", "j", "k"] } : () -> ()
+
+//===----------------------------------------------------------------------===//
+// Format optional attributes
+//===----------------------------------------------------------------------===//
+
+// CHECK: test.format_optional_unit_attribute is_optional
+test.format_optional_unit_attribute is_optional
+
+// CHECK: test.format_optional_unit_attribute
+// CHECK-NOT: is_optional
+test.format_optional_unit_attribute
+
+// CHECK: test.format_optional_unit_attribute_no_elide unit
+test.format_optional_unit_attribute_no_elide unit
 
 //===----------------------------------------------------------------------===//
 // Format optional operands and results

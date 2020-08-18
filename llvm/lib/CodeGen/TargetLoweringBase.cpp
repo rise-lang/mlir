@@ -657,6 +657,8 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::UADDSAT, VT, Expand);
     setOperationAction(ISD::SSUBSAT, VT, Expand);
     setOperationAction(ISD::USUBSAT, VT, Expand);
+    setOperationAction(ISD::SSHLSAT, VT, Expand);
+    setOperationAction(ISD::USHLSAT, VT, Expand);
     setOperationAction(ISD::SMULFIX, VT, Expand);
     setOperationAction(ISD::SMULFIXSAT, VT, Expand);
     setOperationAction(ISD::UMULFIX, VT, Expand);
@@ -799,6 +801,11 @@ bool TargetLoweringBase::canOpTrap(unsigned Op, EVT VT) const {
   case ISD::UREM:
     return true;
   }
+}
+
+bool TargetLoweringBase::isFreeAddrSpaceCast(unsigned SrcAS,
+                                             unsigned DestAS) const {
+  return TM.isNoopAddrSpaceCast(SrcAS, DestAS);
 }
 
 void TargetLoweringBase::setJumpIsExpensive(bool isExpensive) {
@@ -1041,9 +1048,19 @@ TargetLoweringBase::emitPatchPoint(MachineInstr &InitialMI,
   // Inherit previous memory operands.
   MIB.cloneMemRefs(*MI);
 
-  for (auto &MO : MI->operands()) {
+  for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
+    MachineOperand &MO = MI->getOperand(i);
     if (!MO.isFI()) {
+      // Index of Def operand this Use it tied to.
+      // Since Defs are coming before Uses, if Use is tied, then
+      // index of Def must be smaller that index of that Use.
+      // Also, Defs preserve their position in new MI.
+      unsigned TiedTo = i;
+      if (MO.isReg() && MO.isTied())
+        TiedTo = MI->findTiedOperandIdx(i);
       MIB.add(MO);
+      if (TiedTo < i)
+        MIB->tieOperands(TiedTo, MIB->getNumOperands() - 1);
       continue;
     }
 

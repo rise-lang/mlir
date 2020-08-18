@@ -34,6 +34,7 @@ class Builder;
 
 namespace rise {
 
+
 /// This is the definition of the Rise dialect.
 class RiseDialect : public mlir::Dialect {
 public:
@@ -55,6 +56,8 @@ public:
   /// Hook for custom printing of Attributes
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
 
+  void initialize();
+  friend class ::mlir::MLIRContext;
 };
 
 } // end namespace rise

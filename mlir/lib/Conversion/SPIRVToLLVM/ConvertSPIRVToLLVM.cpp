@@ -64,10 +64,8 @@ static unsigned getBitWidth(Type type) {
 
 /// Returns the bit width of LLVMType integer or vector.
 static unsigned getLLVMTypeBitWidth(LLVM::LLVMType type) {
-  return type.isVectorTy() ? type.getVectorElementType()
-                                 .getUnderlyingType()
-                                 ->getIntegerBitWidth()
-                           : type.getUnderlyingType()->getIntegerBitWidth();
+  return type.isVectorTy() ? type.getVectorElementType().getIntegerBitWidth()
+                           : type.getIntegerBitWidth();
 }
 
 /// Creates `IntegerAttribute` with all bits set for given type
@@ -83,13 +81,29 @@ static IntegerAttr minusOneIntegerAttribute(Type type, Builder builder) {
 /// Creates `llvm.mlir.constant` with all bits set for the given type.
 static Value createConstantAllBitsSet(Location loc, Type srcType, Type dstType,
                                       PatternRewriter &rewriter) {
-  if (srcType.isa<VectorType>())
+  if (srcType.isa<VectorType>()) {
     return rewriter.create<LLVM::ConstantOp>(
         loc, dstType,
         SplatElementsAttr::get(srcType.cast<ShapedType>(),
                                minusOneIntegerAttribute(srcType, rewriter)));
+  }
   return rewriter.create<LLVM::ConstantOp>(
       loc, dstType, minusOneIntegerAttribute(srcType, rewriter));
+}
+
+/// Creates `llvm.mlir.constant` with a floating-point scalar or vector value.
+static Value createFPConstant(Location loc, Type srcType, Type dstType,
+                              PatternRewriter &rewriter, double value) {
+  if (auto vecType = srcType.dyn_cast<VectorType>()) {
+    auto floatType = vecType.getElementType().cast<FloatType>();
+    return rewriter.create<LLVM::ConstantOp>(
+        loc, dstType,
+        SplatElementsAttr::get(vecType,
+                               rewriter.getFloatAttr(floatType, value)));
+  }
+  auto floatType = srcType.cast<FloatType>();
+  return rewriter.create<LLVM::ConstantOp>(
+      loc, dstType, rewriter.getFloatAttr(floatType, value));
 }
 
 /// Utility function for bitfiled ops:
@@ -172,8 +186,37 @@ static Type convertStructTypePacked(spirv::StructType type,
       llvm::map_range(type.getElementTypes(), [&](Type elementType) {
         return converter.convertType(elementType).cast<LLVM::LLVMType>();
       }));
-  return LLVM::LLVMType::getStructTy(converter.getDialect(), elementsVector,
+  return LLVM::LLVMType::getStructTy(type.getContext(), elementsVector,
                                      /*isPacked=*/true);
+}
+
+/// Creates LLVM dialect constant with the given value.
+static Value createI32ConstantOf(Location loc, PatternRewriter &rewriter,
+                                 unsigned value) {
+  return rewriter.create<LLVM::ConstantOp>(
+      loc, LLVM::LLVMType::getInt32Ty(rewriter.getContext()),
+      rewriter.getIntegerAttr(rewriter.getI32Type(), value));
+}
+
+/// Utility for `spv.Load` and `spv.Store` conversion.
+static LogicalResult replaceWithLoadOrStore(Operation *op,
+                                            ConversionPatternRewriter &rewriter,
+                                            LLVMTypeConverter &typeConverter,
+                                            unsigned alignment, bool isVolatile,
+                                            bool isNonTemporal) {
+  if (auto loadOp = dyn_cast<spirv::LoadOp>(op)) {
+    auto dstType = typeConverter.convertType(loadOp.getType());
+    if (!dstType)
+      return failure();
+    rewriter.replaceOpWithNewOp<LLVM::LoadOp>(
+        loadOp, dstType, loadOp.ptr(), alignment, isVolatile, isNonTemporal);
+    return success();
+  }
+  auto storeOp = cast<spirv::StoreOp>(op);
+  rewriter.replaceOpWithNewOp<LLVM::StoreOp>(storeOp, storeOp.value(),
+                                             storeOp.ptr(), alignment,
+                                             isVolatile, isNonTemporal);
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -230,6 +273,22 @@ static Optional<Type> convertStructType(spirv::StructType type,
 
 namespace {
 
+class AddressOfPattern : public SPIRVToLLVMConversion<spirv::AddressOfOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::AddressOfOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::AddressOfOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto dstType = typeConverter.convertType(op.pointer().getType());
+    if (!dstType)
+      return failure();
+    rewriter.replaceOpWithNewOp<LLVM::AddressOfOp>(
+        op, dstType.cast<LLVM::LLVMType>(), op.variable());
+    return success();
+  }
+};
+
 class BitFieldInsertPattern
     : public SPIRVToLLVMConversion<spirv::BitFieldInsertOp> {
 public:
@@ -239,7 +298,7 @@ public:
   matchAndRewrite(spirv::BitFieldInsertOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcType = op.getType();
-    auto dstType = this->typeConverter.convertType(srcType);
+    auto dstType = typeConverter.convertType(srcType);
     if (!dstType)
       return failure();
     Location loc = op.getLoc();
@@ -328,7 +387,7 @@ public:
   matchAndRewrite(spirv::BitFieldSExtractOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcType = op.getType();
-    auto dstType = this->typeConverter.convertType(srcType);
+    auto dstType = typeConverter.convertType(srcType);
     if (!dstType)
       return failure();
     Location loc = op.getLoc();
@@ -381,7 +440,7 @@ public:
   matchAndRewrite(spirv::BitFieldUExtractOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcType = op.getType();
-    auto dstType = this->typeConverter.convertType(srcType);
+    auto dstType = typeConverter.convertType(srcType);
     if (!dstType)
       return failure();
     Location loc = op.getLoc();
@@ -407,6 +466,44 @@ public:
   }
 };
 
+class BranchConversionPattern : public SPIRVToLLVMConversion<spirv::BranchOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::BranchOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::BranchOp branchOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<LLVM::BrOp>(branchOp, operands,
+                                            branchOp.getTarget());
+    return success();
+  }
+};
+
+class BranchConditionalConversionPattern
+    : public SPIRVToLLVMConversion<spirv::BranchConditionalOp> {
+public:
+  using SPIRVToLLVMConversion<
+      spirv::BranchConditionalOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::BranchConditionalOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    // If branch weights exist, map them to 32-bit integer vector.
+    ElementsAttr branchWeights = nullptr;
+    if (auto weights = op.branch_weights()) {
+      VectorType weightType = VectorType::get(2, rewriter.getI32Type());
+      branchWeights =
+          DenseElementsAttr::get(weightType, weights.getValue().getValue());
+    }
+
+    rewriter.replaceOpWithNewOp<LLVM::CondBrOp>(
+        op, op.condition(), op.getTrueBlockArguments(),
+        op.getFalseBlockArguments(), branchWeights, op.getTrueBlock(),
+        op.getFalseBlock());
+    return success();
+  }
+};
+
 /// Converts SPIR-V operations that have straightforward LLVM equivalent
 /// into LLVM dialect operations.
 template <typename SPIRVOp, typename LLVMOp>
@@ -422,6 +519,55 @@ public:
       return failure();
     rewriter.template replaceOpWithNewOp<LLVMOp>(operation, dstType, operands,
                                                  operation.getAttrs());
+    return success();
+  }
+};
+
+/// Converts `spv.globalVariable` to `llvm.mlir.global`. Note that SPIR-V global
+/// returns a pointer, whereas in LLVM dialect the global holds an actual value.
+/// This difference is handled by `spv._address_of` and `llvm.mlir.addressof`ops
+/// that both return a pointer.
+class GlobalVariablePattern
+    : public SPIRVToLLVMConversion<spirv::GlobalVariableOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::GlobalVariableOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::GlobalVariableOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    // Currently, there is no support of initialization with a constant value in
+    // SPIR-V dialect. Specialization constants are not considered as well.
+    if (op.initializer())
+      return failure();
+
+    auto srcType = op.type().cast<spirv::PointerType>();
+    auto dstType = typeConverter.convertType(srcType.getPointeeType());
+    if (!dstType)
+      return failure();
+
+    // Limit conversion to the current invocation only for now.
+    auto storageClass = srcType.getStorageClass();
+    if (storageClass != spirv::StorageClass::Input &&
+        storageClass != spirv::StorageClass::Private &&
+        storageClass != spirv::StorageClass::Output) {
+      return failure();
+    }
+
+    // LLVM dialect spec: "If the global value is a constant, storing into it is
+    // not allowed.". This corresponds to SPIR-V 'Input' storage class that is
+    // read-only.
+    bool isConstant = storageClass == spirv::StorageClass::Input;
+    // SPIR-V spec: "By default, functions and global variables are private to a
+    // module and cannot be accessed by other modules. However, a module may be
+    // written to export or import functions and global (module scope)
+    // variables.". Therefore, map 'Private' storage class to private linkage,
+    // 'Input' and 'Output' to external linkage.
+    auto linkage = storageClass == spirv::StorageClass::Private
+                       ? LLVM::Linkage::Private
+                       : LLVM::Linkage::External;
+    rewriter.replaceOpWithNewOp<LLVM::GlobalOp>(
+        op, dstType.cast<LLVM::LLVMType>(), isConstant, linkage, op.sym_name(),
+        Attribute());
     return success();
   }
 };
@@ -473,7 +619,7 @@ public:
     }
 
     // Function returns a single result.
-    auto dstType = this->typeConverter.convertType(callOp.getType(0));
+    auto dstType = typeConverter.convertType(callOp.getType(0));
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(callOp, dstType, operands,
                                               callOp.getAttrs());
     return success();
@@ -521,6 +667,64 @@ public:
         rewriter.getI64IntegerAttr(static_cast<int64_t>(predicate)),
         operation.operand1(), operation.operand2());
     return success();
+  }
+};
+
+class InverseSqrtPattern
+    : public SPIRVToLLVMConversion<spirv::GLSLInverseSqrtOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::GLSLInverseSqrtOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::GLSLInverseSqrtOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto srcType = op.getType();
+    auto dstType = typeConverter.convertType(srcType);
+    if (!dstType)
+      return failure();
+
+    Location loc = op.getLoc();
+    Value one = createFPConstant(loc, srcType, dstType, rewriter, 1.0);
+    Value sqrt = rewriter.create<LLVM::SqrtOp>(loc, dstType, op.operand());
+    rewriter.replaceOpWithNewOp<LLVM::FDivOp>(op, dstType, one, sqrt);
+    return success();
+  }
+};
+
+/// Converts `spv.Load` and `spv.Store` to LLVM dialect.
+template <typename SPIRVop>
+class LoadStorePattern : public SPIRVToLLVMConversion<SPIRVop> {
+public:
+  using SPIRVToLLVMConversion<SPIRVop>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(SPIRVop op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+
+    if (!op.memory_access().hasValue()) {
+      replaceWithLoadOrStore(op, rewriter, this->typeConverter, /*alignment=*/0,
+                             /*isVolatile=*/false, /*isNonTemporal=*/ false);
+      return success();
+    }
+    auto memoryAccess = op.memory_access().getValue();
+    switch (memoryAccess) {
+    case spirv::MemoryAccess::Aligned:
+    case spirv::MemoryAccess::None:
+    case spirv::MemoryAccess::Nontemporal:
+    case spirv::MemoryAccess::Volatile: {
+      unsigned alignment = memoryAccess == spirv::MemoryAccess::Aligned
+                               ? op.alignment().getValue().getZExtValue()
+                               : 0;
+      bool isNonTemporal = memoryAccess == spirv::MemoryAccess::Nontemporal;
+      bool isVolatile = memoryAccess == spirv::MemoryAccess::Volatile;
+      replaceWithLoadOrStore(op, rewriter, this->typeConverter, alignment,
+                             isVolatile, isNonTemporal);
+      return success();
+    }
+    default:
+      // There is no support of other memory access attributes.
+      return failure();
+    }
   }
 };
 
@@ -579,6 +783,176 @@ public:
   }
 };
 
+/// Converts `spv.loop` to LLVM dialect. All blocks within selection should be
+/// reachable for conversion to succeed.
+/// The structure of the loop in LLVM dialect will be the following:
+///
+///      +------------------------------------+
+///      | <code before spv.loop>             |
+///      | llvm.br ^header                    |
+///      +------------------------------------+
+///                           |
+///   +----------------+      |
+///   |                |      |
+///   |                V      V
+///   |  +------------------------------------+
+///   |  | ^header:                           |
+///   |  |   <header code>                    |
+///   |  |   llvm.cond_br %cond, ^body, ^exit |
+///   |  +------------------------------------+
+///   |                    |
+///   |                    |----------------------+
+///   |                    |                      |
+///   |                    V                      |
+///   |  +------------------------------------+   |
+///   |  | ^body:                             |   |
+///   |  |   <body code>                      |   |
+///   |  |   llvm.br ^continue                |   |
+///   |  +------------------------------------+   |
+///   |                    |                      |
+///   |                    V                      |
+///   |  +------------------------------------+   |
+///   |  | ^continue:                         |   |
+///   |  |   <continue code>                  |   |
+///   |  |   llvm.br ^header                  |   |
+///   |  +------------------------------------+   |
+///   |               |                           |
+///   +---------------+    +----------------------+
+///                        |
+///                        V
+///      +------------------------------------+
+///      | ^exit:                             |
+///      |   llvm.br ^remaining               |
+///      +------------------------------------+
+///                        |
+///                        V
+///      +------------------------------------+
+///      | ^remaining:                        |
+///      |   <code after spv.loop>            |
+///      +------------------------------------+
+///
+class LoopPattern : public SPIRVToLLVMConversion<spirv::LoopOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::LoopOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::LoopOp loopOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    // There is no support of loop control at the moment.
+    if (loopOp.loop_control() != spirv::LoopControl::None)
+      return failure();
+
+    Location loc = loopOp.getLoc();
+
+    // Split the current block after `spv.loop`. The remaing ops will be used in
+    // `endBlock`.
+    Block *currentBlock = rewriter.getBlock();
+    auto position = Block::iterator(loopOp);
+    Block *endBlock = rewriter.splitBlock(currentBlock, position);
+
+    // Remove entry block and create a branch in the current block going to the
+    // header block.
+    Block *entryBlock = loopOp.getEntryBlock();
+    assert(entryBlock->getOperations().size() == 1);
+    auto brOp = dyn_cast<spirv::BranchOp>(entryBlock->getOperations().front());
+    if (!brOp)
+      return failure();
+    Block *headerBlock = loopOp.getHeaderBlock();
+    rewriter.setInsertionPointToEnd(currentBlock);
+    rewriter.create<LLVM::BrOp>(loc, brOp.getBlockArguments(), headerBlock);
+    rewriter.eraseBlock(entryBlock);
+
+    // Branch from merge block to end block.
+    Block *mergeBlock = loopOp.getMergeBlock();
+    Operation *terminator = mergeBlock->getTerminator();
+    ValueRange terminatorOperands = terminator->getOperands();
+    rewriter.setInsertionPointToEnd(mergeBlock);
+    rewriter.create<LLVM::BrOp>(loc, terminatorOperands, endBlock);
+
+    rewriter.inlineRegionBefore(loopOp.body(), endBlock);
+    rewriter.replaceOp(loopOp, endBlock->getArguments());
+    return success();
+  }
+};
+
+class MergePattern : public SPIRVToLLVMConversion<spirv::MergeOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::MergeOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::MergeOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+/// Converts `spv.selection` with `spv.BranchConditional` in its header block.
+/// All blocks within selection should be reachable for conversion to succeed.
+class SelectionPattern : public SPIRVToLLVMConversion<spirv::SelectionOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::SelectionOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::SelectionOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    // There is no support for `Flatten` or `DontFlatten` selection control at
+    // the moment. This are just compiler hints and can be performed during the
+    // optimization passes.
+    if (op.selection_control() != spirv::SelectionControl::None)
+      return failure();
+
+    // `spv.selection` should have at least two blocks: one selection header
+    // block and one merge block. If no blocks are present, or control flow
+    // branches straight to merge block (two blocks are present), the op is
+    // redundant and it is erased.
+    if (op.body().getBlocks().size() <= 2) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    Location loc = op.getLoc();
+
+    // Split the current block after `spv.selection`. The remaing ops will be
+    // used in `continueBlock`.
+    auto *currentBlock = rewriter.getInsertionBlock();
+    rewriter.setInsertionPointAfter(op);
+    auto position = rewriter.getInsertionPoint();
+    auto *continueBlock = rewriter.splitBlock(currentBlock, position);
+
+    // Extract conditional branch information from the header block. By SPIR-V
+    // dialect spec, it should contain `spv.BranchConditional` or `spv.Switch`
+    // op. Note that `spv.Switch op` is not supported at the moment in the
+    // SPIR-V dialect. Remove this block when finished.
+    auto *headerBlock = op.getHeaderBlock();
+    assert(headerBlock->getOperations().size() == 1);
+    auto condBrOp = dyn_cast<spirv::BranchConditionalOp>(
+        headerBlock->getOperations().front());
+    if (!condBrOp)
+      return failure();
+    rewriter.eraseBlock(headerBlock);
+
+    // Branch from merge block to continue block.
+    auto *mergeBlock = op.getMergeBlock();
+    Operation *terminator = mergeBlock->getTerminator();
+    ValueRange terminatorOperands = terminator->getOperands();
+    rewriter.setInsertionPointToEnd(mergeBlock);
+    rewriter.create<LLVM::BrOp>(loc, terminatorOperands, continueBlock);
+
+    // Link current block to `true` and `false` blocks within the selection.
+    Block *trueBlock = condBrOp.getTrueBlock();
+    Block *falseBlock = condBrOp.getFalseBlock();
+    rewriter.setInsertionPointToEnd(currentBlock);
+    rewriter.create<LLVM::CondBrOp>(loc, condBrOp.condition(), trueBlock,
+                                    condBrOp.trueTargetOperands(), falseBlock,
+                                    condBrOp.falseTargetOperands());
+
+    rewriter.inlineRegionBefore(op.body(), continueBlock);
+    rewriter.replaceOp(op, continueBlock->getArguments());
+    return success();
+  }
+};
+
 /// Converts SPIR-V shift ops to LLVM shift ops. Since LLVM dialect
 /// puts a restriction on `Shift` and `Base` to have the same bit width,
 /// `Shift` is zero or sign extended to match this specification. Cases when
@@ -621,6 +995,90 @@ public:
   }
 };
 
+class TanPattern : public SPIRVToLLVMConversion<spirv::GLSLTanOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::GLSLTanOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::GLSLTanOp tanOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto dstType = typeConverter.convertType(tanOp.getType());
+    if (!dstType)
+      return failure();
+
+    Location loc = tanOp.getLoc();
+    Value sin = rewriter.create<LLVM::SinOp>(loc, dstType, tanOp.operand());
+    Value cos = rewriter.create<LLVM::CosOp>(loc, dstType, tanOp.operand());
+    rewriter.replaceOpWithNewOp<LLVM::FDivOp>(tanOp, dstType, sin, cos);
+    return success();
+  }
+};
+
+/// Convert `spv.Tanh` to
+///
+///   exp(2x) - 1
+///   -----------
+///   exp(2x) + 1
+///
+class TanhPattern : public SPIRVToLLVMConversion<spirv::GLSLTanhOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::GLSLTanhOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::GLSLTanhOp tanhOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto srcType = tanhOp.getType();
+    auto dstType = typeConverter.convertType(srcType);
+    if (!dstType)
+      return failure();
+
+    Location loc = tanhOp.getLoc();
+    Value two = createFPConstant(loc, srcType, dstType, rewriter, 2.0);
+    Value multiplied =
+        rewriter.create<LLVM::FMulOp>(loc, dstType, two, tanhOp.operand());
+    Value exponential = rewriter.create<LLVM::ExpOp>(loc, dstType, multiplied);
+    Value one = createFPConstant(loc, srcType, dstType, rewriter, 1.0);
+    Value numerator =
+        rewriter.create<LLVM::FSubOp>(loc, dstType, exponential, one);
+    Value denominator =
+        rewriter.create<LLVM::FAddOp>(loc, dstType, exponential, one);
+    rewriter.replaceOpWithNewOp<LLVM::FDivOp>(tanhOp, dstType, numerator,
+                                              denominator);
+    return success();
+  }
+};
+
+class VariablePattern : public SPIRVToLLVMConversion<spirv::VariableOp> {
+public:
+  using SPIRVToLLVMConversion<spirv::VariableOp>::SPIRVToLLVMConversion;
+
+  LogicalResult
+  matchAndRewrite(spirv::VariableOp varOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto srcType = varOp.getType();
+    // Initialization is supported for scalars and vectors only.
+    auto pointerTo = srcType.cast<spirv::PointerType>().getPointeeType();
+    auto init = varOp.initializer();
+    if (init && !pointerTo.isIntOrFloat() && !pointerTo.isa<VectorType>())
+      return failure();
+
+    auto dstType = typeConverter.convertType(srcType);
+    if (!dstType)
+      return failure();
+
+    Location loc = varOp.getLoc();
+    Value size = createI32ConstantOf(loc, rewriter, 1);
+    if (!init) {
+      rewriter.replaceOpWithNewOp<LLVM::AllocaOp>(varOp, dstType, size);
+      return success();
+    }
+    Value allocated = rewriter.create<LLVM::AllocaOp>(loc, dstType, size);
+    rewriter.create<LLVM::StoreOp>(loc, init, allocated);
+    rewriter.replaceOp(varOp, allocated);
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // FuncOp conversion
 //===----------------------------------------------------------------------===//
@@ -638,7 +1096,7 @@ public:
     auto funcType = funcOp.getType();
     TypeConverter::SignatureConversion signatureConverter(
         funcType.getNumInputs());
-    auto llvmType = this->typeConverter.convertFunctionSignature(
+    auto llvmType = typeConverter.convertFunctionSignature(
         funcOp.getType(), /*isVariadic=*/false, signatureConverter);
     if (!llvmType)
       return failure();
@@ -675,7 +1133,10 @@ public:
 
     rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
                                 newFuncOp.end());
-    rewriter.applySignatureConversion(&newFuncOp.getBody(), signatureConverter);
+    if (failed(rewriter.convertRegionTypes(&newFuncOp.getBody(), typeConverter,
+                                           &signatureConverter))) {
+      return failure();
+    }
     rewriter.eraseOp(funcOp);
     return success();
   }
@@ -804,8 +1265,27 @@ void mlir::populateSPIRVToLLVMConversionPatterns(
       // Constant op
       ConstantScalarAndVectorPattern,
 
+      // Control Flow ops
+      BranchConversionPattern, BranchConditionalConversionPattern, LoopPattern,
+      SelectionPattern, MergePattern,
+
       // Function Call op
       FunctionCallPattern,
+
+      // GLSL extended instruction set ops
+      DirectConversionPattern<spirv::GLSLCeilOp, LLVM::FCeilOp>,
+      DirectConversionPattern<spirv::GLSLCosOp, LLVM::CosOp>,
+      DirectConversionPattern<spirv::GLSLExpOp, LLVM::ExpOp>,
+      DirectConversionPattern<spirv::GLSLFAbsOp, LLVM::FAbsOp>,
+      DirectConversionPattern<spirv::GLSLFloorOp, LLVM::FFloorOp>,
+      DirectConversionPattern<spirv::GLSLFMaxOp, LLVM::MaxNumOp>,
+      DirectConversionPattern<spirv::GLSLFMinOp, LLVM::MinNumOp>,
+      DirectConversionPattern<spirv::GLSLLogOp, LLVM::LogOp>,
+      DirectConversionPattern<spirv::GLSLSinOp, LLVM::SinOp>,
+      DirectConversionPattern<spirv::GLSLSMaxOp, LLVM::SMaxOp>,
+      DirectConversionPattern<spirv::GLSLSMinOp, LLVM::SMinOp>,
+      DirectConversionPattern<spirv::GLSLSqrtOp, LLVM::SqrtOp>,
+      InverseSqrtPattern, TanPattern, TanhPattern,
 
       // Logical ops
       DirectConversionPattern<spirv::LogicalAndOp, LLVM::AndOp>,
@@ -813,6 +1293,10 @@ void mlir::populateSPIRVToLLVMConversionPatterns(
       IComparePattern<spirv::LogicalEqualOp, LLVM::ICmpPredicate::eq>,
       IComparePattern<spirv::LogicalNotEqualOp, LLVM::ICmpPredicate::ne>,
       NotPattern<spirv::LogicalNotOp>,
+
+      // Memory ops
+      AddressOfPattern, GlobalVariablePattern, LoadStorePattern<spirv::LoadOp>,
+      LoadStorePattern<spirv::StoreOp>, VariablePattern,
 
       // Miscellaneous ops
       DirectConversionPattern<spirv::SelectOp, LLVM::SelectOp>,
