@@ -55,7 +55,7 @@ func @affine_load_invalid_dim(%M : memref<10xi32>) {
   "unknown"() ({
   ^bb0(%arg: index):
     affine.load %M[%arg] : memref<10xi32>
-    // expected-error@-1 {{index must be a dimension or symbol identifier}}
+    // expected-error@-1 {{operand cannot be used as a dimension id}}
     br ^bb1
   ^bb1:
     br ^bb1
@@ -167,6 +167,62 @@ func @affine_min(%arg0 : index, %arg1 : index, %arg2 : index) {
   // expected-error@+1 {{operand count and affine map dimension and symbol count must match}}
   %0 = affine.min affine_map<(d0) -> (d0)> ()
 
+  return
+}
+
+// -----
+
+// CHECK-LABEL: @affine.execute_region_missing_capture
+func @affine.execute_region_missing_capture(%M : memref<2xi32>) {
+  affine.for %i = 0 to 10 {
+    affine.execute_region [] = () : () -> () {
+    // expected-error@-1 {{incoming memref not explicitly captured}}
+      affine.load %M[%i] : memref<2xi32>
+    }
+  }
+  return
+}
+
+// -----
+
+// CHECK-LABEL: @affine.execute_region_wrong_capture
+func @affine.execute_region_wrong_capture(%s : index) {
+  affine.execute_region [%rS] = (%s) : (index) -> () {
+    // expected-error@-1 {{operand #0 must be memref}}
+    "use"(%s) : (index) -> ()
+  }
+}
+
+// -----
+
+// CHECK-LABEL: @affine.execute_region_wrong_capture
+func @affine.execute_region_wrong_capture(%A : memref<2xi32>) {
+  affine.execute_region [] = (%A) : (memref<2xi32>) -> () {
+    // expected-error@-1 {{incorrect number of memref captures}}
+  }
+  return
+}
+
+// -----
+
+// CHECK-LABEL: @affine.execute_region_region_type_mismatch
+func @affine.execute_region_region_type_mismatch(%A : memref<2xi32>) {
+  "affine.execute_region"(%A) ({
+    // expected-error@-1 {{region argument 0 does not match corresponding operand}}
+    ^bb0(%rA : memref<4xi32>):
+      return
+  }) : (memref<2xi32>) -> ()
+}
+
+// -----
+
+// CHECK-LABEL: @affine.execute_region_region_arg_count_mismatch
+func @affine.execute_region_region_arg_count_mismatch(%A : memref<2xi32>) {
+  "affine.execute_region"(%A) ({
+    // expected-error@-1 {{region argument count does not match operand count}}
+    ^bb0:
+      return
+  }) : (memref<2xi32>) -> ()
   return
 }
 

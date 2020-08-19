@@ -69,9 +69,8 @@ std::unique_ptr<OperationPass<FuncOp>> createLoopCoalescingPass();
 /// variables into another ParallelLoop over less than N induction variables.
 std::unique_ptr<Pass> createParallelLoopCollapsingPass();
 
-/// Creates a pass to perform optimizations relying on memref dataflow such as
-/// store to load forwarding, elimination of dead stores, and dead allocs.
-std::unique_ptr<OperationPass<FuncOp>> createMemRefDataFlowOptPass();
+/// Creates a pass that performs high order polyhedral optimization.
+std::unique_ptr<OperationPass<FuncOp>> createHigherOrderPolyhedralOptPass();
 
 /// Creates a pass to strip debug information from a function.
 std::unique_ptr<Pass> createStripDebugInfoPass();

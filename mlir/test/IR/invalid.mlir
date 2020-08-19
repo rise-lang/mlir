@@ -339,13 +339,13 @@ func @malformed_type(%a : intt) { // expected-error {{expected non-function type
 
 func @resulterror() -> i32 {
 ^bb42:
-  return    // expected-error {{'std.return' op has 0 operands, but enclosing function (@resulterror) returns 1}}
+  return    // expected-error {{'std.return' op has 0 operands, but enclosing op returns 1}}
 }
 
 // -----
 
 func @func_resulterror() -> i32 {
-  return // expected-error {{'std.return' op has 0 operands, but enclosing function (@func_resulterror) returns 1}}
+  return // expected-error {{'std.return' op has 0 operands, but enclosing op returns 1}}
 }
 
 // -----
@@ -471,7 +471,7 @@ func @dominance_failure() {
 
 func @return_type_mismatch() -> i32 {
   %0 = "foo"() : ()->f32
-  return %0 : f32  // expected-error {{type of return operand 0 ('f32') doesn't match function result type ('i32') in function @return_type_mismatch}}
+  return %0 : f32  // expected-error {{type of return operand 0 ('f32') doesn't match enclosing op result type ('i32')}}
 }
 
 // -----

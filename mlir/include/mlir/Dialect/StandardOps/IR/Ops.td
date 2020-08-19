@@ -1536,6 +1536,43 @@ def ExtractElementOp : Std_Op<"extract_element",
 }
 
 //===----------------------------------------------------------------------===//
+// ExecuteRegionOp
+//===----------------------------------------------------------------------===//
+
+def ExecuteRegionOp : Std_Op<"execute_region"> {
+  let summary = "execute_region operation";
+  let description = [{
+      The execute_region operation executes the region held exactly once with
+      control returning to right after the op. The op cannot have any operands,
+      nor does its region have any arguments. All SSA values that dominate the
+      op can be accessed inside. Its region's blocks can have terminators the
+      same way as MLIR functions (FuncOp) can. Control from any return ops
+      from the top level of its region returns to right after the execute_region
+      op. The results of the execute_region op match 1:1 with the return values
+      from its region's blocks;
+
+      Ex:
+
+      loop.for %i = 0 to 128 {
+        %y = std.execute_region -> i32 {
+          %x = load %A[%i] : memref<128xi32>
+          return %x : i32
+        }
+      }
+  }];
+
+  let results = (outs Variadic<AnyType>);
+
+  let regions = (region AnyRegion:$region);
+
+  let verifier = ?;
+
+  // TODO: If the parent is a Func op (which would be the case if all
+  // other ops are from the std dialect), the inliner could be used to inline.
+  let hasCanonicalizer = 0;
+}
+
+//===----------------------------------------------------------------------===//
 // TensorFromElementsOp
 //===----------------------------------------------------------------------===//
 
@@ -1850,6 +1887,47 @@ def MemRefCastOp : CastOp<"memref_cast", [
 }
 
 //===----------------------------------------------------------------------===//
+// MemRefShapeCastOp
+//===----------------------------------------------------------------------===//
+
+def MemRefShapeCastOp : Std_Op<"memref_shape_cast", [NoSideEffect]> {
+  let summary = "memref shape cast operation";
+  let description = [{
+    The "memref_shape_cast" operation converts a memref from an non-vector
+    element type to another memref of a vector elemental type while not changing
+    the source memref's element type. The last dimension size of the source
+    dimension is divided (floor division) by the vector size to obtain the
+    corresponding dimension for target memref type.
+
+    %MV = memref_shape_cast %M : memref<64x16xf32> to memref<64x2xvector<8xf32>>
+    %AV = memref_shape_cast %A : memref<?x?xf32> to memref<?x?xvector<8xf32>>
+  }];
+
+  let arguments = (ins AnyMemRef:$source);
+  let results = (outs AnyMemRef);
+
+  let parser = [{
+    return impl::parseCastOp(parser, result);
+  }];
+  let printer = [{
+    return printStandardCastOp(this->getOperation(), p);
+  }];
+
+  let verifier = [{ return ::verifyCastOp(*this); }];
+
+  let extraClassDeclaration = [{
+    /// Return true if `a` and `b` are valid operand and result pairs for
+    /// the operation.
+    static bool areCastCompatible(Type a, Type b);
+
+    /// The result of a memref_shape_cast is always a memref.
+    MemRefType getType() { return getResult().getType().cast<MemRefType>(); }
+  }];
+
+  let hasFolder = 1;
+}
+
+//===----------------------------------------------------------------------===//
 // MulFOp
 //===----------------------------------------------------------------------===//
 
@@ -2091,21 +2169,22 @@ def RemFOp : FloatArithmeticOp<"remf"> {
 // ReturnOp
 //===----------------------------------------------------------------------===//
 
-def ReturnOp : Std_Op<"return", [NoSideEffect, HasParent<"FuncOp">, ReturnLike,
-                                 Terminator]> {
+def ReturnOp : Std_Op<"return", [NoSideEffect, ReturnLike, Terminator]> {
   let summary = "return operation";
   let description = [{
-    The `return` operation represents a return operation within a function.
-    The operation takes variable number of operands and produces no results.
-    The operand number and types must match the signature of the function
-    that contains the operation.
-
-    Example:
+    The `return` terminator operation, when enclosed immediately by a function,
+    represents the completion of that function and produces its result values.
+    The count and types of the operands must match the result types of the
+    enclosing function. It is valid for multiple blocks in a single function to
+    return. In the case that the `return` op's parent is not a function op, the
+    `return` represents a transfer of control to its parent, whose semantics
+    determine where control flows next, and whose result values match the values
+    returned.
 
     ```mlir
-    func @foo() : (i32, f8) {
+    func @foo() : () -> (i32, f32) {
       ...
-      return %0, %1 : i32, f8
+      return %0, %1 : i32, f32
     }
     ```
   }];

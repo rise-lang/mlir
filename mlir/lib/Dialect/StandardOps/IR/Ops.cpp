@@ -1828,6 +1828,51 @@ OpFoldResult IndexCastOp::fold(ArrayRef<Attribute> cstOperands) {
 }
 
 //===----------------------------------------------------------------------===//
+// ExecuteRegionOp
+//===----------------------------------------------------------------------===//
+
+//
+// (ssa-id `=`)? `execute_region` `->` function-result-type `{`
+//    block+
+// `}`
+//
+// Ex:
+//    std.execute_region -> i32 {
+//      %idx = load %rI[%i] : memref<128xi32>
+//      return %idx : i32
+//    }
+//
+static ParseResult parseExecuteRegionOp(OpAsmParser &parser,
+                                        OperationState &result) {
+  if (parser.parseOptionalArrowTypeList(result.types))
+    return failure();
+
+  // Introduce the body region and parse it.
+  Region *body = result.addRegion();
+  if (parser.parseRegion(*body, /*arguments=*/{}, /*argTypes=*/{}) ||
+      parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  // Parse the optional attribute list.
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  return success();
+}
+
+static void print(OpAsmPrinter &p, ExecuteRegionOp op) {
+  p << ExecuteRegionOp::getOperationName();
+  if (op.getNumResults() > 0)
+    p << " -> " << op.getResultTypes();
+
+  p.printRegion(op.region(),
+                /*printEntryBlockArgs=*/false,
+                /*printBlockTerminators=*/true);
+
+  p.printOptionalAttrDict(op.getAttrs());
+}
+
+//===----------------------------------------------------------------------===//
 // LoadOp
 //===----------------------------------------------------------------------===//
 
@@ -1921,6 +1966,68 @@ bool MemRefCastOp::areCastCompatible(Type a, Type b) {
 }
 
 OpFoldResult MemRefCastOp::fold(ArrayRef<Attribute> operands) {
+  return impl::foldCastOp(*this);
+}
+
+//===----------------------------------------------------------------------===//
+// MemRefShapeCastOp
+//===----------------------------------------------------------------------===//
+
+bool MemRefShapeCastOp::areCastCompatible(Type a, Type b) {
+  auto aT = a.dyn_cast<MemRefType>();
+  auto bT = b.dyn_cast<MemRefType>();
+
+  if (!aT || !bT)
+    return false;
+
+  if (aT.getAffineMaps() != bT.getAffineMaps())
+    return false;
+
+  if (aT.getMemorySpace() != bT.getMemorySpace())
+    return false;
+
+  if (aT.getRank() != bT.getRank())
+    return false;
+
+  // With rank 0, there is no vec cast.
+  if (aT.getRank() == 0)
+    return false;
+
+  // Should have the same shape up until the last n-1 dimensions.
+  // Replace this by std::equal.
+  for (unsigned i = 0, e = aT.getRank() - 1; i < e; ++i)
+    if (aT.getDimSize(i) != bT.getDimSize(i))
+      return false;
+
+  // Source memref can't have vector element type.
+  if (auto shapedEltType = aT.getElementType().dyn_cast<ShapedType>())
+    return false;
+
+  auto shapedEltTypeB = bT.getElementType().dyn_cast<ShapedType>();
+  if (!shapedEltTypeB)
+    return false;
+
+  auto eltA = aT.getElementType();
+  auto eltB = shapedEltTypeB.getElementType();
+  if (eltA != eltB)
+    return false;
+
+  int64_t lastDimA = aT.getShape().back();
+  int64_t lastDimB = bT.getShape().back();
+
+  // If one of them is dynamic but not the other, they are incompatible.
+  if (lastDimA * lastDimB < 0)
+    return false;
+
+  if (lastDimA != MemRefType::kDynamicSize &&
+      lastDimB != MemRefType::kDynamicSize &&
+      lastDimA / shapedEltTypeB.getNumElements() != lastDimB)
+    return false;
+
+  return true;
+}
+
+OpFoldResult MemRefShapeCastOp::fold(ArrayRef<Attribute> operands) {
   return impl::foldCastOp(*this);
 }
 
@@ -2055,22 +2162,35 @@ OpFoldResult RankOp::fold(ArrayRef<Attribute> operands) {
 //===----------------------------------------------------------------------===//
 
 static LogicalResult verify(ReturnOp op) {
-  auto function = cast<FuncOp>(op.getParentOp());
+  auto *parentOp = op.getParentOp();
+  if (!parentOp)
+    return op.emitOpError("has no parent op");
 
-  // The operand number and types must match the function signature.
-  const auto &results = function.getType().getResults();
-  if (op.getNumOperands() != results.size())
+  // The operand count and types must be consisntent with the parent op. When
+  // the parent is a FuncOp (which is declarative), check against its return
+  // types; for the rest, check again the number of actual SSA results.
+  SmallVector<Type, 4> retTypes;
+  auto funcOp = dyn_cast<FuncOp>(parentOp);
+  if (funcOp) {
+    retTypes.assign(funcOp.getType().getResults().begin(),
+                    funcOp.getType().getResults().end());
+  } else {
+    retTypes.reserve(parentOp->getNumResults());
+    for (auto result : parentOp->getResults())
+      retTypes.push_back(result.getType());
+  }
+
+  if (op.getNumOperands() != retTypes.size())
     return op.emitOpError("has ")
-           << op.getNumOperands() << " operands, but enclosing function (@"
-           << function.getName() << ") returns " << results.size();
+           << op.getNumOperands() << " operands, but enclosing op returns "
+           << retTypes.size();
 
-  for (unsigned i = 0, e = results.size(); i != e; ++i)
-    if (op.getOperand(i).getType() != results[i])
-      return op.emitError()
-             << "type of return operand " << i << " ("
-             << op.getOperand(i).getType()
-             << ") doesn't match function result type (" << results[i] << ")"
-             << " in function @" << function.getName();
+  for (unsigned i = 0, e = retTypes.size(); i != e; ++i)
+    if (op.getOperand(i).getType() != retTypes[i])
+      return op.emitError() << "type of return operand " << i << " ("
+                            << op.getOperand(i).getType()
+                            << ") doesn't match enclosing op result type ("
+                            << retTypes[i] << ")";
 
   return success();
 }

@@ -10,8 +10,6 @@
 #include "mlir/IR/Builders.h"
 
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
-#include "mlir/Dialect/Linalg/EDSC/Builders.h"
-#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
 #include "mlir/Dialect/SCF/EDSC/Intrinsics.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/EDSC/Builders.h"
@@ -512,7 +510,7 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
 
   // Introduce a temporary to accumulate into, or accumulate direcly in the
   // output
-  bool defineNewAccumulator = true;
+  bool defineNewAccumulator = false;
 
   Value accum;
   if (defineNewAccumulator) {

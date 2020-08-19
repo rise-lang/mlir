@@ -6,12 +6,12 @@ add_mlir_library(MLIRTransforms
   CopyRemoval.cpp
   CSE.cpp
   DialectConversion.cpp
+  HigherOrderPolyhedralOpt.cpp
   Inliner.cpp
   LocationSnapshot.cpp
   LoopCoalescing.cpp
   LoopFusion.cpp
   LoopInvariantCodeMotion.cpp
-  MemRefDataFlowOpt.cpp
   NormalizeMemRefs.cpp
   OpStats.cpp
   ParallelLoopCollapsing.cpp

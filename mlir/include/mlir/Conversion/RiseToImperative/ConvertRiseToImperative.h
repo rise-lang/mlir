@@ -7,7 +7,6 @@
 
 #include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"

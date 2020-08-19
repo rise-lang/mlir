@@ -22,11 +22,9 @@ void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
 #define GEN_PASS_CLASSES
 #include "mlir/Dialect/Rise/Passes.h.inc"
 
-namespace rise {
 
 std::unique_ptr<OperationPass<FuncOp>> createConvertRiseToImperativePass();
 
-} // namespace rise
 } // namespace mlir
 
 #endif // MLIR_DIALECT_RISE_PASSES_H

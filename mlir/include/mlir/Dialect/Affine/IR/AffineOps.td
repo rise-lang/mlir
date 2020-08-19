@@ -815,6 +815,76 @@ def AffineYieldOp : Affine_Op<"yield", [NoSideEffect, Terminator, ReturnLike]> {
   let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
 }
 
+def AffineExecuteRegionOp : Affine_Op<"execute_region", [AffineScope]> {
+  let summary = "execute_region operation";
+  let description = [{
+      The `affine.execute_region` op introduces a new symbol context for affine
+      operations. It holds a single region,  which can be a list of one or more
+      blocks, and its semantics are to execute its region exactly once. The op's
+      region can have zero or more arguments, each of which can only be a
+      memref. The operands bind 1:1 to its region's arguments. The op can't use
+      any memrefs defined outside of it, but can use any other SSA values that
+      dominate it. The results of a execute_region op match 1:1 with the return
+      values from its region's blocks;
+
+      Examples:
+
+      ```mlir
+      affine.for %i = 0 to 128 {
+        affine.execute_region [%rI, %rM] = (%I, %M)
+              : (memref<128xi32>, memref<24xf32>) -> () {
+          %idx = affine.load %rI[%i] : memref<128xi32>
+          %index = index_cast %idx : i32 to index
+          affine.load %rM[%index]: memref<24xf32>
+          return
+        }
+      }
+      ```
+
+      ```mlir
+      affine.for %i = 0 to %n {
+        affine.execute_region [] = () : () -> () {
+          // %pow can now be used as a loop bound.
+          %pow = call @powi(%i) : (index) ->  index
+          affine.for %j = 0 to %pow {
+            "foo"() : () -> ()
+          }
+          return
+        }
+      }
+      ```
+
+      ```mlir
+      affine.for %i = 0 to %n {
+        affine.execute_region : () -> () {
+          // %pow can now be used as a loop bound.
+          %pow = call @powi(%i) : (index) ->  index
+          affine.for %j = 0 to %pow {
+            "foo"() : () -> ()
+          }
+          return
+        }
+      }
+      ```
+
+  }];
+
+  let arguments =  (ins Variadic<AnyMemRef>:$operands);
+  let results = (outs Variadic<AnyType>);
+
+  let regions = (region AnyRegion:$region);
+
+  let skipDefaultBuilders = 1;
+
+  let builders = [
+    OpBuilder<"Builder &builder, OperationState &result, "
+              "ValueRange memrefs">
+  ];
+
+  // TODO: canonicalizations related to memrefs.
+  let hasCanonicalizer = 0;
+}
+
 def AffineVectorLoadOp : AffineLoadOpBase<"vector_load"> {
   let summary = "affine vector load operation";
   let description = [{

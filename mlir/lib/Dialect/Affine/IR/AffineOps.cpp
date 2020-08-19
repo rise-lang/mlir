@@ -14,9 +14,11 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
@@ -257,7 +259,8 @@ bool mlir::isValidSymbol(Value value, Region *region) {
   auto *defOp = value.getDefiningOp();
   if (!defOp) {
     // A block argument that is not a top-level value is a valid symbol if it
-    // dominates region's parent op.
+    // dominates region's parent op. `region` should not be isolated from above
+    // for that symbol to pass in.
     if (region && !region->getParentOp()->isKnownIsolatedFromAbove())
       if (auto *parentOpRegion = region->getParentOp()->getParentRegion())
         return isValidSymbol(value, parentOpRegion);
@@ -1534,11 +1537,50 @@ struct AffineForEmptyLoopFolder : public OpRewritePattern<AffineForOp> {
     return success();
   }
 };
+
+// This is a pattern to simplify to unit stride in simple cases.
+struct AffineStrideNormalizer : public OpRewritePattern<AffineForOp> {
+  using OpRewritePattern<AffineForOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(AffineForOp forOp,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<Value, 4> lbOperands(forOp.getLowerBoundOperands());
+    SmallVector<Value, 4> ubOperands(forOp.getUpperBoundOperands());
+
+    int64_t step = forOp.getStep();
+
+    // TODO: keeping it very simple.
+    if (step == 1 || !forOp.hasConstantBounds()) {
+      return failure();
+    }
+
+    rewriter.startRootUpdate(forOp);
+
+    int64_t lb = forOp.getConstantLowerBound();
+    int64_t ub = forOp.getConstantUpperBound();
+
+    forOp.setStep(1);
+    forOp.setConstantUpperBound(lb + mlir::ceilDiv(ub - lb, step));
+
+    OpBuilder b(&forOp.getBody()->front());
+    auto d0 = getAffineDimExpr(0, b.getContext());
+    auto ivScaleUp =
+        b.create<AffineApplyOp>(forOp.getLoc(), AffineMap::get(1, 0, d0 * step),
+                                forOp.getInductionVar());
+
+    SmallPtrSet<Operation *, 1> exceptions = {ivScaleUp};
+    replaceAllUsesExcept(forOp.getInductionVar(), ivScaleUp, exceptions);
+
+    rewriter.finalizeRootUpdate(forOp);
+    return success();
+  }
+};
+
 } // end anonymous namespace
 
 void AffineForOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
                                               MLIRContext *context) {
-  results.insert<AffineForEmptyLoopFolder>(context);
+  results.insert<AffineForEmptyLoopFolder, AffineStrideNormalizer>(context);
 }
 
 LogicalResult AffineForOp::fold(ArrayRef<Attribute> operands,
@@ -2019,29 +2061,31 @@ static void print(OpAsmPrinter &p, AffineLoadOp op) {
 
 /// Verify common indexing invariants of affine.load, affine.store,
 /// affine.vector_load and affine.vector_store.
+template <typename AffineMemOpTy>
 static LogicalResult
-verifyMemoryOpIndexing(Operation *op, AffineMapAttr mapAttr,
+verifyMemoryOpIndexing(AffineMemOpTy op, AffineMapAttr mapAttr,
                        Operation::operand_range mapOperands,
                        MemRefType memrefType, unsigned numIndexOperands) {
+  unsigned numDims;
   if (mapAttr) {
     AffineMap map = mapAttr.getValue();
     if (map.getNumResults() != memrefType.getRank())
-      return op->emitOpError("affine map num results must equal memref rank");
+      return op.emitOpError("affine map num results must equal memref rank");
     if (map.getNumInputs() != numIndexOperands)
-      return op->emitOpError("expects as many subscripts as affine map inputs");
+      return op.emitOpError("expects as many subscripts as affine map inputs");
+    numDims = map.getNumDims();
   } else {
     if (memrefType.getRank() != numIndexOperands)
-      return op->emitOpError(
+      return op.emitOpError(
           "expects the number of subscripts to be equal to memref rank");
+    numDims = op.getNumOperands() - 1;
   }
 
-  Region *scope = getAffineScope(op);
   for (auto idx : mapOperands) {
     if (!idx.getType().isIndex())
-      return op->emitOpError("index to load must have 'index' type");
-    if (!isValidAffineIndexOperand(idx, scope))
-      return op->emitOpError("index must be a dimension or symbol identifier");
+      return op.emitOpError("index to load must have 'index' type");
   }
+  verifyDimAndSymbolIdentifiers(op, op.getMapOperands(), numDims);
 
   return success();
 }
@@ -2052,7 +2096,7 @@ LogicalResult verify(AffineLoadOp op) {
     return op.emitOpError("result type must match element type of memref");
 
   if (failed(verifyMemoryOpIndexing(
-          op.getOperation(),
+          op,
           op.getAttrOfType<AffineMapAttr>(op.getMapAttrName()),
           op.getMapOperands(), memrefType,
           /*numIndexOperands=*/op.getNumOperands() - 1)))
@@ -2141,7 +2185,7 @@ LogicalResult verify(AffineStoreOp op) {
         "first operand must have same type memref element type");
 
   if (failed(verifyMemoryOpIndexing(
-          op.getOperation(),
+          op,
           op.getAttrOfType<AffineMapAttr>(op.getMapAttrName()),
           op.getMapOperands(), memrefType,
           /*numIndexOperands=*/op.getNumOperands() - 2)))
@@ -2375,6 +2419,144 @@ LogicalResult AffinePrefetchOp::fold(ArrayRef<Attribute> cstOperands,
                                      SmallVectorImpl<OpFoldResult> &results) {
   /// prefetch(memrefcast) -> prefetch
   return foldMemRefCast(*this);
+}
+
+//===----------------------------------------------------------------------===//
+// AffineExecuteRegionOp
+//===----------------------------------------------------------------------===//
+//
+
+// TODO: missing region body.
+void AffineExecuteRegionOp::build(Builder &builder, OperationState &result,
+                                  ValueRange memrefs) {
+  // Create a region and an empty entry block. The arguments of the region are
+  // the supplied memrefs.
+  Region *region = result.addRegion();
+  Block *body = new Block();
+  region->push_back(body);
+  body->addArguments(memrefs.getTypes());
+}
+
+static LogicalResult verify(AffineExecuteRegionOp op) {
+  // All memref uses in the execute_region region should be explicitly captured.
+  // FIXME: change this walk to an affine walk that doesn't walk inner
+  // execute_regions.
+  DenseSet<Value> memrefsUsed;
+  op.region().walk([&](Operation *innerOp) {
+    for (auto v : innerOp->getOperands())
+      if (v.getType().isa<MemRefType>())
+        memrefsUsed.insert(v);
+  });
+
+  // For each memref use, ensure either an execute_region argument or a local
+  // def.
+  for (auto memref : memrefsUsed) {
+    if (auto arg = memref.dyn_cast<BlockArgument>())
+      if (arg.getOwner()->getParent()->getParentOp() == op)
+        continue;
+    if (auto *defOp = memref.getDefiningOp())
+      // FIXME: this will only work if the memrefs collected above didn't
+      // include any from inner execute_regions.
+      if (defOp->getParentOfType<AffineExecuteRegionOp>() == op)
+        continue;
+    return op.emitOpError("incoming memref not explicitly captured");
+  }
+
+  // Verify that the region arguments match operands.
+  auto &entryBlock = op.region().front();
+  if (entryBlock.getNumArguments() != op.getNumOperands())
+    return op.emitOpError("region argument count does not match operand count");
+
+  for (auto argEn : llvm::enumerate(entryBlock.getArguments())) {
+    if (op.getOperand(argEn.index()).getType() != argEn.value().getType())
+      return op.emitOpError("region argument ")
+             << argEn.index() << " does not match corresponding operand";
+  }
+
+  return success();
+}
+
+// Custom form syntax.
+//
+// (ssa-id `=`)? `affine.execute_region` `[` memref-region-arg-list `]`
+//                                   `=` `(` memref-use-list `)`
+//                  `:` memref-type-list-parens `->` function-result-type `{`
+//    block+
+// `}`
+//
+// Ex:
+//
+//  affine.execute_region [%rI, %rM] = (%I, %M)
+//        : (memref<128xi32>, memref<1024xf32>) -> () {
+//      %idx = affine.load %rI[%i] : memref<128xi32>
+//      %index = index_cast %idx : i32 to index
+//      affine.load %rM[%index]: memref<1024xf32>
+//      return
+//    }
+//
+static ParseResult parseAffineExecuteRegionOp(OpAsmParser &parser,
+                                              OperationState &result) {
+  // Memref operands.
+  SmallVector<OpAsmParser::OperandType, 4> memrefs;
+
+  // Region arguments to be created.
+  SmallVector<OpAsmParser::OperandType, 4> regionMemRefs;
+
+  // The graybox op has the same type signature as a function.
+  FunctionType opType;
+
+  // Parse the memref assignments.
+  auto argLoc = parser.getCurrentLocation();
+  if (parser.parseRegionArgumentList(regionMemRefs,
+                                     OpAsmParser::Delimiter::Square) ||
+      parser.parseEqual() ||
+      parser.parseOperandList(memrefs, OpAsmParser::Delimiter::Paren))
+    return failure();
+
+  if (memrefs.size() != regionMemRefs.size())
+    return parser.emitError(parser.getNameLoc(),
+                            "incorrect number of memref captures");
+
+  if (parser.parseColonType(opType) ||
+      parser.addTypesToList(opType.getResults(), result.types))
+    return failure();
+
+  auto memrefTypes = opType.getInputs();
+  if (parser.resolveOperands(memrefs, memrefTypes, argLoc, result.operands))
+    return failure();
+
+  // Introduce the body region and parse it.
+  Region *body = result.addRegion();
+  if (parser.parseRegion(*body, regionMemRefs, memrefTypes) ||
+      parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  // Parse the optional attribute list.
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  return success();
+}
+
+static void print(OpAsmPrinter &p, AffineExecuteRegionOp op) {
+  p << AffineExecuteRegionOp::getOperationName() << " [";
+  // TODO: consider shadowing region arguments.
+  p.printOperands(op.region().front().getArguments());
+  p << "] = (";
+  auto operands = op.getOperands();
+  p.printOperands(operands);
+  p << ") ";
+
+  SmallVector<Type, 4> argTypes(op.getOperandTypes());
+  p << " : "
+    << FunctionType::get(argTypes, op.getResultTypes(),
+                         op.getOperation()->getContext());
+
+  p.printRegion(op.region(),
+                /*printEntryBlockArgs=*/false,
+                /*printBlockTerminators=*/true);
+
+  p.printOptionalAttrDict(op.getAttrs());
 }
 
 //===----------------------------------------------------------------------===//
@@ -2759,7 +2941,7 @@ static LogicalResult verifyVectorMemoryOp(Operation *op, MemRefType memrefType,
 static LogicalResult verify(AffineVectorLoadOp op) {
   MemRefType memrefType = op.getMemRefType();
   if (failed(verifyMemoryOpIndexing(
-          op.getOperation(),
+          op,
           op.getAttrOfType<AffineMapAttr>(op.getMapAttrName()),
           op.getMapOperands(), memrefType,
           /*numIndexOperands=*/op.getNumOperands() - 1)))
@@ -2814,7 +2996,7 @@ static void print(OpAsmPrinter &p, AffineVectorStoreOp op) {
 static LogicalResult verify(AffineVectorStoreOp op) {
   MemRefType memrefType = op.getMemRefType();
   if (failed(verifyMemoryOpIndexing(
-          op.getOperation(),
+          op,
           op.getAttrOfType<AffineMapAttr>(op.getMapAttrName()),
           op.getMapOperands(), memrefType,
           /*numIndexOperands=*/op.getNumOperands() - 2)))

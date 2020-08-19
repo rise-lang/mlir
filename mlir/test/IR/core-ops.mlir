@@ -630,6 +630,24 @@ func @calls(%arg0: i32) {
   // CHECK: %4 = call_indirect %f_0(%arg0) : (i32) -> i32
   %3 = "std.call_indirect"(%f_0, %arg0) : ((i32) -> i32, i32) -> i32
 
+  // CHECK: execute_region {
+  // CHECK: }
+  "std.execute_region"() ({
+  ^bb0:
+    br ^bb1
+  ^bb1:
+    return
+  }) : () -> ()
+
+  // CHECK:      execute_region -> i64 {
+  // CHECK-NEXT:   constant
+  // CHECK-NEXT:   return
+  // CHECK-NEXT: }
+  %5 = execute_region -> i64 {
+    %c1 = constant 1 : i64
+    return %c1 : i64
+  }
+
   return
 }
 
@@ -701,6 +719,15 @@ func @memref_cast(%arg0: memref<4xf32>, %arg1 : memref<?xf32>, %arg2 : memref<64
   // CHECK: memref_cast %{{.*}} : memref<*xf32> to memref<4xf32>
   %5 = memref_cast %4 : memref<*xf32> to memref<4xf32>
   return
+}
+
+// CHECK-LABEL: func @memref_shape_cast
+func @memref_shape_cast(%arg0: memref<60x8xf32>, %arg1: memref<?x?xf32>) -> memref<60x2xvector<4xf32>> {
+  // CHECK: {{.*}} = memref_shape_cast %arg0 : memref<60x8xf32> to memref<60x2xvector<4xf32>>
+  %0 = memref_shape_cast %arg0 : memref<60x8xf32> to memref<60x2xvector<4xf32>>
+  // CHECK: memref_shape_cast %arg1 : memref<?x?xf32> to memref<?x?xvector<4xf32>>
+  %1 = memref_shape_cast %arg1 : memref<?x?xf32> to memref<?x?xvector<4xf32>>
+  return %0 : memref<60x2xvector<4xf32>>
 }
 
 // CHECK-LABEL: func @memref_view(%arg0
@@ -810,6 +837,15 @@ func @tensor_load_store(%0 : memref<4x4xi32>) {
   %1 = tensor_load %0 : memref<4x4xi32>
   // CHECK: tensor_store %[[TENSOR]], %[[MEMREF]] : memref<4x4xi32>
   tensor_store %1, %0 : memref<4x4xi32>
+  return
+}
+
+// CHECK-LABEL: func @return_in_op_with_region
+func @return_in_op_with_region() {
+  "foo.region"() ({
+    %c9 = constant 9 : i32
+    return %c9 : i32
+  }): () -> (i32)
   return
 }
 

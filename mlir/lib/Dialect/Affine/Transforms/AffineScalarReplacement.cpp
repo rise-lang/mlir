@@ -1,4 +1,4 @@
-//===- MemRefDataFlowOpt.cpp - MemRef DataFlow Optimization pass ------ -*-===//
+//===- AffineScalarReplacement.cpp - Scalar Replacement pass ---------- -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,9 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements a pass to forward memref stores to loads, thereby
-// potentially getting rid of intermediate memref's entirely.
-// TODO: In the future, similar techniques could be used to eliminate
+// This file implements a pass to replace affine memref accesses with scalars.
+// This subsumes store to load forwarding, hoisting invariant load's and stores
+// out of loops, and eliminating redundant load's. As a result, in some cases,
+// intermediate memref's can be completely be eliminated.
+// TODO(mlir-team): In the future, similar techniques could be used to eliminate
 // dead memref store's and perform more complex forwarding when support for
 // SSA scalars live out of 'affine.for'/'affine.if' statements is available.
 //===----------------------------------------------------------------------===//
@@ -17,13 +19,14 @@
 #include "mlir/Analysis/AffineAnalysis.h"
 #include "mlir/Analysis/Utils.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Dominance.h"
-#include "mlir/Transforms/Passes.h"
+#include "mlir/Transforms/LoopUtils.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include <algorithm>
 
-#define DEBUG_TYPE "memref-dataflow-opt"
+#define DEBUG_TYPE "affine-scalrep"
 
 using namespace mlir;
 
@@ -60,9 +63,11 @@ namespace {
 // currently only eliminates the stores only if no other loads/uses (other
 // than dealloc) remain.
 //
-struct MemRefDataFlowOpt : public MemRefDataFlowOptBase<MemRefDataFlowOpt> {
+struct AffineScalarReplacement
+    : public AffineScalarReplacementBase<AffineScalarReplacement> {
   void runOnFunction() override;
 
+  bool forwardStoreToLoad(FuncOp f);
   void forwardStoreToLoad(AffineReadOpInterface loadOp);
 
   // A list of memref's that are potentially dead / could be eliminated.
@@ -78,14 +83,15 @@ struct MemRefDataFlowOpt : public MemRefDataFlowOptBase<MemRefDataFlowOpt> {
 
 /// Creates a pass to perform optimizations relying on memref dataflow such as
 /// store to load forwarding, elimination of dead stores, and dead allocs.
-std::unique_ptr<OperationPass<FuncOp>> mlir::createMemRefDataFlowOptPass() {
-  return std::make_unique<MemRefDataFlowOpt>();
+std::unique_ptr<OperationPass<FuncOp>>
+mlir::createAffineScalarReplacementPass() {
+  return std::make_unique<AffineScalarReplacement>();
 }
 
 // This is a straightforward implementation not optimized for speed. Optimize
 // if needed.
-void MemRefDataFlowOpt::forwardStoreToLoad(AffineReadOpInterface loadOp) {
-  // First pass over the use list to get the minimum number of surrounding
+void AffineScalarReplacement::forwardStoreToLoad(AffineReadOpInterface loadOp) {
+  // First pass over the use list to get minimum number of surrounding
   // loops common between the load op and the store op, with min taken across
   // all store ops.
   SmallVector<Operation *, 8> storeOps;
@@ -176,14 +182,8 @@ void MemRefDataFlowOpt::forwardStoreToLoad(AffineReadOpInterface loadOp) {
   loadOpsToErase.push_back(loadOp);
 }
 
-void MemRefDataFlowOpt::runOnFunction() {
-  // Only supports single block functions at the moment.
-  FuncOp f = getFunction();
-  if (!llvm::hasSingleElement(f)) {
-    markAllAnalysesPreserved();
-    return;
-  }
-
+/// Returns true if any forwarding happened.
+bool AffineScalarReplacement::forwardStoreToLoad(FuncOp f) {
   domInfo = &getAnalysis<DominanceInfo>();
   postDomInfo = &getAnalysis<PostDominanceInfo>();
 
@@ -217,4 +217,22 @@ void MemRefDataFlowOpt::runOnFunction() {
       user->erase();
     defOp->erase();
   }
+
+  return loadOpsToErase.size() > 0;
+}
+
+void AffineScalarReplacement::runOnFunction() {
+  // Only supports single block functions at the moment.
+  FuncOp f = getFunction();
+  if (!llvm::hasSingleElement(f)) {
+    markAllAnalysesPreserved();
+    return;
+  }
+
+  // Replace accesses to invariant load/store's and multiple redundant loads
+  // by scalars.
+  f.walk([&](AffineForOp forOp) { scalarReplace(forOp); });
+
+  // Store to load forwarding
+  forwardStoreToLoad(f);
 }

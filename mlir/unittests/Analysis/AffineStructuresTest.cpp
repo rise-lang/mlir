@@ -53,7 +53,8 @@ void checkSample(bool hasValue, const FlatAffineConstraints &fac) {
 FlatAffineConstraints
 makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
                        ArrayRef<SmallVector<int64_t, 4>> eqs) {
-  FlatAffineConstraints fac(ineqs.size(), eqs.size(), dims + 1, dims);
+  FlatAffineConstraints fac(ineqs.size(), eqs.size(), dims + 1, dims,
+                            /*numSymbols=*/0);
   for (const auto &eq : eqs)
     fac.addEquality(eq);
   for (const auto &ineq : ineqs)

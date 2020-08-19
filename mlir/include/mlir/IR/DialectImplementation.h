@@ -18,7 +18,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/raw_ostream.h"
-#include <mlir/Dialect/Rise/IR/Types.h>
+//#include <mlir/Dialect/Rise/IR/Types.h>
 
 namespace mlir {
 

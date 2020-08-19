@@ -36,11 +36,25 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/raw_ostream.h"
+#include <iomanip>
 #include <cstdint>
 #include <numeric>
+#include <sstream>
+#include <sys/time.h>
 
 using namespace mlir;
 using llvm::Error;
+
+// Timer based on gettimeofday.
+// TODO: replace with an existing LLVM utility if appropriate.
+static double rtclock() {
+  struct timeval Tp;
+  int stat = gettimeofday(&Tp, NULL);
+  if (stat != 0)
+    printf("Error return from gettimeofday: %d", stat);
+  return (Tp.tv_sec + Tp.tv_usec * 1.0e-6);
+}
 
 namespace {
 /// This options struct prevents the need for global static initializers, and
@@ -92,6 +106,14 @@ struct Options {
   llvm::cl::opt<std::string> objectFilename{
       "object-filename",
       llvm::cl::desc("Dump JITted-compiled object to file <input file>.o")};
+
+  llvm::cl::opt<bool> time{
+      "time", llvm::cl::desc("Report compile and execution times"),
+             llvm::cl::init(true)};
+
+  llvm::cl::opt<unsigned> reps{
+      "reps", llvm::cl::desc("Number of execution repetitions"),
+             llvm::cl::value_desc("<unsigned>"), llvm::cl::init(1)};
 };
 } // end anonymous namespace
 
@@ -136,6 +158,8 @@ static Error
 compileAndExecute(Options &options, ModuleOp module, StringRef entryPoint,
                   std::function<llvm::Error(llvm::Module *)> transformer,
                   void **args) {
+  // Record start time for compilation.
+  double tStart = rtclock();
   Optional<llvm::CodeGenOpt::Level> jitCodeGenOptLevel;
   if (auto clOptLevel = getCommandLineOptLevel(options))
     jitCodeGenOptLevel =
@@ -144,6 +168,13 @@ compileAndExecute(Options &options, ModuleOp module, StringRef entryPoint,
                                  options.clSharedLibs.end());
   auto expectedEngine = mlir::ExecutionEngine::create(module, transformer,
                                                       jitCodeGenOptLevel, libs);
+  double tLapsed = rtclock() - tStart;
+  if (options.time) {
+    std::stringstream msg;
+    msg << std::setprecision(6) << "Compilation time: " << tLapsed << "s\n";
+    llvm::errs() << msg.str();
+  }
+
   if (!expectedEngine)
     return expectedEngine.takeError();
 
@@ -158,7 +189,17 @@ compileAndExecute(Options &options, ModuleOp module, StringRef entryPoint,
                                  : options.objectFilename);
 
   void (*fptr)(void **) = *expectedFPtr;
-  (*fptr)(args);
+
+  tStart = rtclock();
+  for (unsigned i = 0; i < options.reps; ++i)
+    (*fptr)(args);
+  tLapsed = rtclock() - tStart;
+  if (options.time) {
+    std::stringstream msg;
+    msg << std::setprecision(6)
+        << "Total execution time: " << tLapsed << "s\n";
+    llvm::errs() << msg.str();
+  }
 
   return Error::success();
 }

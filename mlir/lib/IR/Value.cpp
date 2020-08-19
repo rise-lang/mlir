@@ -253,3 +253,13 @@ OpaqueValue::OpaqueValue(Value value) : impl(value.getAsOpaquePointer()) {}
 OpaqueValue::operator Value() const {
   return Value::getFromOpaquePointer(impl);
 }
+
+// Replaces all uses of `orig` with `replacement` except if the user is listed
+// in `exceptions`.
+void mlir::replaceAllUsesExcept(Value orig, Value replacement,
+                     const SmallPtrSetImpl<Operation *> &exceptions) {
+  for (auto &use : llvm::make_early_inc_range(orig.getUses())) {
+    if (exceptions.count(use.getOwner()) == 0)
+      use.set(replacement);
+  }
+}

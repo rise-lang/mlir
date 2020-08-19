@@ -27,6 +27,8 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
 
+#define DEBUG_TYPE "lower-affine"
+
 using namespace mlir;
 using namespace mlir::vector;
 
@@ -357,6 +359,47 @@ public:
   }
 };
 
+class AffineExecuteRegionOpLowering
+    : public OpRewritePattern<AffineExecuteRegionOp> {
+public:
+  using OpRewritePattern<AffineExecuteRegionOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(AffineExecuteRegionOp op,
+                                PatternRewriter &rewriter) const override {
+    // Move scope operations (except for its terminator) to the loop's
+    // containing block.
+    if (op.region().getBlocks().size() > 1) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Single block in graybox region supported for now");
+      return failure();
+    }
+    auto &block = op.region().front();
+    auto returnOp = dyn_cast<ReturnOp>(block.back());
+    if (!returnOp) {
+      LLVM_DEBUG(llvm::dbgs() << "Only return terminated block implemented");
+      return failure();
+    }
+
+    // Replace all uses of the results with the return values.
+    for (auto operandEn : llvm::enumerate(returnOp.getOperands()))
+      op.getResult(operandEn.index()).replaceAllUsesWith(operandEn.value());
+
+    // Remove the terminator of the graybox.
+    rewriter.eraseOp(returnOp);
+
+    // Move the operations of the graybox into its parent block.
+    auto *parentBlock = op.getOperation()->getBlock();
+    parentBlock->getOperations().splice(Block::iterator(op),
+                                        block.getOperations());
+    // Replace each memref region argument by the corresponding operand.
+    for (auto &argEntry : llvm::enumerate(block.getArguments()))
+      argEntry.value().replaceAllUsesWith(op.getOperand(argEntry.index()));
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 /// Convert an `affine.parallel` (loop nest) operation into a `scf.parallel`
 /// operation.
 class AffineParallelLowering : public OpRewritePattern<AffineParallelOp> {
@@ -654,6 +697,7 @@ void mlir::populateAffineToStdConversionPatterns(
       AffineMaxLowering,
       AffineParallelLowering,
       AffinePrefetchLowering,
+      AffineExecuteRegionOpLowering,
       AffineStoreLowering,
       AffineForLowering,
       AffineIfLowering,

@@ -394,7 +394,7 @@ void mlir::createAffineComputationSlice(
 }
 
 // TODO: Currently works for static memrefs with a single layout map.
-LogicalResult mlir::normalizeMemRef(AllocOp allocOp) {
+LogicalResult mlir::normalizeMemRef(AllocOp allocOp, Value *normalizedMemRef) {
   MemRefType memrefType = allocOp.getType();
   OpBuilder b(allocOp);
 

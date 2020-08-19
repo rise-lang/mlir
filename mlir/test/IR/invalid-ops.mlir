@@ -894,9 +894,9 @@ func @trunci_cast_to_same_width(%arg0 : i16) {
 
 func @return_not_in_function() {
   "foo.region"() ({
-    // expected-error@+1 {{'std.return' op expects parent op 'func'}}
+    // expected-error@+1 {{'std.return' op has 0 operands, but enclosing op returns 1}}
     return
-  }): () -> ()
+  }): () -> (i32)
   return
 }
 
@@ -1090,6 +1090,57 @@ func @invalid_memref_cast() {
   // expected-error@+1 {{operand type 'memref<*xf32>' and result type 'memref<*xf32>' are cast incompatible}}
   %2 = memref_cast %1 : memref<*xf32, 0> to memref<*xf32, 0>
   return
+}
+
+// -----
+
+func @invalid_memref_shape_cast_1() {
+  %0 = alloc() : memref<2x4xf32>
+  %1 = memref_shape_cast %0 : memref<2x4xf32> to memref<2x2xf64>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<2x2xf64>' are cast incompatible}}
+}
+
+// -----
+
+func @invalid_memref_shape_cast_2() {
+  %0 = alloc() : memref<2x4xf32>
+  memref_shape_cast %0 : memref<2x4xf32> to memref<2xvector<4xf32>>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<2xvector<4xf32>>' are cast incompatible}}
+  return
+}
+
+// -----
+
+func @invalid_memref_shape_cast_3() {
+  %0 = alloc() : memref<2x4xf32>
+  memref_shape_cast %0 : memref<2x4xf32> to memref<2x?xvector<4xf32>>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<2x?xvector<4xf32>>' are cast incompatible}}
+  return
+}
+
+// -----
+
+func @invalid_memref_shape_cast_4() {
+  %0 = alloc() : memref<2x4xf32>
+  memref_shape_cast %0 : memref<2x4xf32> to memref<?x1xvector<4xf32>>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<?x1xvector<4xf32>>' are cast incompatible}}
+  return
+}
+
+// -----
+
+func @invalid_memref_shape_cast_5() {
+  %0 = alloc() : memref<2x4xf32>
+  %1 = memref_shape_cast %0 : memref<2x4xf32> to memref<4x2xf32>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<4x2xf32>' are cast incompatible}}
+}
+
+// -----
+
+func @invalid_memref_shape_cast_6() {
+  %0 = alloc() : memref<2x4xf32>
+  %1 = memref_shape_cast %0 : memref<2x4xf32> to memref<2x4xf32>
+  // expected-error@-1 {{operand type 'memref<2x4xf32>' and result type 'memref<2x4xf32>' are cast incompatible}}
 }
 
 // -----

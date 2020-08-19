@@ -104,7 +104,7 @@ AffineDataCopyGeneration::runOnBlock(Block *block,
           : fastMemoryCapacity;
   AffineCopyOptions copyOptions = {generateDma, slowMemorySpace,
                                    fastMemorySpace, tagMemorySpace,
-                                   fastMemCapacityBytes};
+                                   fastMemCapacityBytes, AffineMap()};
 
   // Every affine.forop in the block starts and ends a block range for copying;
   // in addition, a contiguous sequence of operations starting with a

@@ -35,7 +35,8 @@ struct LoopTiling : public AffineLoopTilingBase<LoopTiling> {
   LoopTiling() = default;
   explicit LoopTiling(uint64_t cacheSizeBytes, bool avoidMaxMinBounds = true)
       : avoidMaxMinBounds(avoidMaxMinBounds) {
-    this->cacheSizeInKiB = cacheSizeBytes / 1024;
+//    this->cacheSizeInKiB = cacheSizeBytes / 1024;
+      this->tileSizes = {32,16};
   }
 
   void runOnFunction() override;
@@ -55,7 +56,7 @@ struct LoopTiling : public AffineLoopTilingBase<LoopTiling> {
 /// Function.
 std::unique_ptr<OperationPass<FuncOp>>
 mlir::createLoopTilingPass(uint64_t cacheSizeBytes) {
-  return std::make_unique<LoopTiling>(cacheSizeBytes);
+  return std::make_unique<LoopTiling>();
 }
 std::unique_ptr<OperationPass<FuncOp>> mlir::createLoopTilingPass() {
   return std::make_unique<LoopTiling>();
@@ -460,7 +461,9 @@ void LoopTiling::runOnFunction() {
           MutableArrayRef<AffineForOp>(tiledNest).drop_front(band.size());
       separateFullTiles(intraTileLoops);
     }
+//    band.front().getParentOfType<ModuleOp>().dump();
   }
+
 }
 
 constexpr unsigned LoopTiling::kDefaultTileSize;

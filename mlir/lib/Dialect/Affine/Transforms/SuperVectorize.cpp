@@ -1,4 +1,4 @@
-//===- SuperVectorize.cpp - Vectorize Pass Impl ---------------------------===//
+//===- SuperVectorize.cpp - SuperVectorize Pass Impl ---------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -571,15 +571,15 @@ namespace {
 
 /// Base state for the vectorize pass.
 /// Command line arguments are preempted by non-empty pass arguments.
-struct Vectorize : public AffineVectorizeBase<Vectorize> {
-  Vectorize() = default;
-  Vectorize(ArrayRef<int64_t> virtualVectorSize);
+struct SuperVectorize : public AffineSuperVectorizeBase<SuperVectorize> {
+  SuperVectorize() = default;
+  SuperVectorize(ArrayRef<int64_t> virtualVectorSize);
   void runOnFunction() override;
 };
 
 } // end anonymous namespace
 
-Vectorize::Vectorize(ArrayRef<int64_t> virtualVectorSize) {
+SuperVectorize::SuperVectorize(ArrayRef<int64_t> virtualVectorSize) {
   vectorSizes = virtualVectorSize;
 }
 
@@ -1190,7 +1190,7 @@ static LogicalResult vectorizeRootMatch(NestedMatch m,
 
 /// Applies vectorization to the current Function by searching over a bunch of
 /// predetermined patterns.
-void Vectorize::runOnFunction() {
+void SuperVectorize::runOnFunction() {
   FuncOp f = getFunction();
   if (!fastestVaryingPattern.empty() &&
       fastestVaryingPattern.size() != vectorSizes.size()) {
@@ -1254,10 +1254,10 @@ void vectorizeAffineLoops(Operation *parentOp, DenseSet<Operation *> &loops,
 
 std::unique_ptr<OperationPass<FuncOp>>
 createSuperVectorizePass(ArrayRef<int64_t> virtualVectorSize) {
-  return std::make_unique<Vectorize>(virtualVectorSize);
+  return std::make_unique<SuperVectorize>(virtualVectorSize);
 }
 std::unique_ptr<OperationPass<FuncOp>> createSuperVectorizePass() {
-  return std::make_unique<Vectorize>();
+  return std::make_unique<SuperVectorize>();
 }
 
 } // namespace mlir

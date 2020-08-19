@@ -150,7 +150,7 @@ Value mlir::edsc::op::mapSeq(DataType t,
                              function_ref<Value(BlockArgument)> bodyBuilder,
                              Value array) {
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
-  return mapSeq("scf", arrayT.getElementType(), t, bodyBuilder, array);
+  return mapSeq("affine", arrayT.getElementType(), t, bodyBuilder, array);
 }
 
 Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
@@ -174,7 +174,7 @@ Value mlir::edsc::op::reduceSeq(
   ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
 
   return reduceSeq(
-      "scf", arrayT.getSize(), arrayT.getElementType(), t,
+      "affine", arrayT.getSize(), arrayT.getElementType(), t,
       lambda2(funType(arrayT.getElementType(), funType(t, t)), bodyBuilder),
       initializer, array);
 }

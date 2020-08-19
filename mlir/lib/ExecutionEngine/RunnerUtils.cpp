@@ -13,6 +13,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <assert.h>
+#include <iostream>
+#include <math.h>
+#include <sys/time.h>
 #include "mlir/ExecutionEngine/RunnerUtils.h"
 
 #ifndef _WIN32
@@ -41,9 +45,20 @@ extern "C" void print_memref_i32(int64_t rank, void *ptr) {
   _mlir_ciface_print_memref_i32(&descriptor);
 }
 
+extern "C" void _mlir_ciface_print_memref_f64(UnrankedMemRefType<double> *M) {
+  impl::printMemRef(*M);
+}
+
 extern "C" void print_memref_f32(int64_t rank, void *ptr) {
   UnrankedMemRefType<float> descriptor = {rank, ptr};
   _mlir_ciface_print_memref_f32(&descriptor);
+}
+
+extern "C" void print_memref_f64(int64_t rank, void *ptr) {
+  UnrankedMemRefType<double> descriptor;
+  descriptor.rank = rank;
+  descriptor.descriptor = ptr;
+  _mlir_ciface_print_memref_f64(&descriptor);
 }
 
 extern "C" void
@@ -64,6 +79,10 @@ _mlir_ciface_print_memref_3d_f32(StridedMemRefType<float, 3> *M) {
 }
 extern "C" void
 _mlir_ciface_print_memref_4d_f32(StridedMemRefType<float, 4> *M) {
+  impl::printMemRef(*M);
+}
+extern "C" void
+_mlir_ciface_print_memref_2d_f64(StridedMemRefType<double, 2> *M) {
   impl::printMemRef(*M);
 }
 

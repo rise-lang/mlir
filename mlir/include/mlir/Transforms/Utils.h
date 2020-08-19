@@ -88,7 +88,7 @@ LogicalResult replaceAllMemRefUsesWith(Value oldMemRef, Value newMemRef,
 /// Rewrites the memref defined by this alloc op to have an identity layout map
 /// and updates all its indexing uses. Returns failure if any of its uses
 /// escape (while leaving the IR in a valid state).
-LogicalResult normalizeMemRef(AllocOp op);
+LogicalResult normalizeMemRef(AllocOp op, Value *normalizedMemRef = nullptr);
 
 /// Uses the old memref type map layout and computes the new memref type to have
 /// a new shape and a layout map, where the old layout map has been normalized
