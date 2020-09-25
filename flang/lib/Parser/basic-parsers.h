@@ -729,13 +729,7 @@ public:
       return RESULT{};
     } else {
       if constexpr (sizeof...(PARSER) == 1) {
-        if constexpr (std::is_same_v<Success, typename PARSER::resultType...>) {
-          if (std::get<0>(parsers_).Parse(state)) {
-            return RESULT{};
-          }
-        } else if (auto arg{std::get<0>(parsers_).Parse(state)}) {
-          return RESULT{std::move(*arg)};
-        }
+        return ParseOne(state);
       } else {
         ApplyArgs<PARSER...> results;
         using Sequence = std::index_sequence_for<PARSER...>;
@@ -749,6 +743,17 @@ public:
   }
 
 private:
+  std::optional<resultType> ParseOne(ParseState &state) const {
+    if constexpr (std::is_same_v<Success, typename PARSER::resultType...>) {
+      if (std::get<0>(parsers_).Parse(state)) {
+        return RESULT{};
+      }
+    } else if (auto arg{std::get<0>(parsers_).Parse(state)}) {
+      return RESULT{std::move(*arg)};
+    }
+    return std::nullopt;
+  }
+
   const std::tuple<PARSER...> parsers_;
 };
 
@@ -800,13 +805,14 @@ inline constexpr auto nonemptySeparated(PA p, PB sep) {
 // must discard its result in order to be compatible in type with other
 // parsers in an alternative, e.g. "x >> ok || y >> ok" is type-safe even
 // when x and y have distinct result types.
-constexpr struct OkParser {
+struct OkParser {
   using resultType = Success;
   constexpr OkParser() {}
   static constexpr std::optional<Success> Parse(ParseState &) {
     return Success{};
   }
-} ok;
+};
+constexpr OkParser ok;
 
 // A variant of recovery() above for convenience.
 template <typename PA, typename PB>

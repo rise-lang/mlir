@@ -146,9 +146,13 @@ void DAGTypeLegalizer::ScalarizeVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::SHL:
   case ISD::SRA:
   case ISD::SRL:
+  case ISD::ROTL:
+  case ISD::ROTR:
     R = ScalarizeVecRes_BinOp(N);
     break;
   case ISD::FMA:
+  case ISD::FSHL:
+  case ISD::FSHR:
     R = ScalarizeVecRes_TernaryOp(N);
     break;
 
@@ -946,9 +950,13 @@ void DAGTypeLegalizer::SplitVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::USUBSAT:
   case ISD::SSHLSAT:
   case ISD::USHLSAT:
+  case ISD::ROTL:
+  case ISD::ROTR:
     SplitVecRes_BinOp(N, Lo, Hi);
     break;
   case ISD::FMA:
+  case ISD::FSHL:
+  case ISD::FSHR:
     SplitVecRes_TernaryOp(N, Lo, Hi);
     break;
 
@@ -998,7 +1006,8 @@ void DAGTypeLegalizer::IncrementPointer(MemSDNode *N, EVT MemVT,
     Flags.setNoUnsignedWrap(true);
     if (ScaledOffset)
       *ScaledOffset += IncrementSize;
-    Ptr = DAG.getNode(ISD::ADD, DL, Ptr.getValueType(), Ptr, BytesIncrement);
+    Ptr = DAG.getNode(ISD::ADD, DL, Ptr.getValueType(), Ptr, BytesIncrement,
+                      Flags);
   } else {
     MPI = N->getPointerInfo().getWithOffset(IncrementSize);
     // Increment the pointer to the other half.
@@ -1630,9 +1639,10 @@ void DAGTypeLegalizer::SplitVecRes_MLOAD(MaskedLoadSDNode *MLD,
   else
     std::tie(PassThruLo, PassThruHi) = DAG.SplitVector(PassThru, dl);
 
+  unsigned LoSize = MemoryLocation::getSizeOrUnknown(LoMemVT.getStoreSize());
   MachineMemOperand *MMO = DAG.getMachineFunction().getMachineMemOperand(
-      MLD->getPointerInfo(), MachineMemOperand::MOLoad, LoMemVT.getStoreSize(),
-      Alignment, MLD->getAAInfo(), MLD->getRanges());
+      MLD->getPointerInfo(), MachineMemOperand::MOLoad, LoSize, Alignment,
+      MLD->getAAInfo(), MLD->getRanges());
 
   Lo = DAG.getMaskedLoad(LoVT, dl, Ch, Ptr, Offset, MaskLo, PassThruLo, LoMemVT,
                          MMO, MLD->getAddressingMode(), ExtType,
@@ -1646,12 +1656,18 @@ void DAGTypeLegalizer::SplitVecRes_MLOAD(MaskedLoadSDNode *MLD,
     // Generate hi masked load.
     Ptr = TLI.IncrementMemoryAddress(Ptr, MaskLo, dl, LoMemVT, DAG,
                                      MLD->isExpandingLoad());
-    unsigned HiOffset = LoMemVT.getStoreSize();
+    unsigned HiSize = MemoryLocation::getSizeOrUnknown(HiMemVT.getStoreSize());
+
+    MachinePointerInfo MPI;
+    if (LoMemVT.isScalableVector())
+      MPI = MachinePointerInfo(MLD->getPointerInfo().getAddrSpace());
+    else
+      MPI = MLD->getPointerInfo().getWithOffset(
+          LoMemVT.getStoreSize().getFixedSize());
 
     MMO = DAG.getMachineFunction().getMachineMemOperand(
-        MLD->getPointerInfo().getWithOffset(HiOffset),
-        MachineMemOperand::MOLoad, HiMemVT.getStoreSize(), Alignment,
-        MLD->getAAInfo(), MLD->getRanges());
+        MPI, MachineMemOperand::MOLoad, HiSize, Alignment, MLD->getAAInfo(),
+        MLD->getRanges());
 
     Hi = DAG.getMaskedLoad(HiVT, dl, Ch, Ptr, Offset, MaskHi, PassThruHi,
                            HiMemVT, MMO, MLD->getAddressingMode(), ExtType,
@@ -2029,16 +2045,12 @@ bool DAGTypeLegalizer::SplitVectorOperand(SDNode *N, unsigned OpNo) {
     case ISD::FP_TO_UINT:
     case ISD::STRICT_FP_TO_SINT:
     case ISD::STRICT_FP_TO_UINT:
-    case ISD::CTTZ:
-    case ISD::CTLZ:
-    case ISD::CTPOP:
     case ISD::STRICT_FP_EXTEND:
     case ISD::FP_EXTEND:
     case ISD::SIGN_EXTEND:
     case ISD::ZERO_EXTEND:
     case ISD::ANY_EXTEND:
     case ISD::FTRUNC:
-    case ISD::FCANONICALIZE:
       Res = SplitVecOp_UnaryOp(N);
       break;
 
@@ -2131,7 +2143,6 @@ SDValue DAGTypeLegalizer::SplitVecOp_VECREDUCE(SDNode *N, unsigned OpNo) {
   EVT LoOpVT, HiOpVT;
   std::tie(LoOpVT, HiOpVT) = DAG.GetSplitDestVTs(VecVT);
 
-  bool NoNaN = N->getFlags().hasNoNaNs();
   unsigned CombineOpc = 0;
   switch (N->getOpcode()) {
   case ISD::VECREDUCE_FADD: CombineOpc = ISD::FADD; break;
@@ -2145,12 +2156,8 @@ SDValue DAGTypeLegalizer::SplitVecOp_VECREDUCE(SDNode *N, unsigned OpNo) {
   case ISD::VECREDUCE_SMIN: CombineOpc = ISD::SMIN; break;
   case ISD::VECREDUCE_UMAX: CombineOpc = ISD::UMAX; break;
   case ISD::VECREDUCE_UMIN: CombineOpc = ISD::UMIN; break;
-  case ISD::VECREDUCE_FMAX:
-    CombineOpc = NoNaN ? ISD::FMAXNUM : ISD::FMAXIMUM;
-    break;
-  case ISD::VECREDUCE_FMIN:
-    CombineOpc = NoNaN ? ISD::FMINNUM : ISD::FMINIMUM;
-    break;
+  case ISD::VECREDUCE_FMAX: CombineOpc = ISD::FMAXNUM; break;
+  case ISD::VECREDUCE_FMIN: CombineOpc = ISD::FMINNUM; break;
   default:
     llvm_unreachable("Unexpected reduce ISD node");
   }
@@ -2792,6 +2799,9 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::OR:
   case ISD::SUB:
   case ISD::XOR:
+  case ISD::SHL:
+  case ISD::SRA:
+  case ISD::SRL:
   case ISD::FMINNUM:
   case ISD::FMAXNUM:
   case ISD::FMINIMUM:
@@ -2806,6 +2816,8 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
   case ISD::SSUBSAT:
   case ISD::SSHLSAT:
   case ISD::USHLSAT:
+  case ISD::ROTL:
+  case ISD::ROTR:
     Res = WidenVecRes_Binary(N);
     break;
 
@@ -2852,12 +2864,6 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
 
   case ISD::FPOWI:
     Res = WidenVecRes_POWI(N);
-    break;
-
-  case ISD::SHL:
-  case ISD::SRA:
-  case ISD::SRL:
-    Res = WidenVecRes_Shift(N);
     break;
 
   case ISD::ANY_EXTEND_VECTOR_INREG:
@@ -2926,6 +2932,8 @@ void DAGTypeLegalizer::WidenVectorResult(SDNode *N, unsigned ResNo) {
     Res = WidenVecRes_Unary(N);
     break;
   case ISD::FMA:
+  case ISD::FSHL:
+  case ISD::FSHR:
     Res = WidenVecRes_Ternary(N);
     break;
   }
@@ -3291,19 +3299,34 @@ SDValue DAGTypeLegalizer::WidenVecRes_OverflowOp(SDNode *N, unsigned ResNo) {
 }
 
 SDValue DAGTypeLegalizer::WidenVecRes_Convert(SDNode *N) {
+  LLVMContext &Ctx = *DAG.getContext();
   SDValue InOp = N->getOperand(0);
   SDLoc DL(N);
 
-  EVT WidenVT = TLI.getTypeToTransformTo(*DAG.getContext(), N->getValueType(0));
+  EVT WidenVT = TLI.getTypeToTransformTo(Ctx, N->getValueType(0));
   unsigned WidenNumElts = WidenVT.getVectorNumElements();
 
   EVT InVT = InOp.getValueType();
-  EVT InEltVT = InVT.getVectorElementType();
-  EVT InWidenVT = EVT::getVectorVT(*DAG.getContext(), InEltVT, WidenNumElts);
 
   unsigned Opcode = N->getOpcode();
-  unsigned InVTNumElts = InVT.getVectorNumElements();
   const SDNodeFlags Flags = N->getFlags();
+
+  // Handle the case of ZERO_EXTEND where the promoted InVT element size does
+  // not equal that of WidenVT.
+  if (N->getOpcode() == ISD::ZERO_EXTEND &&
+      getTypeAction(InVT) == TargetLowering::TypePromoteInteger &&
+      TLI.getTypeToTransformTo(Ctx, InVT).getScalarSizeInBits() !=
+      WidenVT.getScalarSizeInBits()) {
+    InOp = ZExtPromotedInteger(InOp);
+    InVT = InOp.getValueType();
+    if (WidenVT.getScalarSizeInBits() < InVT.getScalarSizeInBits())
+      Opcode = ISD::TRUNCATE;
+  }
+
+  EVT InEltVT = InVT.getVectorElementType();
+  EVT InWidenVT = EVT::getVectorVT(Ctx, InEltVT, WidenNumElts);
+  unsigned InVTNumElts = InVT.getVectorNumElements();
+
   if (getTypeAction(InVT) == TargetLowering::TypeWidenVector) {
     InOp = GetWidenedVector(N->getOperand(0));
     InVT = InOp.getValueType();
@@ -3474,25 +3497,6 @@ SDValue DAGTypeLegalizer::WidenVecRes_POWI(SDNode *N) {
   EVT WidenVT = TLI.getTypeToTransformTo(*DAG.getContext(), N->getValueType(0));
   SDValue InOp = GetWidenedVector(N->getOperand(0));
   SDValue ShOp = N->getOperand(1);
-  return DAG.getNode(N->getOpcode(), SDLoc(N), WidenVT, InOp, ShOp);
-}
-
-SDValue DAGTypeLegalizer::WidenVecRes_Shift(SDNode *N) {
-  EVT WidenVT = TLI.getTypeToTransformTo(*DAG.getContext(), N->getValueType(0));
-  SDValue InOp = GetWidenedVector(N->getOperand(0));
-  SDValue ShOp = N->getOperand(1);
-
-  EVT ShVT = ShOp.getValueType();
-  if (getTypeAction(ShVT) == TargetLowering::TypeWidenVector) {
-    ShOp = GetWidenedVector(ShOp);
-    ShVT = ShOp.getValueType();
-  }
-  EVT ShWidenVT = EVT::getVectorVT(*DAG.getContext(),
-                                   ShVT.getVectorElementType(),
-                                   WidenVT.getVectorNumElements());
-  if (ShVT != ShWidenVT)
-    ShOp = ModifyToType(ShOp, ShWidenVT);
-
   return DAG.getNode(N->getOpcode(), SDLoc(N), WidenVT, InOp, ShOp);
 }
 
@@ -4576,11 +4580,11 @@ SDValue DAGTypeLegalizer::WidenVecOp_STORE(SDNode *N) {
   if (!ST->getMemoryVT().getScalarType().isByteSized())
     return TLI.scalarizeVectorStore(ST, DAG);
 
-  SmallVector<SDValue, 16> StChain;
   if (ST->isTruncatingStore())
-    GenWidenVectorTruncStores(StChain, ST);
-  else
-    GenWidenVectorStores(StChain, ST);
+    return TLI.scalarizeVectorStore(ST, DAG);
+
+  SmallVector<SDValue, 16> StChain;
+  GenWidenVectorStores(StChain, ST);
 
   if (StChain.size() == 1)
     return StChain[0];
@@ -4759,6 +4763,7 @@ SDValue DAGTypeLegalizer::WidenVecOp_VECREDUCE(SDNode *N) {
   EVT OrigVT = N->getOperand(0).getValueType();
   EVT WideVT = Op.getValueType();
   EVT ElemVT = OrigVT.getVectorElementType();
+  SDNodeFlags Flags = N->getFlags();
 
   SDValue NeutralElem;
   switch (N->getOpcode()) {
@@ -4790,12 +4795,18 @@ SDValue DAGTypeLegalizer::WidenVecOp_VECREDUCE(SDNode *N) {
     NeutralElem = DAG.getConstantFP(1.0, dl, ElemVT);
     break;
   case ISD::VECREDUCE_FMAX:
+    // This has maxnum semantics, so NaN represents missing data. We must clear
+    // 'nnan' if it was set because the NaN would be a poison value.
     NeutralElem = DAG.getConstantFP(
-        -std::numeric_limits<double>::infinity(), dl, ElemVT);
+        std::numeric_limits<double>::quiet_NaN(), dl, ElemVT);
+    Flags.setNoNaNs(false);
     break;
   case ISD::VECREDUCE_FMIN:
+    // This has minnum semantics, so NaN represents missing data. We must clear
+    // 'nnan' if it was set because the NaN would be a poison value.
     NeutralElem = DAG.getConstantFP(
-        std::numeric_limits<double>::infinity(), dl, ElemVT);
+        std::numeric_limits<double>::quiet_NaN(), dl, ElemVT);
+    Flags.setNoNaNs(false);
     break;
   }
 
@@ -4806,7 +4817,7 @@ SDValue DAGTypeLegalizer::WidenVecOp_VECREDUCE(SDNode *N) {
     Op = DAG.getNode(ISD::INSERT_VECTOR_ELT, dl, WideVT, Op, NeutralElem,
                      DAG.getVectorIdxConstant(Idx, dl));
 
-  return DAG.getNode(N->getOpcode(), dl, N->getValueType(0), Op, N->getFlags());
+  return DAG.getNode(N->getOpcode(), dl, N->getValueType(0), Op, Flags);
 }
 
 SDValue DAGTypeLegalizer::WidenVecOp_VSELECT(SDNode *N) {
@@ -4895,11 +4906,14 @@ static EVT FindMemType(SelectionDAG& DAG, const TargetLowering &TLI,
         isPowerOf2_32(WidenWidth / MemVTWidth) &&
         (MemVTWidth <= Width ||
          (Align!=0 && MemVTWidth<=AlignInBits && MemVTWidth<=Width+WidenEx))) {
-      if (RetVT.getSizeInBits() < MemVTWidth || MemVT == WidenVT)
+      if (RetVT.getSizeInBits().getFixedSize() < MemVTWidth || MemVT == WidenVT)
         return MemVT;
     }
   }
 
+  if (Scalable)
+    report_fatal_error("Using element-wise loads and stores for widening "
+                       "operations is not supported for scalable vectors");
   return RetVT;
 }
 
@@ -4942,10 +4956,10 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
   // element type or scalar loads and then recombines it to the widen vector
   // type.
   EVT WidenVT = TLI.getTypeToTransformTo(*DAG.getContext(),LD->getValueType(0));
-  unsigned WidenWidth = WidenVT.getSizeInBits();
   EVT LdVT    = LD->getMemoryVT();
   SDLoc dl(LD);
   assert(LdVT.isVector() && WidenVT.isVector());
+  assert(LdVT.isScalableVector() == WidenVT.isScalableVector());
   assert(LdVT.getVectorElementType() == WidenVT.getVectorElementType());
 
   // Load information
@@ -4954,15 +4968,17 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
   MachineMemOperand::Flags MMOFlags = LD->getMemOperand()->getFlags();
   AAMDNodes AAInfo = LD->getAAInfo();
 
-  int LdWidth = LdVT.getSizeInBits();
-  int WidthDiff = WidenWidth - LdWidth;
+  TypeSize LdWidth = LdVT.getSizeInBits();
+  TypeSize WidenWidth = WidenVT.getSizeInBits();
+  TypeSize WidthDiff = WidenWidth - LdWidth;
   // Allow wider loads if they are sufficiently aligned to avoid memory faults
   // and if the original load is simple.
   unsigned LdAlign = (!LD->isSimple()) ? 0 : LD->getAlignment();
 
   // Find the vector type that can load from.
-  EVT NewVT = FindMemType(DAG, TLI, LdWidth, WidenVT, LdAlign, WidthDiff);
-  int NewVTWidth = NewVT.getSizeInBits();
+  EVT NewVT = FindMemType(DAG, TLI, LdWidth.getKnownMinSize(), WidenVT, LdAlign,
+                          WidthDiff.getKnownMinSize());
+  TypeSize NewVTWidth = NewVT.getSizeInBits();
   SDValue LdOp = DAG.getLoad(NewVT, dl, Chain, BasePtr, LD->getPointerInfo(),
                              LD->getOriginalAlign(), MMOFlags, AAInfo);
   LdChain.push_back(LdOp.getValue(1));
@@ -4970,7 +4986,7 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
   // Check if we can load the element with one instruction.
   if (LdWidth <= NewVTWidth) {
     if (!NewVT.isVector()) {
-      unsigned NumElts = WidenWidth / NewVTWidth;
+      unsigned NumElts = WidenWidth.getFixedSize() / NewVTWidth.getFixedSize();
       EVT NewVecVT = EVT::getVectorVT(*DAG.getContext(), NewVT, NumElts);
       SDValue VecOp = DAG.getNode(ISD::SCALAR_TO_VECTOR, dl, NewVecVT, LdOp);
       return DAG.getNode(ISD::BITCAST, dl, WidenVT, VecOp);
@@ -4978,8 +4994,9 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
     if (NewVT == WidenVT)
       return LdOp;
 
-    assert(WidenWidth % NewVTWidth == 0);
-    unsigned NumConcat = WidenWidth / NewVTWidth;
+    // TODO: We don't currently have any tests that exercise this code path.
+    assert(WidenWidth.getFixedSize() % NewVTWidth.getFixedSize() == 0);
+    unsigned NumConcat = WidenWidth.getFixedSize() / NewVTWidth.getFixedSize();
     SmallVector<SDValue, 16> ConcatOps(NumConcat);
     SDValue UndefVal = DAG.getUNDEF(NewVT);
     ConcatOps[0] = LdOp;
@@ -4992,35 +5009,30 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
   SmallVector<SDValue, 16> LdOps;
   LdOps.push_back(LdOp);
 
-  LdWidth -= NewVTWidth;
-  unsigned Offset = 0;
+  uint64_t ScaledOffset = 0;
+  MachinePointerInfo MPI = LD->getPointerInfo();
+  do {
+    LdWidth -= NewVTWidth;
+    IncrementPointer(cast<LoadSDNode>(LdOp), NewVT, MPI, BasePtr,
+                     &ScaledOffset);
 
-  while (LdWidth > 0) {
-    unsigned Increment = NewVTWidth / 8;
-    Offset += Increment;
-    BasePtr = DAG.getObjectPtrOffset(dl, BasePtr, TypeSize::Fixed(Increment));
-
-    SDValue L;
     if (LdWidth < NewVTWidth) {
       // The current type we are using is too large. Find a better size.
-      NewVT = FindMemType(DAG, TLI, LdWidth, WidenVT, LdAlign, WidthDiff);
+      NewVT = FindMemType(DAG, TLI, LdWidth.getKnownMinSize(), WidenVT, LdAlign,
+                          WidthDiff.getKnownMinSize());
       NewVTWidth = NewVT.getSizeInBits();
-      L = DAG.getLoad(NewVT, dl, Chain, BasePtr,
-                      LD->getPointerInfo().getWithOffset(Offset),
-                      LD->getOriginalAlign(), MMOFlags, AAInfo);
-      LdChain.push_back(L.getValue(1));
-    } else {
-      L = DAG.getLoad(NewVT, dl, Chain, BasePtr,
-                      LD->getPointerInfo().getWithOffset(Offset),
-                      LD->getOriginalAlign(), MMOFlags, AAInfo);
-      LdChain.push_back(L.getValue(1));
     }
+
+    Align NewAlign = ScaledOffset == 0
+                         ? LD->getOriginalAlign()
+                         : commonAlignment(LD->getAlign(), ScaledOffset);
+    SDValue L =
+        DAG.getLoad(NewVT, dl, Chain, BasePtr, MPI, NewAlign, MMOFlags, AAInfo);
+    LdChain.push_back(L.getValue(1));
 
     LdOps.push_back(L);
     LdOp = L;
-
-    LdWidth -= NewVTWidth;
-  }
+  } while (LdWidth > NewVTWidth);
 
   // Build the vector from the load operations.
   unsigned End = LdOps.size();
@@ -5044,13 +5056,17 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
     }
     ConcatOps[--Idx] = BuildVectorFromScalar(DAG, LdTy, LdOps, i + 1, End);
   }
+
   ConcatOps[--Idx] = LdOps[i];
   for (--i; i >= 0; --i) {
     EVT NewLdTy = LdOps[i].getValueType();
     if (NewLdTy != LdTy) {
       // Create a larger vector.
-      unsigned NumOps = NewLdTy.getSizeInBits() / LdTy.getSizeInBits();
-      assert(NewLdTy.getSizeInBits() % LdTy.getSizeInBits() == 0);
+      unsigned NumOps =
+          (NewLdTy.getSizeInBits() / LdTy.getSizeInBits()).getKnownMinSize();
+      assert(
+          (NewLdTy.getSizeInBits() % LdTy.getSizeInBits()).getKnownMinSize() ==
+          0);
       SmallVector<SDValue, 16> WidenOps(NumOps);
       unsigned j = 0;
       for (; j != End-Idx; ++j)
@@ -5071,7 +5087,7 @@ SDValue DAGTypeLegalizer::GenWidenVectorLoads(SmallVectorImpl<SDValue> &LdChain,
                        makeArrayRef(&ConcatOps[Idx], End - Idx));
 
   // We need to fill the rest with undefs to build the vector.
-  unsigned NumOps = WidenWidth / LdTy.getSizeInBits();
+  unsigned NumOps = (WidenWidth / LdTy.getSizeInBits()).getKnownMinSize();
   SmallVector<SDValue, 16> WidenOps(NumOps);
   SDValue UndefVal = DAG.getUNDEF(LdTy);
   {
@@ -5094,12 +5110,17 @@ DAGTypeLegalizer::GenWidenVectorExtLoads(SmallVectorImpl<SDValue> &LdChain,
   EVT LdVT    = LD->getMemoryVT();
   SDLoc dl(LD);
   assert(LdVT.isVector() && WidenVT.isVector());
+  assert(LdVT.isScalableVector() == WidenVT.isScalableVector());
 
   // Load information
   SDValue Chain = LD->getChain();
   SDValue BasePtr = LD->getBasePtr();
   MachineMemOperand::Flags MMOFlags = LD->getMemOperand()->getFlags();
   AAMDNodes AAInfo = LD->getAAInfo();
+
+  if (LdVT.isScalableVector())
+    report_fatal_error("Generating widen scalable extending vector loads is "
+                       "not yet supported");
 
   EVT EltVT = WidenVT.getVectorElementType();
   EVT LdEltVT = LdVT.getVectorElementType();
@@ -5201,54 +5222,6 @@ void DAGTypeLegalizer::GenWidenVectorStores(SmallVectorImpl<SDValue> &StChain,
       // Restore index back to be relative to the original widen element type.
       Idx = Idx * NewVTWidth.getFixedSize() / ValEltWidth;
     }
-  }
-}
-
-void
-DAGTypeLegalizer::GenWidenVectorTruncStores(SmallVectorImpl<SDValue> &StChain,
-                                            StoreSDNode *ST) {
-  // For extension loads, it may not be more efficient to truncate the vector
-  // and then store it. Instead, we extract each element and then store it.
-  SDValue Chain = ST->getChain();
-  SDValue BasePtr = ST->getBasePtr();
-  MachineMemOperand::Flags MMOFlags = ST->getMemOperand()->getFlags();
-  AAMDNodes AAInfo = ST->getAAInfo();
-  SDValue ValOp = GetWidenedVector(ST->getValue());
-  SDLoc dl(ST);
-
-  EVT StVT = ST->getMemoryVT();
-  EVT ValVT = ValOp.getValueType();
-
-  // It must be true that the wide vector type is bigger than where we need to
-  // store.
-  assert(StVT.isVector() && ValOp.getValueType().isVector());
-  assert(StVT.isScalableVector() == ValOp.getValueType().isScalableVector());
-  assert(StVT.bitsLT(ValOp.getValueType()));
-
-  if (StVT.isScalableVector())
-    report_fatal_error("Generating widen scalable vector truncating stores not "
-                       "yet supported");
-
-  // For truncating stores, we can not play the tricks of chopping legal vector
-  // types and bitcast it to the right type. Instead, we unroll the store.
-  EVT StEltVT  = StVT.getVectorElementType();
-  EVT ValEltVT = ValVT.getVectorElementType();
-  unsigned Increment = ValEltVT.getSizeInBits() / 8;
-  unsigned NumElts = StVT.getVectorNumElements();
-  SDValue EOp = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, ValEltVT, ValOp,
-                            DAG.getVectorIdxConstant(0, dl));
-  StChain.push_back(
-      DAG.getTruncStore(Chain, dl, EOp, BasePtr, ST->getPointerInfo(), StEltVT,
-                        ST->getOriginalAlign(), MMOFlags, AAInfo));
-  unsigned Offset = Increment;
-  for (unsigned i=1; i < NumElts; ++i, Offset += Increment) {
-    SDValue NewBasePtr =
-        DAG.getObjectPtrOffset(dl, BasePtr, TypeSize::Fixed(Offset));
-    SDValue EOp = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, ValEltVT, ValOp,
-                              DAG.getVectorIdxConstant(0, dl));
-    StChain.push_back(DAG.getTruncStore(
-        Chain, dl, EOp, NewBasePtr, ST->getPointerInfo().getWithOffset(Offset),
-        StEltVT, ST->getOriginalAlign(), MMOFlags, AAInfo));
   }
 }
 

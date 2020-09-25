@@ -416,10 +416,6 @@ def parseOptionsAndInitTestdirs():
 
     if args.replay_path:
         configuration.replay_path = args.replay_path
-
-    # rerun-related arguments
-    configuration.rerun_all_issues = args.rerun_all_issues
-
     if args.lldb_platform_name:
         configuration.lldb_platform_name = args.lldb_platform_name
     if args.lldb_platform_url:
@@ -452,6 +448,18 @@ def parseOptionsAndInitTestdirs():
         configuration.testdirs = [os.path.realpath(os.path.abspath(x)) for x in args.args]
 
     lldbtest_config.codesign_identity = args.codesign_identity
+
+def registerFaulthandler():
+    try:
+        import faulthandler
+    except ImportError:
+        # faulthandler is not available until python3
+        return
+
+    faulthandler.enable()
+    # faulthandler.register is not available on Windows.
+    if getattr(faulthandler, 'register', None):
+        faulthandler.register(signal.SIGTERM, chain=True)
 
 def setupSysPath():
     """
@@ -523,13 +531,6 @@ def setupSysPath():
         print("The 'lldb' executable cannot be located.  Some of the tests may not be run as a result.")
         sys.exit(-1)
 
-    # confusingly, this is the "bin" directory
-    lldbLibDir = os.path.dirname(lldbtest_config.lldbExec)
-    os.environ["LLDB_LIB_DIR"] = lldbLibDir
-    lldbImpLibDir = configuration.lldb_libs_dir
-    os.environ["LLDB_IMPLIB_DIR"] = lldbImpLibDir
-    print("LLDB library dir:", os.environ["LLDB_LIB_DIR"])
-    print("LLDB import library dir:", os.environ["LLDB_IMPLIB_DIR"])
     os.system('%s -v' % lldbtest_config.lldbExec)
 
     lldbDir = os.path.dirname(lldbtest_config.lldbExec)
@@ -544,8 +545,6 @@ def setupSysPath():
             configuration.skip_categories.append("lldb-vscode")
 
     lldbPythonDir = None  # The directory that contains 'lldb/__init__.py'
-    if not configuration.lldb_framework_path and os.path.exists(os.path.join(lldbLibDir, "LLDB.framework")):
-        configuration.lldb_framework_path = os.path.join(lldbLibDir, "LLDB.framework")
     if configuration.lldb_framework_path:
         lldbtest_config.lldb_framework_path = configuration.lldb_framework_path
         candidatePath = os.path.join(
@@ -766,15 +765,6 @@ def getVersionForSDK(sdk):
     return ver
 
 
-def setDefaultTripleForPlatform():
-    if configuration.lldb_platform_name == 'ios-simulator':
-        triple_str = 'x86_64-apple-ios%s' % (
-            getVersionForSDK('iphonesimulator'))
-        os.environ['TRIPLE'] = triple_str
-        return {'TRIPLE': triple_str}
-    return {}
-
-
 def checkCompiler():
     # Add some intervention here to sanity check that the compiler requested is sane.
     # If found not to be an executable program, we abort.
@@ -897,6 +887,9 @@ def run_suite():
     #
     parseOptionsAndInitTestdirs()
 
+    # Print a stack trace if the test hangs or is passed SIGTERM.
+    registerFaulthandler()
+
     setupSysPath()
 
     import lldbconfig
@@ -946,14 +939,6 @@ def run_suite():
                 exitTestSuite(1)
         else:
             configuration.lldb_platform_url = None
-
-    platform_changes = setDefaultTripleForPlatform()
-    first = True
-    for key in platform_changes:
-        if first:
-            print("Environment variables setup for platform support:")
-            first = False
-        print("%s = %s" % (key, platform_changes[key]))
 
     if configuration.lldb_platform_working_dir:
         print("Setting remote platform working directory to '%s'..." %
@@ -1039,6 +1024,10 @@ def run_suite():
             "Collected %d test%s\n\n" %
             (configuration.suite.countTestCases(),
              configuration.suite.countTestCases() != 1 and "s" or ""))
+
+    if configuration.suite.countTestCases() == 0:
+        logging.error("did not discover any matching tests")
+        exitTestSuite(1)
 
     # Invoke the test runner.
     if configuration.count == 1:

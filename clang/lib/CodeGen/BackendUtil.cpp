@@ -68,6 +68,7 @@
 #include "llvm/Transforms/Instrumentation/GCOVProfiler.h"
 #include "llvm/Transforms/Instrumentation/HWAddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/InstrProfiling.h"
+#include "llvm/Transforms/Instrumentation/MemProfiler.h"
 #include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
 #include "llvm/Transforms/Instrumentation/SanitizerCoverage.h"
 #include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
@@ -265,6 +266,12 @@ static bool asanUseGlobalsGC(const Triple &T, const CodeGenOptions &CGOpts) {
     break;
   }
   return false;
+}
+
+static void addMemProfilerPasses(const PassManagerBuilder &Builder,
+                                 legacy::PassManagerBase &PM) {
+  PM.add(createMemProfilerFunctionPass());
+  PM.add(createModuleMemProfilerLegacyPassPass());
 }
 
 static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
@@ -507,6 +514,7 @@ static void initTargetOptions(DiagnosticsEngine &Diags,
       Options.BBSectionsFuncListBuf = std::move(*MBOrErr);
   }
 
+  Options.EnableMachineFunctionSplitter = CodeGenOpts.SplitMachineFunctions;
   Options.FunctionSections = CodeGenOpts.FunctionSections;
   Options.DataSections = CodeGenOpts.DataSections;
   Options.UniqueSectionNames = CodeGenOpts.UniqueSectionNames;
@@ -520,6 +528,8 @@ static void initTargetOptions(DiagnosticsEngine &Diags,
   Options.EmitAddrsig = CodeGenOpts.Addrsig;
   Options.ForceDwarfFrameSection = CodeGenOpts.ForceDwarfFrameSection;
   Options.EmitCallSiteInfo = CodeGenOpts.EmitCallSiteInfo;
+  Options.ValueTrackingVariableLocations =
+      CodeGenOpts.ValueTrackingVariableLocations;
   Options.XRayOmitFunctionIndex = CodeGenOpts.XRayOmitFunctionIndex;
 
   Options.MCOptions.SplitDwarfFile = CodeGenOpts.SplitDwarfFile;
@@ -544,7 +554,9 @@ static void initTargetOptions(DiagnosticsEngine &Diags,
   Options.MCOptions.Argv0 = CodeGenOpts.Argv0;
   Options.MCOptions.CommandLineArgs = CodeGenOpts.CommandLineArgs;
 }
-static Optional<GCOVOptions> getGCOVOptions(const CodeGenOptions &CodeGenOpts) {
+
+static Optional<GCOVOptions> getGCOVOptions(const CodeGenOptions &CodeGenOpts,
+                                            const LangOptions &LangOpts) {
   if (CodeGenOpts.DisableGCov)
     return None;
   if (!CodeGenOpts.EmitGcovArcs && !CodeGenOpts.EmitGcovNotes)
@@ -558,6 +570,7 @@ static Optional<GCOVOptions> getGCOVOptions(const CodeGenOptions &CodeGenOpts) {
   Options.NoRedZone = CodeGenOpts.DisableRedZone;
   Options.Filter = CodeGenOpts.ProfileFilterFiles;
   Options.Exclude = CodeGenOpts.ProfileExcludeFiles;
+  Options.Atomic = LangOpts.Sanitize.has(SanitizerKind::Thread);
   return Options;
 }
 
@@ -660,6 +673,13 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   if (LangOpts.Coroutines)
     addCoroutinePassesToExtensionPoints(PMBuilder);
 
+  if (CodeGenOpts.MemProf) {
+    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
+                           addMemProfilerPasses);
+    PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                           addMemProfilerPasses);
+  }
+
   if (LangOpts.Sanitize.has(SanitizerKind::LocalBounds)) {
     PMBuilder.addExtension(PassManagerBuilder::EP_ScalarOptimizerLate,
                            addBoundsCheckingPass);
@@ -747,7 +767,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
     MPM.add(createUniqueInternalLinkageNamesPass());
   }
 
-  if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts)) {
+  if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts, LangOpts)) {
     MPM.add(createGCOVProfilerPass(*Options));
     if (CodeGenOpts.getDebugInfo() == codegenoptions::NoDebugInfo)
       MPM.add(createStripSymbolsPass(true));
@@ -1213,7 +1233,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
         MPM.addPass(LowerTypeTestsPass(/*ExportSummary=*/nullptr,
                                        /*ImportSummary=*/nullptr,
                                        /*DropTypeTests=*/true));
-      if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts))
+      if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts, LangOpts))
         MPM.addPass(GCOVProfilerPass(*Options));
       if (Optional<InstrProfOptions> Options =
               getInstrProfOptions(CodeGenOpts, LangOpts))
@@ -1241,12 +1261,6 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
       // At -O0 we directly run necessary sanitizer passes.
       if (LangOpts.Sanitize.has(SanitizerKind::LocalBounds))
         MPM.addPass(createModuleToFunctionPassAdaptor(BoundsCheckingPass()));
-
-      // Add UniqueInternalLinkageNames Pass which renames internal linkage
-      // symbols with unique names.
-      if (CodeGenOpts.UniqueInternalLinkageNames) {
-        MPM.addPass(UniqueInternalLinkageNamesPass());
-      }
 
       // Lastly, add semantically necessary passes for LTO.
       if (IsLTO || IsThinLTO) {
@@ -1333,7 +1347,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
                       /*CompileKernel=*/false, Recover, UseAfterScope)));
             });
       }
-      if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts))
+      if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts, LangOpts))
         PB.registerPipelineStartEPCallback([Options](ModulePassManager &MPM) {
           MPM.addPass(GCOVProfilerPass(*Options));
         });
@@ -1342,12 +1356,6 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
         PB.registerPipelineStartEPCallback([Options](ModulePassManager &MPM) {
           MPM.addPass(InstrProfiling(*Options, false));
         });
-
-      // Add UniqueInternalLinkageNames Pass which renames internal linkage
-      // symbols with unique names.
-      if (CodeGenOpts.UniqueInternalLinkageNames) {
-        MPM.addPass(UniqueInternalLinkageNamesPass());
-      }
 
       if (IsThinLTO) {
         MPM = PB.buildThinLTOPreLinkDefaultPipeline(
@@ -1363,6 +1371,16 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
         MPM = PB.buildPerModuleDefaultPipeline(Level,
                                                CodeGenOpts.DebugPassManager);
       }
+    }
+
+    // Add UniqueInternalLinkageNames Pass which renames internal linkage
+    // symbols with unique names.
+    if (CodeGenOpts.UniqueInternalLinkageNames)
+      MPM.addPass(UniqueInternalLinkageNamesPass());
+
+    if (CodeGenOpts.MemProf) {
+      MPM.addPass(createModuleToFunctionPassAdaptor(MemProfilerPass()));
+      MPM.addPass(ModuleMemProfilerPass());
     }
 
     if (LangOpts.Sanitize.has(SanitizerKind::HWAddress)) {
@@ -1622,9 +1640,10 @@ static void runThinLTOBackend(
     Conf.CGFileType = getCodeGenFileType(Action);
     break;
   }
-  if (Error E = thinBackend(
-          Conf, -1, AddStream, *M, *CombinedIndex, ImportList,
-          ModuleToDefinedGVSummaries[M->getModuleIdentifier()], ModuleMap)) {
+  if (Error E =
+          thinBackend(Conf, -1, AddStream, *M, *CombinedIndex, ImportList,
+                      ModuleToDefinedGVSummaries[M->getModuleIdentifier()],
+                      ModuleMap, &CGOpts.CmdArgs)) {
     handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
       errs() << "Error running ThinLTO backend: " << EIB.message() << '\n';
     });

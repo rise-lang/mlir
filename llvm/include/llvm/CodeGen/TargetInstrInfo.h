@@ -724,7 +724,7 @@ public:
     return nullptr;
   }
 
-  /// Analyze the loop code, return true if it cannot be understoo. Upon
+  /// Analyze the loop code, return true if it cannot be understood. Upon
   /// success, this function returns false and returns information about the
   /// induction variable and compare instruction used at the end.
   virtual bool analyzeLoop(MachineLoop &L, MachineInstr *&IndVarInst,
@@ -771,7 +771,7 @@ public:
 
   /// Second variant of isProfitableToIfCvt. This one
   /// checks for the case where two basic blocks from true and false path
-  /// of a if-then-else (diamond) are predicated on mutally exclusive
+  /// of a if-then-else (diamond) are predicated on mutually exclusive
   /// predicates, where the probability of the true path being taken is given
   /// by Probability, and Confidence is a measure of our confidence that it
   /// will be properly predicted.
@@ -1267,6 +1267,17 @@ public:
   virtual bool getBaseAndOffsetPosition(const MachineInstr &MI,
                                         unsigned &BasePos,
                                         unsigned &OffsetPos) const {
+    return false;
+  }
+
+  /// Returns true if MI's Def is NullValueReg, and the MI
+  /// does not change the Zero value. i.e. cases such as rax = shr rax, X where
+  /// NullValueReg = rax. Note that if the NullValueReg is non-zero, this
+  /// function can return true even if becomes zero. Specifically cases such as
+  /// NullValueReg = shl NullValueReg, 63.
+  virtual bool preservesZeroValueInReg(const MachineInstr *MI,
+                                       const Register NullValueReg,
+                                       const TargetRegisterInfo *TRI) const {
     return false;
   }
 

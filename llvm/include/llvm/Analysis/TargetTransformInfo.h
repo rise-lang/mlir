@@ -128,6 +128,11 @@ public:
 
   IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
                           unsigned Factor);
+  IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
+                          ElementCount Factor)
+      : IntrinsicCostAttributes(Id, CI, Factor.getKnownMinValue()) {
+    assert(!Factor.isScalable());
+  }
 
   IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
                           unsigned Factor, unsigned ScalarCost);
@@ -805,8 +810,9 @@ public:
   /// Return the expected cost of materialization for the given integer
   /// immediate of the specified type for a given instruction. The cost can be
   /// zero if the immediate can be folded into the specified instruction.
-  int getIntImmCostInst(unsigned Opc, unsigned Idx, const APInt &Imm,
-                        Type *Ty, TargetCostKind CostKind) const;
+  int getIntImmCostInst(unsigned Opc, unsigned Idx, const APInt &Imm, Type *Ty,
+                        TargetCostKind CostKind,
+                        Instruction *Inst = nullptr) const;
   int getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                           Type *Ty, TargetCostKind CostKind) const;
 
@@ -1283,6 +1289,24 @@ public:
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const;
 
+  /// \returns True if the target prefers reductions in loop.
+  bool preferInLoopReduction(unsigned Opcode, Type *Ty,
+                             ReductionFlags Flags) const;
+
+  /// \returns True if the target prefers reductions select kept in the loop
+  /// when tail folding. i.e.
+  /// loop:
+  ///   p = phi (0, s)
+  ///   a = add (p, x)
+  ///   s = select (mask, a, p)
+  /// vecreduce.add(s)
+  ///
+  /// As opposed to the normal scheme of p = phi (0, a) which allows the select
+  /// to be pulled out of the loop. If the select(.., add, ..) can be predicated
+  /// by the target, this can lead to cleaner code generation.
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       ReductionFlags Flags) const;
+
   /// \returns True if the target wants to expand the given reduction intrinsic
   /// into a shuffle sequence.
   bool shouldExpandReduction(const IntrinsicInst *II) const;
@@ -1438,7 +1462,8 @@ public:
   virtual int getIntImmCost(const APInt &Imm, Type *Ty,
                             TargetCostKind CostKind) = 0;
   virtual int getIntImmCostInst(unsigned Opc, unsigned Idx, const APInt &Imm,
-                                Type *Ty, TargetCostKind CostKind) = 0;
+                                Type *Ty, TargetCostKind CostKind,
+                                Instruction *Inst = nullptr) = 0;
   virtual int getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx,
                                   const APInt &Imm, Type *Ty,
                                   TargetCostKind CostKind) = 0;
@@ -1573,6 +1598,10 @@ public:
                                         VectorType *VecTy) const = 0;
   virtual bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                                      ReductionFlags) const = 0;
+  virtual bool preferInLoopReduction(unsigned Opcode, Type *Ty,
+                                     ReductionFlags) const = 0;
+  virtual bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                               ReductionFlags) const = 0;
   virtual bool shouldExpandReduction(const IntrinsicInst *II) const = 0;
   virtual unsigned getGISelRematGlobalCost() const = 0;
   virtual bool hasActiveVectorLength() const = 0;
@@ -1823,9 +1852,10 @@ public:
                     TargetCostKind CostKind) override {
     return Impl.getIntImmCost(Imm, Ty, CostKind);
   }
-  int getIntImmCostInst(unsigned Opc, unsigned Idx, const APInt &Imm,
-                        Type *Ty, TargetCostKind CostKind) override {
-    return Impl.getIntImmCostInst(Opc, Idx, Imm, Ty, CostKind);
+  int getIntImmCostInst(unsigned Opc, unsigned Idx, const APInt &Imm, Type *Ty,
+                        TargetCostKind CostKind,
+                        Instruction *Inst = nullptr) override {
+    return Impl.getIntImmCostInst(Opc, Idx, Imm, Ty, CostKind, Inst);
   }
   int getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                           Type *Ty, TargetCostKind CostKind) override {
@@ -2072,6 +2102,14 @@ public:
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const override {
     return Impl.useReductionIntrinsic(Opcode, Ty, Flags);
+  }
+  bool preferInLoopReduction(unsigned Opcode, Type *Ty,
+                             ReductionFlags Flags) const override {
+    return Impl.preferInLoopReduction(Opcode, Ty, Flags);
+  }
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       ReductionFlags Flags) const override {
+    return Impl.preferPredicatedReductionSelect(Opcode, Ty, Flags);
   }
   bool shouldExpandReduction(const IntrinsicInst *II) const override {
     return Impl.shouldExpandReduction(II);

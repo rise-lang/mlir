@@ -3,8 +3,11 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_clang_unittest(SyntaxTests
+  TreeTestBase.cpp
   BuildTreeTest.cpp
   MutationsTest.cpp
+  SynthesisTest.cpp
+  TreeTest.cpp
   TokensTest.cpp
 )
 

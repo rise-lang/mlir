@@ -307,6 +307,9 @@ public:
   /// otherwise.
   bool containsId(Value id) const;
 
+  /// Swap the posA^th identifier with the posB^th identifier.
+  void swapId(unsigned posA, unsigned posB);
+
   // Add identifiers of the specified kind - specified positions are relative to
   // the kind of identifier. The coefficient column corresponding to the added
   // identifier is initialized to zero. 'id' is the Value corresponding to the
@@ -545,6 +548,13 @@ public:
   /// A more expensive check to detect redundant inequalities thatn
   /// removeTrivialRedundancy.
   void removeRedundantInequalities();
+
+  /// Removes redundant constraints using Simplex. Although the algorithm can
+  /// theoretically take exponential time in the worst case (rare), it is known
+  /// to perform much better in the average case. If V is the number of vertices
+  /// in the polytope and C is the number of constraints, the algorithm takes
+  /// O(VC) time.
+  void removeRedundantConstraints();
 
   // Removes all equalities and inequalities.
   void clearConstraints();

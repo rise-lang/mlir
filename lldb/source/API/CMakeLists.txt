@@ -121,9 +121,9 @@ if(LLDB_ENABLE_PYTHON AND (BUILD_SHARED_LIBS OR LLVM_LINK_LLVM_DYLIB) AND UNIX A
   set_property(TARGET liblldb APPEND PROPERTY INSTALL_RPATH "\$ORIGIN/../../../../lib${LLVM_LIBDIR_SUFFIX}")
 endif()
 
-if(PYTHON_RPATH)
-  set_property(TARGET liblldb APPEND PROPERTY INSTALL_RPATH "${PYTHON_RPATH}")
-  set_property(TARGET liblldb APPEND PROPERTY BUILD_RPATH   "${PYTHON_RPATH}")
+if(Python3_RPATH)
+  set_property(TARGET liblldb APPEND PROPERTY INSTALL_RPATH "${Python3_RPATH}")
+  set_property(TARGET liblldb APPEND PROPERTY BUILD_RPATH   "${Python3_RPATH}")
 endif()
 
 
@@ -182,11 +182,11 @@ if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
   set_target_properties(liblldb_exports PROPERTIES FOLDER "lldb misc")
 endif()
 
-if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
+if (MSVC)
   # Only MSVC has the ABI compatibility problem and avoids using FindPythonLibs,
-  # so only it needs to explicitly link against ${PYTHON_LIBRARIES}
-  if (MSVC AND LLDB_ENABLE_PYTHON)
-    target_link_libraries(liblldb PRIVATE ${PYTHON_LIBRARIES})
+  # so only it needs to explicitly link against ${Python3_LIBRARIES}
+  if (LLDB_ENABLE_PYTHON)
+    target_link_libraries(liblldb PRIVATE ${Python3_LIBRARIES})
   endif()
 else()
   set_target_properties(liblldb

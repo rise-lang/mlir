@@ -91,8 +91,8 @@ def ext_cce_narrowing : ExtWarn<
   "evaluates to %2, which cannot be narrowed to type %3}1">,
   InGroup<CXX11Narrowing>, DefaultError, SFINAEFailure;
 def err_ice_not_integral : Error<
-  "integral constant expression must have integral or unscoped enumeration "
-  "type, not %0">;
+  "%select{integer|integral}1 constant expression must have "
+  "%select{integer|integral or unscoped enumeration}1 type, not %0">;
 def err_ice_incomplete_type : Error<
   "integral constant expression has incomplete class type %0">;
 def err_ice_explicit_conversion : Error<
@@ -2829,8 +2829,9 @@ def err_attribute_requires_opencl_version : Error<
 def err_invalid_branch_protection_spec : Error<
   "invalid or misplaced branch protection specification '%0'">;
 def warn_unsupported_target_attribute
-    : Warning<"%select{unsupported|duplicate}0%select{| architecture}1 '%2' in"
-              " the 'target' attribute string; 'target' attribute ignored">,
+    : Warning<"%select{unsupported|duplicate|unknown}0%select{| architecture|"
+              " tune CPU}1 '%2' in the 'target' attribute string; 'target' "
+              "attribute ignored">,
       InGroup<IgnoredAttributes>;
 def err_attribute_unsupported
     : Error<"%0 attribute is not supported for this target">;
@@ -2924,6 +2925,8 @@ def err_attribute_invalid_size : Error<
   "vector size not an integral multiple of component size">;
 def err_attribute_zero_size : Error<"zero %0 size">;
 def err_attribute_size_too_large : Error<"%0 size too large">;
+def err_typecheck_vector_not_convertable_sizeless : Error<
+  "cannot convert between a fixed-length and a sizeless vector (%0 and %1)">;
 def err_typecheck_vector_not_convertable_implict_truncation : Error<
    "cannot convert between %select{scalar|vector}0 type %1 and vector type"
    " %2 as implicit conversion would cause truncation">;
@@ -3138,6 +3141,9 @@ def warn_nocf_check_attribute_ignored :
 def warn_attribute_after_definition_ignored : Warning<
   "attribute %0 after definition is ignored">,
    InGroup<IgnoredAttributes>;
+def warn_attributes_likelihood_ifstmt_conflict
+    : Warning<"conflicting attributes %0 are ignored">,
+      InGroup<IgnoredAttributes>;
 def warn_cxx11_gnu_attribute_on_type : Warning<
   "attribute %0 ignored, because it cannot be applied to a type">,
   InGroup<IgnoredAttributes>;
@@ -3474,6 +3480,9 @@ def warn_acquired_before_after_cycle : Warning<
 def warn_acquire_requires_negative_cap : Warning<
   "acquiring %0 '%1' requires negative capability '%2'">,
   InGroup<ThreadSafetyNegative>, DefaultIgnore;
+def warn_fun_requires_negative_cap : Warning<
+  "calling function %0 requires negative capability '%1'">,
+  InGroup<ThreadSafetyAnalysis>, DefaultIgnore;
 
 // Thread safety warnings on pass by reference
 def warn_guarded_pass_by_reference : Warning<
@@ -3965,6 +3974,53 @@ def err_objc_bridged_related_known_method : Error<
 def err_objc_attr_protocol_requires_definition : Error<
   "attribute %0 can only be applied to @protocol definitions, not forward declarations">;
 
+// Swift attributes.
+def warn_attr_swift_name_function
+  : Warning<"%0 attribute argument must be a string literal specifying a Swift function name">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_invalid_identifier
+  : Warning<"%0 attribute has invalid identifier for the %select{base|context|parameter}1 name">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_decl_kind
+  : Warning<"%0 attribute cannot be applied to this declaration">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_subscript_invalid_parameter
+  : Warning<"%0 attribute for 'subscript' must %select{be a getter or setter|"
+        "have at least one parameter|"
+        "have a 'self:' parameter}1">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_missing_parameters
+  : Warning<"%0 attribute is missing parameter label clause">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_setter_parameters
+  : Warning<"%0 attribute for setter must have one parameter for new value">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_multiple_selfs
+  : Warning<"%0 attribute cannot specify more than one 'self:' parameter">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_getter_parameters
+  : Warning<"%0 attribute for getter must not have any parameters besides 'self:'">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_subscript_setter_no_newValue
+  : Warning<"%0 attribute for 'subscript' setter must have a 'newValue:' parameter">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_subscript_setter_multiple_newValues
+  : Warning<"%0 attribute for 'subscript' setter cannot have multiple 'newValue:' parameters">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_subscript_getter_newValue
+  : Warning<"%0 attribute for 'subscript' getter cannot have a 'newValue:' parameter">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_num_params
+  : Warning<"too %select{few|many}0 parameters in %1 attribute (expected %2; got %3)">,
+    InGroup<SwiftNameAttribute>;
+
+def err_attr_swift_error_no_error_parameter : Error<
+  "%0 attribute can only be applied to a %select{function|method}1 with an "
+  "error parameter">;
+def err_attr_swift_error_return_type : Error<
+  "%0 attribute with '%1' convention can only be applied to a "
+  "%select{function|method}2 returning %select{an integral type|a pointer}3">;
+
 def warn_ignored_objc_externally_retained : Warning<
   "'objc_externally_retained' can only be applied to local variables "
   "%select{of retainable type|with strong ownership}0">,
@@ -4407,6 +4463,28 @@ def note_template_nontype_parm_prev_declaration : Note<
   "previous non-type template parameter with type %0 is here">;
 def err_template_nontype_parm_bad_type : Error<
   "a non-type template parameter cannot have type %0">;
+def err_template_nontype_parm_bad_structural_type : Error<
+  "a non-type template parameter cannot have type %0 before C++20">;
+def err_template_nontype_parm_incomplete : Error<
+  "non-type template parameter has incomplete type %0">;
+def err_template_nontype_parm_not_literal : Error<
+  "non-type template parameter has non-literal type %0">;
+def err_template_nontype_parm_rvalue_ref : Error<
+  "non-type template parameter has rvalue reference type %0">;
+def err_template_nontype_parm_not_structural : Error<
+  "type %0 of non-type template parameter is not a structural type">;
+def note_not_structural_non_public : Note<
+  "%0 is not a structural type because it has a "
+  "%select{non-static data member|base class}1 that is not public">;
+def note_not_structural_mutable_field : Note<
+  "%0 is not a structural type because it has a mutable "
+  "non-static data member">;
+def note_not_structural_rvalue_ref_field : Note<
+  "%0 is not a structural type because it has a non-static data member "
+  "of rvalue reference type">;
+def note_not_structural_subobject : Note<
+  "%0 is not a structural type because it has a "
+  "%select{non-static data member|base class}1 of non-structural type %2">;
 def warn_cxx14_compat_template_nontype_parm_auto_type : Warning<
   "non-type template parameters declared with %0 are incompatible with C++ "
   "standards before C++17">,
@@ -4526,6 +4604,8 @@ def err_non_type_template_arg_subobject : Error<
   "non-type template argument refers to subobject '%0'">;
 def err_non_type_template_arg_addr_label_diff : Error<
   "template argument / label address difference / what did you expect?">;
+def err_non_type_template_arg_unsupported : Error<
+  "sorry, non-type template argument of type %0 is not yet supported">;
 def err_template_arg_not_convertible : Error<
   "non-type template argument of type %0 cannot be converted to a value "
   "of type %1">;
@@ -5086,6 +5166,9 @@ def err_fold_expression_empty : Error<
   "with no fallback value">;
 def err_fold_expression_bad_operand : Error<
   "expression not permitted as operand of fold expression">;
+def err_fold_expression_limit_exceeded: Error<
+  "instantiating fold expression with %0 arguments exceeded expression nesting "
+  "limit of %1">, DefaultFatal, NoSFINAE;
 
 def err_unexpected_typedef : Error<
   "unexpected type name %0: expected expression">;
@@ -6038,9 +6121,8 @@ def err_func_def_incomplete_result : Error<
 def err_atomic_specifier_bad_type
     : Error<"_Atomic cannot be applied to "
             "%select{incomplete |array |function |reference |atomic |qualified "
-            "|sizeless ||integer |integer }0type "
-            "%1 %select{|||||||which is not trivially copyable|with less than "
-            "1 byte of precision|with a non power of 2 precision}0">;
+            "|sizeless ||integer }0type "
+            "%1 %select{|||||||which is not trivially copyable|}0">;
 
 // Expressions.
 def ext_sizeof_alignof_function_type : Extension<
@@ -7201,8 +7283,8 @@ def warn_overaligned_type : Warning<
   "guarantees %2 bytes">,
   InGroup<OveralignedType>, DefaultIgnore;
 def err_aligned_allocation_unavailable : Error<
-  "aligned %select{allocation|deallocation}0 function of type '%1' is only "
-  "available on %2 %3 or newer">;
+  "aligned %select{allocation|deallocation}0 function of type '%1' is "
+  "%select{only|not}4 available on %2%select{ %3 or newer|}4">;
 def note_silence_aligned_allocation_unavailable : Note<
   "if you supply your own aligned allocation functions, use "
   "-faligned-allocation to silence this diagnostic">;
@@ -7433,6 +7515,12 @@ def err_no_typeid_with_fno_rtti : Error<
   "use of typeid requires -frtti">;
 def err_no_dynamic_cast_with_fno_rtti : Error<
   "use of dynamic_cast requires -frtti">;
+def warn_no_dynamic_cast_with_rtti_disabled: Warning<
+  "dynamic_cast will not work since RTTI data is disabled by " 
+  "%select{-fno-rtti-data|/GR-}0">, InGroup<RTTI>;
+def warn_no_typeid_with_rtti_disabled: Warning<
+  "typeid will not work since RTTI data is disabled by "
+  "%select{-fno-rtti-data|/GR-}0">, InGroup<RTTI>;
 
 def err_cannot_form_pointer_to_member_of_reference_type : Error<
   "cannot form a pointer-to-member to member %0 of reference type %1">;
@@ -7967,6 +8055,8 @@ def err_atomic_exclusive_builtin_pointer_size : Error<
   " 1,2,4 or 8 byte type (%0 invalid)">;
 def err_atomic_builtin_ext_int_size : Error<
   "Atomic memory operand must have a power-of-two size">;
+def err_atomic_builtin_ext_int_prohibit : Error<
+  "argument to atomic builtin of type '_ExtInt' is not supported">;
 def err_atomic_op_needs_atomic : Error<
   "address argument to atomic operation must be a pointer to _Atomic "
   "type (%0 invalid)">;
@@ -10341,10 +10431,6 @@ def err_omp_non_lvalue_in_map_or_motion_clauses: Error<
   "expected addressable lvalue in '%0' clause">;
 def err_omp_var_expected : Error<
   "expected variable of the '%0' type%select{|, not %2}1">;
-def warn_nested_declare_variant
-    : Warning<"nesting `omp begin/end declare variant` is not supported yet; "
-              "nested context ignored">,
-      InGroup<SourceUsesOpenMP>;
 def warn_unknown_declare_variant_isa_trait
     : Warning<"isa trait '%0' is not known to the current target; verify the "
               "spelling or consider restricting the context selector with the "

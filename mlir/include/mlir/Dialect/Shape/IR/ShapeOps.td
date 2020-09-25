@@ -581,6 +581,8 @@ def Shape_AnyOp : Shape_Op<"any", [Commutative,
   let arguments = (ins Variadic<Shape_ShapeOrExtentTensorType>:$inputs);
   let results = (outs Shape_ShapeOrExtentTensorType:$result);
 
+  let assemblyFormat = "$inputs attr-dict `:` type($inputs) `->` type($result)";
+
   let hasFolder = 1;
 }
 
@@ -617,6 +619,7 @@ def Shape_AssumingAllOp : Shape_Op<"assuming_all", [Commutative, NoSideEffect]> 
 
 def Shape_AssumingOp : Shape_Op<"assuming",
                            [SingleBlockImplicitTerminator<"AssumingYieldOp">,
+                            DeclareOpInterfaceMethods<RegionBranchOpInterface>,
                             RecursiveSideEffects]> {
   let summary = "Execute the region";
   let description = [{
@@ -736,5 +739,31 @@ def Shape_ConstWitnessOp : Shape_Op<"const_witness", [ConstantLike, NoSideEffect
   let hasFolder = 1;
 }
 
+def Shape_CstrRequireOp : Shape_Op<"cstr_require", []> {
+  let summary = "Represents a runtime assertion that an i1 is `true`";
+  let description = [{
+    Represents a runtime assertion that an i1 is true. It returns a
+    !shape.witness to order this assertion.
+
+    For simplicity, prefer using other cstr_* ops if they are available for a
+    given constraint.
+
+    Example:
+    ```mlir
+    %bool = ...
+    %w0 = shape.cstr_require %bool, "msg" // Passing if `%bool` is true.
+    ```
+
+    Since this op can be used to express many different possible assertions
+    (depending on whatever computation calculated `pred`), the `msg`
+    should clarify the nature of the assertion for users.
+  }];
+  let arguments = (ins I1:$pred, StrAttr:$msg);
+  let results = (outs Shape_WitnessType:$result);
+
+  let assemblyFormat = "$pred `,` $msg attr-dict";
+
+  let hasFolder = 1;
+}
 
 #endif // SHAPE_OPS

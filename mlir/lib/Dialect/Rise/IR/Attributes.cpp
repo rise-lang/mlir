@@ -32,7 +32,7 @@ namespace rise {
 
 LiteralAttr LiteralAttr::get(MLIRContext *context, DataType type,
                              std::string value) {
-  return Base::get(context, RiseAttributeKind::LITERAL_ATTR, type, value);
+  return Base::get(context, type, value);
 }
 DataType LiteralAttr::getType() const { return getImpl()->type; }
 
@@ -43,7 +43,7 @@ std::string LiteralAttr::getValue() const { return getImpl()->value; }
 //===----------------------------------------------------------------------===//
 
 DataTypeAttr DataTypeAttr::get(MLIRContext *context, DataType value) {
-  return Base::get(context, RiseAttributeKind::DATATYPE_ATTR, value);
+  return Base::get(context, value);
 }
 DataType DataTypeAttr::getValue() const { return getImpl()->value; }
 
@@ -52,7 +52,7 @@ DataType DataTypeAttr::getValue() const { return getImpl()->value; }
 //===----------------------------------------------------------------------===//
 
 NatAttr NatAttr::get(MLIRContext *context, Nat value) {
-  return Base::get(context, RiseAttributeKind::NAT_ATTR, value);
+  return Base::get(context, value);
 }
 Nat NatAttr::getValue() const { return getImpl()->value; }
 

@@ -67,6 +67,7 @@ public:
 
 private:
   RecTyKind Kind;
+  /// ListRecTy of the list that has elements of this type.
   ListRecTy *ListTy = nullptr;
 
 public:
@@ -190,14 +191,14 @@ public:
   bool typeIsConvertibleTo(const RecTy *RHS) const override;
 };
 
-/// 'list<Ty>' - Represent a list of values, all of which must be of
-/// the specified type.
+/// 'list<Ty>' - Represent a list of element values, all of which must be of
+/// the specified type. The type is stored in ElementTy.
 class ListRecTy : public RecTy {
   friend ListRecTy *RecTy::getListTy();
 
-  RecTy *Ty;
+  RecTy *ElementTy;
 
-  explicit ListRecTy(RecTy *T) : RecTy(ListRecTyKind), Ty(T) {}
+  explicit ListRecTy(RecTy *T) : RecTy(ListRecTyKind), ElementTy(T) {}
 
 public:
   static bool classof(const RecTy *RT) {
@@ -205,7 +206,7 @@ public:
   }
 
   static ListRecTy *get(RecTy *T) { return T->getListTy(); }
-  RecTy *getElementType() const { return Ty; }
+  RecTy *getElementType() const { return ElementTy; }
 
   std::string getAsString() const override;
 
@@ -420,14 +421,14 @@ inline raw_ostream &operator<<(raw_ostream &OS, const Init &I) {
   I.print(OS); return OS;
 }
 
-/// This is the common super-class of types that have a specific,
-/// explicit, type.
+/// This is the common superclass of types that have a specific,
+/// explicit, type, stored in ValueTy.
 class TypedInit : public Init {
-  RecTy *Ty;
+  RecTy *ValueTy;
 
 protected:
   explicit TypedInit(InitKind K, RecTy *T, uint8_t Opc = 0)
-    : Init(K, Opc), Ty(T) {}
+      : Init(K, Opc), ValueTy(T) {}
 
 public:
   TypedInit(const TypedInit &) = delete;
@@ -438,7 +439,7 @@ public:
            I->getKind() <= IK_LastTypedInit;
   }
 
-  RecTy *getType() const { return Ty; }
+  RecTy *getType() const { return ValueTy; }
 
   Init *getCastTo(RecTy *Ty) const override;
   Init *convertInitializerTo(RecTy *Ty) const override;
@@ -1439,14 +1440,15 @@ class Record {
   SmallVector<Init *, 0> TemplateArgs;
   SmallVector<RecordVal, 0> Values;
 
-  // All superclasses in the inheritance forest in reverse preorder (yes, it
+  // All superclasses in the inheritance forest in post-order (yes, it
   // must be a forest; diamond-shaped inheritance is not allowed).
   SmallVector<std::pair<Record *, SMRange>, 0> SuperClasses;
 
   // Tracks Record instances. Not owned by Record.
   RecordKeeper &TrackedRecords;
 
-  DefInit *TheInit = nullptr;
+  // The DefInit corresponding to this record.
+  DefInit *CorrespondingDefInit = nullptr;
 
   // Unique record ID.
   unsigned ID;
@@ -1470,8 +1472,8 @@ public:
       : Record(StringInit::get(N), locs, records, false, Class) {}
 
   // When copy-constructing a Record, we must still guarantee a globally unique
-  // ID number.  Don't copy TheInit either since it's owned by the original
-  // record. All other fields can be copied normally.
+  // ID number. Don't copy CorrespondingDefInit either, since it's owned by the
+  // original record. All other fields can be copied normally.
   Record(const Record &O)
     : Name(O.Name), Locs(O.Locs), TemplateArgs(O.TemplateArgs),
       Values(O.Values), SuperClasses(O.SuperClasses),
@@ -1585,7 +1587,8 @@ public:
   }
 
   void addSuperClass(Record *R, SMRange Range) {
-    assert(!TheInit && "changing type of record after it has been referenced");
+    assert(!CorrespondingDefInit &&
+           "changing type of record after it has been referenced");
     assert(!isSubClassOf(R) && "Already subclassing record!");
     SuperClasses.push_back(std::make_pair(R, Range));
   }

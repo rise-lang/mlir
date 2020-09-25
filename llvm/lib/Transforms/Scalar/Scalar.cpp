@@ -38,10 +38,9 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeAlignmentFromAssumptionsPass(Registry);
   initializeCallSiteSplittingLegacyPassPass(Registry);
   initializeConstantHoistingLegacyPassPass(Registry);
-  initializeConstantPropagationPass(Registry);
+  initializeConstraintEliminationPass(Registry);
   initializeCorrelatedValuePropagationPass(Registry);
   initializeDCELegacyPassPass(Registry);
-  initializeDeadInstEliminationPass(Registry);
   initializeDivRemPairsLegacyPassPass(Registry);
   initializeScalarizerLegacyPassPass(Registry);
   initializeDSELegacyPassPass(Registry);
@@ -167,6 +166,10 @@ void LLVMAddIndVarSimplifyPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createIndVarSimplifyPass());
 }
 
+void LLVMAddInstructionSimplifyPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createInstSimplifyLegacyPass());
+}
+
 void LLVMAddJumpThreadingPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createJumpThreadingPass());
 }
@@ -246,10 +249,6 @@ void LLVMAddSimplifyLibCallsPass(LLVMPassManagerRef PM) {
 
 void LLVMAddTailCallEliminationPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createTailCallEliminationPass());
-}
-
-void LLVMAddConstantPropagationPass(LLVMPassManagerRef PM) {
-  unwrap(PM)->add(createConstantPropagationPass());
 }
 
 void LLVMAddDemoteMemoryToRegisterPass(LLVMPassManagerRef PM) {

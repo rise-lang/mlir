@@ -38,19 +38,6 @@ struct RiseNatStorage;
 struct RiseScalarStorage;
 } // namespace detail
 
-/// LLVM-style RTTI: one entry per subclass to allow dyn_cast/isa.
-enum RiseTypeKind {
-  // The enum starts at the range reserved for this dialect.
-  RISE_TYPE = mlir::Type::FIRST_RISE_TYPE,
-  RISE_FUNTYPE,
-  RISE_DATATYPE_WRAPPER,
-  RISE_NAT,
-  RISE_DATATYPE,
-  RISE_TUPLE,
-  RISE_ARRAY,
-  RISE_SCALAR
-};
-
 /// RISE type structure:
 ///                      +----------+
 ///                      |mlir::Type|
@@ -89,27 +76,12 @@ class DataType : public Type::TypeBase<DataType, Type, TypeStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) {
-    return kind == RiseTypeKind::RISE_DATATYPE;
-  }
-
-  /// This method is used to get an instance of DataType.
-  static DataType get(mlir::MLIRContext *context) {
-    return Base::get(context, RiseTypeKind::RISE_DATATYPE);
-  }
 };
 
 class Nat : public mlir::Type::TypeBase<Nat, Type, detail::RiseNatStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_NAT; }
 
   /// This method is used to get an instance of Nat.
   static Nat get(mlir::MLIRContext *context, int intValue);
@@ -121,14 +93,6 @@ class RiseType : public Type::TypeBase<RiseType, Type, TypeStorage> {
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_TYPE; }
-
-  static RiseType get(mlir::MLIRContext *context) {
-    return Base::get(context, RiseTypeKind::RISE_TYPE);
-  }
 };
 
 
@@ -140,9 +104,6 @@ public:
 
   /// This method is used to get an instance of ArrayType.
   static ScalarType get(mlir::MLIRContext *context, Type wrappedType);
-
-  /// Support method to enable LLVM-style RTTI type casting.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_SCALAR; }
 
   Type getWrappedType();
 };
@@ -157,9 +118,6 @@ public:
   static ArrayType get(mlir::MLIRContext *context, Nat size,
                        DataType elementType);
 
-  /// Support method to enable LLVM-style RTTI type casting.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_ARRAY; }
-
   Nat getSize();
   DataType getElementType();
 };
@@ -169,10 +127,6 @@ class Tuple : public mlir::Type::TypeBase<Tuple, DataType,
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) { return kind == RiseTypeKind::RISE_TUPLE; }
 
   /// This method is used to get an instance of Tuple.
   static Tuple get(mlir::MLIRContext *context, DataType first, DataType second);
@@ -186,12 +140,6 @@ class FunType
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast
-  static bool kindof(unsigned kind) {
-    return kind == RiseTypeKind::RISE_FUNTYPE;
-  }
 
   /// This method is used to get an instance of FunType
   static FunType get(mlir::MLIRContext *context, Type input,
@@ -207,15 +155,6 @@ class DataTypeWrapper
 public:
   /// Inherit some necessary constructors from 'TypeBase'.
   using Base::Base;
-
-  /// This static method is used to support type inquiry through isa, cast,
-  /// and dyn_cast.
-  static bool kindof(unsigned kind) {
-    return kind == RiseTypeKind::RISE_DATATYPE_WRAPPER;
-  }
-  static bool basetype(unsigned kind) {
-    return kind == RiseTypeKind::RISE_TYPE;
-  }
 
   /// This method is used to get an instance of DataTypeWrapper.
   static DataTypeWrapper get(mlir::MLIRContext *context, DataType data);

@@ -272,8 +272,10 @@ int ReachingDefAnalysis::getReachingDef(MachineInstr *MI, int PhysReg) const {
 }
 
 MachineInstr* ReachingDefAnalysis::getReachingLocalMIDef(MachineInstr *MI,
-                                                    int PhysReg) const {
-  return getInstFromId(MI->getParent(), getReachingDef(MI, PhysReg));
+                                                         int PhysReg) const {
+  return hasLocalDefBefore(MI, PhysReg)
+    ? getInstFromId(MI->getParent(), getReachingDef(MI, PhysReg))
+    : nullptr;
 }
 
 bool ReachingDefAnalysis::hasSameReachingDef(MachineInstr *A, MachineInstr *B,
@@ -387,6 +389,18 @@ ReachingDefAnalysis::getGlobalUses(MachineInstr *MI, int PhysReg,
   }
 }
 
+void
+ReachingDefAnalysis::getGlobalReachingDefs(MachineInstr *MI, int PhysReg,
+                                           InstSet &Defs) const {
+  if (auto *Def = getUniqueReachingMIDef(MI, PhysReg)) {
+    Defs.insert(Def);
+    return;
+  }
+
+  for (auto *MBB : MI->getParent()->predecessors())
+    getLiveOuts(MBB, PhysReg, Defs);
+}
+
 void ReachingDefAnalysis::getLiveOuts(MachineBasicBlock *MBB, int PhysReg,
                                       InstSet &Defs) const {
   SmallPtrSet<MachineBasicBlock*, 2> VisitedBBs;
@@ -421,17 +435,16 @@ MachineInstr *ReachingDefAnalysis::getUniqueReachingMIDef(MachineInstr *MI,
 
   SmallPtrSet<MachineBasicBlock*, 4> VisitedBBs;
   SmallPtrSet<MachineInstr*, 2> Incoming;
-  for (auto *Pred : MI->getParent()->predecessors())
-    getLiveOuts(Pred, PhysReg, Incoming, VisitedBBs);
+  MachineBasicBlock *Parent = MI->getParent();
+  for (auto *Pred : Parent->predecessors())
+    getLiveOuts(Pred, PhysReg, Incoming);
 
-  // If we have a local def and an incoming instruction, then there's not a
-  // unique instruction def.
-  if (!Incoming.empty() && LocalDef)
-    return nullptr;
-  else if (Incoming.size() == 1)
+  // Check that we have a single incoming value and that it does not
+  // come from the same block as MI - since it would mean that the def
+  // is executed after MI.
+  if (Incoming.size() == 1 && (*Incoming.begin())->getParent() != Parent)
     return *Incoming.begin();
-  else
-    return LocalDef;
+  return nullptr;
 }
 
 MachineInstr *ReachingDefAnalysis::getMIOperand(MachineInstr *MI,

@@ -304,6 +304,19 @@ FunctionPass *llvm::createMachineVerifierPass(const std::string &Banner) {
   return new MachineVerifierPass(Banner);
 }
 
+void llvm::verifyMachineFunction(MachineFunctionAnalysisManager *,
+                                 const std::string &Banner,
+                                 const MachineFunction &MF) {
+  // TODO: Use MFAM after porting below analyses.
+  // LiveVariables *LiveVars;
+  // LiveIntervals *LiveInts;
+  // LiveStacks *LiveStks;
+  // SlotIndexes *Indexes;
+  unsigned FoundErrors = MachineVerifier(nullptr, Banner.c_str()).verify(MF);
+  if (FoundErrors)
+    report_fatal_error("Found " + Twine(FoundErrors) + " machine code errors.");
+}
+
 bool MachineFunction::verify(Pass *p, const char *Banner, bool AbortOnErrors)
     const {
   MachineFunction &MF = const_cast<MachineFunction&>(*this);
@@ -475,7 +488,7 @@ void MachineVerifier::report(const char *msg, const MachineInstr *MI) {
   errs() << "- instruction: ";
   if (Indexes && Indexes->hasIndex(*MI))
     errs() << Indexes->getInstructionIndex(*MI) << '\t';
-  MI->print(errs(), /*SkipOpers=*/true);
+  MI->print(errs(), /*IsStandalone=*/true);
 }
 
 void MachineVerifier::report(const char *msg, const MachineOperand *MO,
@@ -777,9 +790,7 @@ void MachineVerifier::visitMachineBundleBefore(const MachineInstr *MI) {
   }
 
   // Ensure non-terminators don't follow terminators.
-  // Ignore predicated terminators formed by if conversion.
-  // FIXME: If conversion shouldn't need to violate this rule.
-  if (MI->isTerminator() && !TII->isPredicated(*MI)) {
+  if (MI->isTerminator()) {
     if (!FirstTerminator)
       FirstTerminator = MI;
   } else if (FirstTerminator) {
@@ -1344,20 +1355,7 @@ void MachineVerifier::verifyPreISelGenericInstruction(const MachineInstr *MI) {
         break;
       }
     }
-    switch (IntrID) {
-    case Intrinsic::memcpy:
-      if (MI->getNumOperands() != 5)
-        report("Expected memcpy intrinsic to have 5 operands", MI);
-      break;
-    case Intrinsic::memmove:
-      if (MI->getNumOperands() != 5)
-        report("Expected memmove intrinsic to have 5 operands", MI);
-      break;
-    case Intrinsic::memset:
-      if (MI->getNumOperands() != 5)
-        report("Expected memset intrinsic to have 5 operands", MI);
-      break;
-    }
+
     break;
   }
   case TargetOpcode::G_SEXT_INREG: {
@@ -1433,6 +1431,61 @@ void MachineVerifier::verifyPreISelGenericInstruction(const MachineInstr *MI) {
       report("src operand 2 must be an immediate type", MI);
       break;
     }
+    break;
+  }
+  case TargetOpcode::G_MEMCPY:
+  case TargetOpcode::G_MEMMOVE: {
+    ArrayRef<MachineMemOperand *> MMOs = MI->memoperands();
+    if (MMOs.size() != 2) {
+      report("memcpy/memmove must have 2 memory operands", MI);
+      break;
+    }
+
+    if ((!MMOs[0]->isStore() || MMOs[0]->isLoad()) ||
+        (MMOs[1]->isStore() || !MMOs[1]->isLoad())) {
+      report("wrong memory operand types", MI);
+      break;
+    }
+
+    if (MMOs[0]->getSize() != MMOs[1]->getSize())
+      report("inconsistent memory operand sizes", MI);
+
+    LLT DstPtrTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcPtrTy = MRI->getType(MI->getOperand(1).getReg());
+
+    if (!DstPtrTy.isPointer() || !SrcPtrTy.isPointer()) {
+      report("memory instruction operand must be a pointer", MI);
+      break;
+    }
+
+    if (DstPtrTy.getAddressSpace() != MMOs[0]->getAddrSpace())
+      report("inconsistent store address space", MI);
+    if (SrcPtrTy.getAddressSpace() != MMOs[1]->getAddrSpace())
+      report("inconsistent load address space", MI);
+
+    break;
+  }
+  case TargetOpcode::G_MEMSET: {
+    ArrayRef<MachineMemOperand *> MMOs = MI->memoperands();
+    if (MMOs.size() != 1) {
+      report("memset must have 1 memory operand", MI);
+      break;
+    }
+
+    if ((!MMOs[0]->isStore() || MMOs[0]->isLoad())) {
+      report("memset memory operand must be a store", MI);
+      break;
+    }
+
+    LLT DstPtrTy = MRI->getType(MI->getOperand(0).getReg());
+    if (!DstPtrTy.isPointer()) {
+      report("memset operand must be a pointer", MI);
+      break;
+    }
+
+    if (DstPtrTy.getAddressSpace() != MMOs[0]->getAddrSpace())
+      report("inconsistent memset address space", MI);
+
     break;
   }
   default:
@@ -2476,7 +2529,7 @@ void MachineVerifier::verifyLiveIntervals() {
     }
 
     const LiveInterval &LI = LiveInts->getInterval(Reg);
-    assert(Reg == LI.reg && "Invalid reg to interval mapping");
+    assert(Reg == LI.reg() && "Invalid reg to interval mapping");
     verifyLiveInterval(LI);
   }
 
@@ -2802,7 +2855,7 @@ void MachineVerifier::verifyLiveRange(const LiveRange &LR, unsigned Reg,
 }
 
 void MachineVerifier::verifyLiveInterval(const LiveInterval &LI) {
-  unsigned Reg = LI.reg;
+  unsigned Reg = LI.reg();
   assert(Register::isVirtualRegister(Reg));
   verifyLiveRange(LI, Reg);
 
@@ -2819,10 +2872,10 @@ void MachineVerifier::verifyLiveInterval(const LiveInterval &LI) {
     }
     if (SR.empty()) {
       report("Subrange must not be empty", MF);
-      report_context(SR, LI.reg, SR.LaneMask);
+      report_context(SR, LI.reg(), SR.LaneMask);
     }
     Mask |= SR.LaneMask;
-    verifyLiveRange(SR, LI.reg, SR.LaneMask);
+    verifyLiveRange(SR, LI.reg(), SR.LaneMask);
     if (!LI.covers(SR)) {
       report("A Subrange is not covered by the main range", MF);
       report_context(LI);

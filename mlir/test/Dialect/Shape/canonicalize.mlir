@@ -386,7 +386,31 @@ func @f(%arg0: !shape.shape, %arg1: !shape.shape) {
 }
 
 // -----
+// cstr_require with constant can be folded
+// CHECK-LABEL: func @cstr_require_fold
+func @cstr_require_fold() {
+  // CHECK-NEXT: shape.const_witness true
+  // CHECK-NEXT: consume.witness
+  // CHECK-NEXT: return
+  %true = constant true
+  %0 = shape.cstr_require %true, "msg"
+  "consume.witness"(%0) : (!shape.witness) -> ()
+  return
+}
 
+// -----
+// cstr_require without constant cannot be folded
+// CHECK-LABEL: func @cstr_require_no_fold
+func @cstr_require_no_fold(%arg0: i1) {
+  // CHECK-NEXT: shape.cstr_require
+  // CHECK-NEXT: consume.witness
+  // CHECK-NEXT: return
+  %0 = shape.cstr_require %arg0, "msg"
+  "consume.witness"(%0) : (!shape.witness) -> ()
+  return
+}
+
+// -----
 // assuming_all with known passing witnesses can be folded
 // CHECK-LABEL: func @f
 func @f() {
@@ -428,7 +452,7 @@ func @f(%arg : !shape.shape) -> !shape.shape {
   // CHECK-NEXT: %[[CS:.*]] = shape.const_shape
   // CHECK-NEXT: return %[[CS]]
   %0 = shape.const_shape [2, 3, 4] : !shape.shape
-  %1 = "shape.any"(%0, %arg) : (!shape.shape, !shape.shape) -> !shape.shape
+  %1 = shape.any %0, %arg : !shape.shape, !shape.shape -> !shape.shape
   return %1 : !shape.shape
 }
 
@@ -440,7 +464,7 @@ func @f(%arg : tensor<?xindex>) -> tensor<?xindex> {
   // CHECK-NEXT: %[[CS:.*]] = shape.const_shape [2, 3, 4] : tensor<?xindex>
   // CHECK-NEXT: return %[[CS]] : tensor<?xindex>
   %0 = shape.const_shape [2, 3, 4] : tensor<?xindex>
-  %1 = "shape.any"(%0, %arg) : (tensor<?xindex>, tensor<?xindex>) -> tensor<?xindex>
+  %1 = shape.any %0, %arg : tensor<?xindex>, tensor<?xindex> -> tensor<?xindex>
   return %1 : tensor<?xindex>
 }
 
@@ -449,9 +473,9 @@ func @f(%arg : tensor<?xindex>) -> tensor<?xindex> {
 // Folding of any with partially constant operands is not yet implemented.
 // CHECK-LABEL: func @f
 func @f(%arg0 : !shape.shape, %arg1 : !shape.shape) -> !shape.shape {
-  // CHECK-NEXT: %[[CS:.*]] = "shape.any"
+  // CHECK-NEXT: %[[CS:.*]] = shape.any
   // CHECK-NEXT: return %[[CS]]
-  %1 = "shape.any"(%arg0, %arg1) : (!shape.shape, !shape.shape) -> !shape.shape
+  %1 = shape.any %arg0, %arg1 : !shape.shape, !shape.shape -> !shape.shape
   return %1 : !shape.shape
 }
 

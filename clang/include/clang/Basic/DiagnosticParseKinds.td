@@ -62,6 +62,20 @@ def warn_misleading_indentation : Warning<
 def note_previous_statement : Note<
   "previous statement is here">;
 
+def subst_compound_token_kind : TextSubstitution<
+  "%select{%1 and |}0%2 tokens "
+  "%select{introducing statement expression|terminating statement expression|"
+  "introducing attribute|terminating attribute|"
+  "forming pointer to member type}3">;
+def warn_compound_token_split_by_macro : Warning<
+  "%sub{subst_compound_token_kind}0,1,2,3 appear in different "
+  "macro expansion contexts">, InGroup<CompoundTokenSplitByMacro>;
+def note_compound_token_split_second_token_here : Note<
+  "%select{|second }0%1 token is here">;
+def warn_compound_token_split_by_whitespace : Warning<
+  "%sub{subst_compound_token_kind}0,1,2,3 are separated by whitespace">,
+  InGroup<CompoundTokenSplitBySpace>, DefaultIgnore;
+
 def ext_thread_before : Extension<"'__thread' before '%0'">;
 def ext_keyword_as_ident : ExtWarn<
   "keyword '%0' will be made available as an identifier "
@@ -1122,6 +1136,12 @@ def ext_stdc_pragma_ignored : ExtWarn<"unknown pragma in STDC namespace">,
 def warn_stdc_fenv_access_not_supported :
    Warning<"pragma STDC FENV_ACCESS ON is not supported, ignoring pragma">,
    InGroup<UnknownPragmas>;
+def warn_stdc_fenv_round_not_supported :
+   Warning<"pragma STDC FENV_ROUND is not supported">,
+   InGroup<UnknownPragmas>;
+def warn_stdc_unknown_rounding_mode : Warning<
+  "invalid or unsupported rounding mode in '#pragma STDC FENV_ROUND' - ignored">,
+  InGroup<IgnoredPragmas>;
 // - #pragma comment
 def err_pragma_comment_malformed : Error<
   "pragma comment requires parenthesized identifier and optional string">;
@@ -1273,6 +1293,11 @@ def err_omp_mapper_expected_declarator : Error<
   "expected declarator on 'omp declare mapper' directive">;
 def err_omp_declare_variant_wrong_clause : Error<
   "expected '%0' clause on 'omp declare variant' directive">;
+def err_omp_declare_variant_duplicate_nested_trait : Error<
+  "nested OpenMP context selector contains duplicated trait '%0'"
+  " in selector '%1' and set '%2' with different score">;
+def err_omp_declare_variant_nested_user_condition : Error<
+  "nested user conditions in OpenMP context selector not supported (yet)">;
 def warn_omp_declare_variant_string_literal_or_identifier
     : Warning<"expected identifier or string literal describing a context "
               "%select{set|selector|property}0; "

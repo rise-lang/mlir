@@ -128,12 +128,12 @@ bool StringRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
 }
 
 std::string ListRecTy::getAsString() const {
-  return "list<" + Ty->getAsString() + ">";
+  return "list<" + ElementTy->getAsString() + ">";
 }
 
 bool ListRecTy::typeIsConvertibleTo(const RecTy *RHS) const {
   if (const auto *ListTy = dyn_cast<ListRecTy>(RHS))
-    return Ty->typeIsConvertibleTo(ListTy->getElementType());
+    return ElementTy->typeIsConvertibleTo(ListTy->getElementType());
   return false;
 }
 
@@ -2089,9 +2089,9 @@ RecordRecTy *Record::getType() {
 }
 
 DefInit *Record::getDefInit() {
-  if (!TheInit)
-    TheInit = new(Allocator) DefInit(this);
-  return TheInit;
+  if (!CorrespondingDefInit)
+    CorrespondingDefInit = new (Allocator) DefInit(this);
+  return CorrespondingDefInit;
 }
 
 void Record::setName(Init *NewName) {
@@ -2112,9 +2112,11 @@ void Record::setName(Init *NewName) {
 
 void Record::getDirectSuperClasses(SmallVectorImpl<Record *> &Classes) const {
   ArrayRef<std::pair<Record *, SMRange>> SCs = getSuperClasses();
+
+  // Superclasses are in post-order, so the final one is a direct
+  // superclass. All of its transitive superclases immediately precede it,
+  // so we can step through the direct superclasses in reverse order.
   while (!SCs.empty()) {
-    // Superclasses are in reverse preorder, so 'back' is a direct superclass,
-    // and its transitive superclasses are directly preceding it.
     Record *SC = SCs.back().first;
     SCs = SCs.drop_back(1 + SC->getSuperClasses().size());
     Classes.push_back(SC);

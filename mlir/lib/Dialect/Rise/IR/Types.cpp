@@ -40,7 +40,7 @@ namespace rise {
 Type ScalarType::getWrappedType() { return getImpl()->wrappedType; }
 
 ScalarType ScalarType::get(mlir::MLIRContext *context, Type wrappedType) {
-  return Base::get(context, RiseTypeKind::RISE_SCALAR, wrappedType);
+  return Base::get(context, wrappedType);
 }
 
 //===----------------------------------------------------------------------===//
@@ -51,7 +51,7 @@ DataType DataTypeWrapper::getDataType() { return getImpl()->data; }
 
 DataTypeWrapper DataTypeWrapper::get(mlir::MLIRContext *context,
                                      DataType data) {
-  return Base::get(context, RiseTypeKind::RISE_DATATYPE_WRAPPER, data);
+  return Base::get(context, data);
 }
 
 //===----------------------------------------------------------------------===//
@@ -61,7 +61,7 @@ DataTypeWrapper DataTypeWrapper::get(mlir::MLIRContext *context,
 int Nat::getIntValue() { return getImpl()->intValue; }
 
 Nat Nat::get(mlir::MLIRContext *context, int intValue) {
-  return Base::get(context, RiseTypeKind::RISE_NAT, intValue);
+  return Base::get(context, intValue);
 }
 
 //===----------------------------------------------------------------------===//
@@ -70,7 +70,7 @@ Nat Nat::get(mlir::MLIRContext *context, int intValue) {
 
 FunType FunType::get(mlir::MLIRContext *context, Type input,
                      Type output) {
-  return Base::get(context, RiseTypeKind::RISE_FUNTYPE, input, output);
+  return Base::get(context, input, output);
 }
 
 Type FunType::getInput() { return getImpl()->input; }
@@ -82,7 +82,7 @@ Type FunType::getOutput() { return getImpl()->output; }
 //===----------------------------------------------------------------------===//
 Tuple rise::Tuple::get(mlir::MLIRContext *context, DataType first,
                        DataType second) {
-  return Base::get(context, RiseTypeKind::RISE_TUPLE, first, second);
+  return Base::get(context, first, second);
 }
 
 DataType rise::Tuple::getFirst() { return getImpl()->getFirst(); }
@@ -98,7 +98,7 @@ DataType ArrayType::getElementType() { return getImpl()->getElementType(); }
 
 ArrayType ArrayType::get(mlir::MLIRContext *context, Nat size,
                          DataType elementType) {
-  return Base::get(context, RiseTypeKind::RISE_ARRAY, size, elementType);
+  return Base::get(context, size, elementType);
 }
 
 } // end namespace rise

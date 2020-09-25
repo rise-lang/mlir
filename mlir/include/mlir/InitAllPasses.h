@@ -55,7 +55,6 @@ inline void registerAllPasses() {
   registerShapePasses();
   spirv::registerSPIRVPasses();
   registerStandardPasses();
-//  rise::createConvertRiseToImperativePass();
 }
 
 } // namespace mlir

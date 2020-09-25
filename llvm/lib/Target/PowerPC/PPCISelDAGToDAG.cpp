@@ -43,6 +43,7 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/IntrinsicsPowerPC.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CodeGen.h"
@@ -218,7 +219,7 @@ namespace {
     /// SelectCC - Select a comparison of the specified values with the
     /// specified condition code, returning the CR# of the expression.
     SDValue SelectCC(SDValue LHS, SDValue RHS, ISD::CondCode CC,
-                     const SDLoc &dl);
+                     const SDLoc &dl, SDValue Chain = SDValue());
 
     /// SelectAddrImmOffs - Return true if the operand is valid for a preinc
     /// immediate field.  Note that the operand at this point is already the
@@ -648,6 +649,8 @@ bool PPCDAGToDAGISel::tryTLSXFormStore(StoreSDNode *ST) {
   SDValue Offset = ST->getOffset();
   if (!Offset.isUndef())
     return false;
+  if (Base.getOperand(1).getOpcode() == PPCISD::TLS_LOCAL_EXEC_MAT_ADDR)
+    return false;
 
   SDLoc dl(ST);
   EVT MemVT = ST->getMemoryVT();
@@ -690,6 +693,8 @@ bool PPCDAGToDAGISel::tryTLSXFormLoad(LoadSDNode *LD) {
     return false;
   SDValue Offset = LD->getOffset();
   if (!Offset.isUndef())
+    return false;
+  if (Base.getOperand(1).getOpcode() == PPCISD::TLS_LOCAL_EXEC_MAT_ADDR)
     return false;
 
   SDLoc dl(LD);
@@ -3710,7 +3715,7 @@ bool PPCDAGToDAGISel::tryBitPermutation(SDNode *N) {
 /// SelectCC - Select a comparison of the specified values with the specified
 /// condition code, returning the CR# of the expression.
 SDValue PPCDAGToDAGISel::SelectCC(SDValue LHS, SDValue RHS, ISD::CondCode CC,
-                                  const SDLoc &dl) {
+                                  const SDLoc &dl, SDValue Chain) {
   // Always select the LHS.
   unsigned Opc;
 
@@ -3863,7 +3868,12 @@ SDValue PPCDAGToDAGISel::SelectCC(SDValue LHS, SDValue RHS, ISD::CondCode CC,
     assert(Subtarget->hasVSX() && "__float128 requires VSX");
     Opc = PPC::XSCMPUQP;
   }
-  return SDValue(CurDAG->getMachineNode(Opc, dl, MVT::i32, LHS, RHS), 0);
+  if (Chain)
+    return SDValue(
+        CurDAG->getMachineNode(Opc, dl, MVT::i32, MVT::Other, LHS, RHS, Chain),
+        0);
+  else
+    return SDValue(CurDAG->getMachineNode(Opc, dl, MVT::i32, LHS, RHS), 0);
 }
 
 static PPC::Predicate getPredicateForSetCC(ISD::CondCode CC, const EVT &VT,
@@ -4050,17 +4060,23 @@ static unsigned int getVCmpInst(MVT VecVT, ISD::CondCode CC,
 bool PPCDAGToDAGISel::trySETCC(SDNode *N) {
   SDLoc dl(N);
   unsigned Imm;
-  ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
+  bool IsStrict = N->isStrictFPOpcode();
+  ISD::CondCode CC =
+      cast<CondCodeSDNode>(N->getOperand(IsStrict ? 3 : 2))->get();
   EVT PtrVT =
       CurDAG->getTargetLoweringInfo().getPointerTy(CurDAG->getDataLayout());
   bool isPPC64 = (PtrVT == MVT::i64);
+  SDValue Chain = IsStrict ? N->getOperand(0) : SDValue();
 
-  if (!Subtarget->useCRBits() && isInt32Immediate(N->getOperand(1), Imm)) {
+  SDValue LHS = N->getOperand(IsStrict ? 1 : 0);
+  SDValue RHS = N->getOperand(IsStrict ? 2 : 1);
+
+  if (!IsStrict && !Subtarget->useCRBits() && isInt32Immediate(RHS, Imm)) {
     // We can codegen setcc op, imm very efficiently compared to a brcond.
     // Check for those cases here.
     // setcc op, 0
     if (Imm == 0) {
-      SDValue Op = N->getOperand(0);
+      SDValue Op = LHS;
       switch (CC) {
       default: break;
       case ISD::SETEQ: {
@@ -4095,7 +4111,7 @@ bool PPCDAGToDAGISel::trySETCC(SDNode *N) {
       }
       }
     } else if (Imm == ~0U) {        // setcc op, -1
-      SDValue Op = N->getOperand(0);
+      SDValue Op = LHS;
       switch (CC) {
       default: break;
       case ISD::SETEQ:
@@ -4138,12 +4154,9 @@ bool PPCDAGToDAGISel::trySETCC(SDNode *N) {
     }
   }
 
-  SDValue LHS = N->getOperand(0);
-  SDValue RHS = N->getOperand(1);
-
   // Altivec Vector compare instructions do not set any CR register by default and
   // vector compare operations return the same type as the operands.
-  if (LHS.getValueType().isVector()) {
+  if (!IsStrict && LHS.getValueType().isVector()) {
     if (Subtarget->hasSPE())
       return false;
 
@@ -4171,7 +4184,9 @@ bool PPCDAGToDAGISel::trySETCC(SDNode *N) {
 
   bool Inv;
   unsigned Idx = getCRIdxForSetCC(CC, Inv);
-  SDValue CCReg = SelectCC(LHS, RHS, CC, dl);
+  SDValue CCReg = SelectCC(LHS, RHS, CC, dl, Chain);
+  if (IsStrict)
+    CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 1), CCReg.getValue(1));
   SDValue IntCR;
 
   // SPE e*cmp* instructions only set the 'gt' bit, so hard-code that
@@ -4663,7 +4678,48 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     }
     break;
 
+  case ISD::INTRINSIC_WO_CHAIN: {
+    if (!PPCSubTarget->isISA3_1())
+      break;
+    unsigned Opcode = 0;
+    switch (N->getConstantOperandVal(0)) {
+    default:
+      break;
+    case Intrinsic::ppc_altivec_vstribr_p:
+      Opcode = PPC::VSTRIBR_rec;
+      break;
+    case Intrinsic::ppc_altivec_vstribl_p:
+      Opcode = PPC::VSTRIBL_rec;
+      break;
+    case Intrinsic::ppc_altivec_vstrihr_p:
+      Opcode = PPC::VSTRIHR_rec;
+      break;
+    case Intrinsic::ppc_altivec_vstrihl_p:
+      Opcode = PPC::VSTRIHL_rec;
+      break;
+    }
+    if (!Opcode)
+      break;
+
+    // Generate the appropriate vector string isolate intrinsic to match.
+    EVT VTs[] = {MVT::v16i8, MVT::Glue};
+    SDValue VecStrOp =
+        SDValue(CurDAG->getMachineNode(Opcode, dl, VTs, N->getOperand(2)), 0);
+    // Vector string isolate instructions update the EQ bit of CR6.
+    // Generate a SETBC instruction to extract the bit and place it in a GPR.
+    SDValue SubRegIdx = CurDAG->getTargetConstant(PPC::sub_eq, dl, MVT::i32);
+    SDValue CR6Reg = CurDAG->getRegister(PPC::CR6, MVT::i32);
+    SDValue CRBit = SDValue(
+        CurDAG->getMachineNode(TargetOpcode::EXTRACT_SUBREG, dl, MVT::i1,
+                               CR6Reg, SubRegIdx, VecStrOp.getValue(1)),
+        0);
+    CurDAG->SelectNodeTo(N, PPC::SETBC, MVT::i32, CRBit);
+    return;
+  }
+
   case ISD::SETCC:
+  case ISD::STRICT_FSETCC:
+  case ISD::STRICT_FSETCCS:
     if (trySETCC(N))
       return;
     break;

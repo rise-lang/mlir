@@ -41,6 +41,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -233,9 +234,11 @@ class FunctionToLoopPassAdaptor
     : public PassInfoMixin<FunctionToLoopPassAdaptor<LoopPassT>> {
 public:
   explicit FunctionToLoopPassAdaptor(LoopPassT Pass, bool UseMemorySSA = false,
+                                     bool UseBlockFrequencyInfo = false,
                                      bool DebugLogging = false)
       : Pass(std::move(Pass)), LoopCanonicalizationFPM(DebugLogging),
-        UseMemorySSA(UseMemorySSA) {
+        UseMemorySSA(UseMemorySSA),
+        UseBlockFrequencyInfo(UseBlockFrequencyInfo) {
     LoopCanonicalizationFPM.addPass(LoopSimplifyPass());
     LoopCanonicalizationFPM.addPass(LCSSAPass());
   }
@@ -253,7 +256,7 @@ public:
     // canonicalization pipeline.
     if (PI.runBeforePass<Function>(LoopCanonicalizationFPM, F)) {
       PA = LoopCanonicalizationFPM.run(F, AM);
-      PI.runAfterPass<Function>(LoopCanonicalizationFPM, F);
+      PI.runAfterPass<Function>(LoopCanonicalizationFPM, F, PA);
     }
 
     // Get the loop structure for this function
@@ -267,6 +270,9 @@ public:
     MemorySSA *MSSA = UseMemorySSA
                           ? (&AM.getResult<MemorySSAAnalysis>(F).getMSSA())
                           : nullptr;
+    BlockFrequencyInfo *BFI = UseBlockFrequencyInfo && F.hasProfileData()
+                                  ? (&AM.getResult<BlockFrequencyAnalysis>(F))
+                                  : nullptr;
     LoopStandardAnalysisResults LAR = {AM.getResult<AAManager>(F),
                                        AM.getResult<AssumptionAnalysis>(F),
                                        AM.getResult<DominatorTreeAnalysis>(F),
@@ -274,6 +280,7 @@ public:
                                        AM.getResult<ScalarEvolutionAnalysis>(F),
                                        AM.getResult<TargetLibraryAnalysis>(F),
                                        AM.getResult<TargetIRAnalysis>(F),
+                                       BFI,
                                        MSSA};
 
     // Setup the loop analysis manager from its proxy. It is important that
@@ -337,9 +344,9 @@ public:
 
       // Do not pass deleted Loop into the instrumentation.
       if (Updater.skipCurrentLoop())
-        PI.runAfterPassInvalidated<Loop>(Pass);
+        PI.runAfterPassInvalidated<Loop>(Pass, PassPA);
       else
-        PI.runAfterPass<Loop>(Pass, *L);
+        PI.runAfterPass<Loop>(Pass, *L, PassPA);
 
       // FIXME: We should verify the set of analyses relevant to Loop passes
       // are preserved.
@@ -370,6 +377,8 @@ public:
     PA.preserve<DominatorTreeAnalysis>();
     PA.preserve<LoopAnalysis>();
     PA.preserve<ScalarEvolutionAnalysis>();
+    if (UseBlockFrequencyInfo && F.hasProfileData())
+      PA.preserve<BlockFrequencyAnalysis>();
     if (UseMemorySSA)
       PA.preserve<MemorySSAAnalysis>();
     // FIXME: What we really want to do here is preserve an AA category, but
@@ -389,6 +398,7 @@ private:
   FunctionPassManager LoopCanonicalizationFPM;
 
   bool UseMemorySSA = false;
+  bool UseBlockFrequencyInfo = false;
 };
 
 /// A function to deduce a loop pass type and wrap it in the templated
@@ -396,9 +406,10 @@ private:
 template <typename LoopPassT>
 FunctionToLoopPassAdaptor<LoopPassT>
 createFunctionToLoopPassAdaptor(LoopPassT Pass, bool UseMemorySSA = false,
+                                bool UseBlockFrequencyInfo = false,
                                 bool DebugLogging = false) {
-  return FunctionToLoopPassAdaptor<LoopPassT>(std::move(Pass), UseMemorySSA,
-                                              DebugLogging);
+  return FunctionToLoopPassAdaptor<LoopPassT>(
+      std::move(Pass), UseMemorySSA, UseBlockFrequencyInfo, DebugLogging);
 }
 
 /// Pass for printing a loop's contents as textual IR.

@@ -314,7 +314,8 @@ public:
   }
 
   unsigned getIntImmCostInst(unsigned Opcode, unsigned Idx, const APInt &Imm,
-                             Type *Ty, TTI::TargetCostKind CostKind) {
+                             Type *Ty, TTI::TargetCostKind CostKind,
+                             Instruction *Inst = nullptr) {
     return TTI::TCC_Free;
   }
 
@@ -448,12 +449,14 @@ public:
         // Identity and pointer-to-pointer casts are free.
         return 0;
       break;
-    case Instruction::Trunc:
+    case Instruction::Trunc: {
       // trunc to a native type is free (assuming the target has compare and
       // shift-right of the same width).
-      if (DL.isLegalInteger(DL.getTypeSizeInBits(Dst)))
+      TypeSize DstSize = DL.getTypeSizeInBits(Dst);
+      if (!DstSize.isScalable() && DL.isLegalInteger(DstSize.getFixedSize()))
         return 0;
       break;
+    }
     }
     return 1;
   }
@@ -655,6 +658,16 @@ public:
 
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              TTI::ReductionFlags Flags) const {
+    return false;
+  }
+
+  bool preferInLoopReduction(unsigned Opcode, Type *Ty,
+                             TTI::ReductionFlags Flags) const {
+    return false;
+  }
+
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       TTI::ReductionFlags Flags) const {
     return false;
   }
 

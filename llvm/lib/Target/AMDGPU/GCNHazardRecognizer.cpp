@@ -67,7 +67,14 @@ static bool isSGetReg(unsigned Opcode) {
 }
 
 static bool isSSetReg(unsigned Opcode) {
-  return Opcode == AMDGPU::S_SETREG_B32 || Opcode == AMDGPU::S_SETREG_IMM32_B32;
+  switch (Opcode) {
+  case AMDGPU::S_SETREG_B32:
+  case AMDGPU::S_SETREG_B32_mode:
+  case AMDGPU::S_SETREG_IMM32_B32:
+  case AMDGPU::S_SETREG_IMM32_B32_mode:
+    return true;
+  }
+  return false;
 }
 
 static bool isRWLane(unsigned Opcode) {
@@ -185,7 +192,9 @@ GCNHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   if (SIInstrInfo::isMAI(*MI) && checkMAIHazards(MI) > 0)
     return NoopHazard;
 
-  if (MI->mayLoadOrStore() && checkMAILdStHazards(MI) > 0)
+  if ((SIInstrInfo::isVMEM(*MI) ||
+       SIInstrInfo::isFLAT(*MI) ||
+       SIInstrInfo::isDS(*MI)) && checkMAILdStHazards(MI) > 0)
     return NoopHazard;
 
   if (MI->isInlineAsm() && checkInlineAsmHazards(MI) > 0)
@@ -288,7 +297,9 @@ unsigned GCNHazardRecognizer::PreEmitNoopsCommon(MachineInstr *MI) {
   if (SIInstrInfo::isMAI(*MI))
     return std::max(WaitStates, checkMAIHazards(MI));
 
-  if (MI->mayLoadOrStore())
+  if (SIInstrInfo::isVMEM(*MI) ||
+      SIInstrInfo::isFLAT(*MI) ||
+      SIInstrInfo::isDS(*MI))
     return std::max(WaitStates, checkMAILdStHazards(MI));
 
   return WaitStates;
@@ -364,7 +375,7 @@ static int getWaitStatesSince(GCNHazardRecognizer::IsHazardFn IsHazard,
     if (IsHazard(&*I))
       return WaitStates;
 
-    if (I->isInlineAsm() || I->isImplicitDef() || I->isDebugInstr())
+    if (I->isInlineAsm() || I->isMetaInstruction())
       continue;
 
     WaitStates += SIInstrInfo::getNumWaitStates(*I);

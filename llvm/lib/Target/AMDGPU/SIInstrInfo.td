@@ -173,18 +173,6 @@ class SDBufferAtomic<string opcode> : SDNode <opcode,
   [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
 >;
 
-class SDBufferAtomicNoRtn<string opcode> : SDNode <opcode,
-  SDTypeProfile<0, 8,
-      [SDTCisVT<1, v4i32>, // rsrc
-       SDTCisVT<2, i32>,   // vindex(VGPR)
-       SDTCisVT<3, i32>,   // voffset(VGPR)
-       SDTCisVT<4, i32>,   // soffset(SGPR)
-       SDTCisVT<5, i32>,   // offset(imm)
-       SDTCisVT<6, i32>,   // cachepolicy(imm)
-       SDTCisVT<7, i1>]>,  // idxen(imm)
-  [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
->;
-
 def SIbuffer_atomic_swap : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_SWAP">;
 def SIbuffer_atomic_add : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_ADD">;
 def SIbuffer_atomic_sub : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_SUB">;
@@ -198,7 +186,7 @@ def SIbuffer_atomic_xor : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_XOR">;
 def SIbuffer_atomic_inc : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_INC">;
 def SIbuffer_atomic_dec : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_DEC">;
 def SIbuffer_atomic_csub : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_CSUB">;
-def SIbuffer_atomic_fadd : SDBufferAtomicNoRtn <"AMDGPUISD::BUFFER_ATOMIC_FADD">;
+def SIbuffer_atomic_fadd : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_FADD">;
 
 def SIbuffer_atomic_cmpswap : SDNode <"AMDGPUISD::BUFFER_ATOMIC_CMPSWAP",
   SDTypeProfile<1, 9,
@@ -316,18 +304,6 @@ defm atomic_load_fmax_#as : binary_atomic_op<SIatomic_fmax, 0>;
 } // End let AddressSpaces = ...
 } // End foreach AddrSpace
 
-def atomic_fadd_global_noret_impl : PatFrag<
-  (ops node:$ptr, node:$value),
-  (atomic_load_fadd node:$ptr, node:$value)> {
-  // FIXME: Move this
-  let MemoryVT = f32;
-  let IsAtomic = 1;
-  let AddressSpaces = StoreAddress_global.AddrSpaces;
-}
-
-def atomic_fadd_global_noret : PatFrags<(ops node:$src0, node:$src1),
-  [(int_amdgcn_global_atomic_fadd node:$src0, node:$src1),
-   (atomic_fadd_global_noret_impl node:$src0, node:$src1)]>;
 
 //===----------------------------------------------------------------------===//
 // SDNodes PatFrags for loads/stores with a glue input.
@@ -433,16 +409,15 @@ def zextloadi16_local_m0 : PatFrag<(ops node:$ptr), (zextloadi16_glue node:$ptr)
 }
 
 def load_align8_local_m0 : PatFrag<(ops node:$ptr),
-                                   (load_local_m0 node:$ptr)> {
+                                   (load_local_m0 node:$ptr)>, Aligned<8> {
   let IsLoad = 1;
   let IsNonExtLoad = 1;
-  let MinAlignment = 8;
 }
+
 def load_align16_local_m0 : PatFrag<(ops node:$ptr),
-                                    (load_local_m0 node:$ptr)> {
+                                   (load_local_m0 node:$ptr)>, Aligned<16> {
   let IsLoad = 1;
   let IsNonExtLoad = 1;
-  let MinAlignment = 16;
 }
 
 } // End IsLoad = 1
@@ -518,20 +493,18 @@ def truncstorei16_local_m0 : PatFrag<(ops node:$val, node:$ptr),
 }
 }
 
-def store_align16_local_m0 : PatFrag <
-  (ops node:$value, node:$ptr),
-  (store_local_m0 node:$value, node:$ptr)> {
+def store_align8_local_m0 : PatFrag <(ops node:$value, node:$ptr),
+                                     (store_local_m0 node:$value, node:$ptr)>,
+                            Aligned<8> {
   let IsStore = 1;
   let IsTruncStore = 0;
-  let MinAlignment = 16;
 }
 
-def store_align8_local_m0 : PatFrag <
-  (ops node:$value, node:$ptr),
-  (store_local_m0 node:$value, node:$ptr)> {
+def store_align16_local_m0 : PatFrag <(ops node:$value, node:$ptr),
+                                     (store_local_m0 node:$value, node:$ptr)>,
+                            Aligned<16> {
   let IsStore = 1;
   let IsTruncStore = 0;
-  let MinAlignment = 8;
 }
 
 let AddressSpaces = StoreAddress_local.AddrSpaces in {
@@ -564,6 +537,48 @@ def si_setcc_uniform : PatFrag <
   }
   return true;
 }]>;
+
+//===----------------------------------------------------------------------===//
+// SDNodes PatFrags for a16 loads and stores with 3 components.
+// v3f16/v3i16 is widened to v4f16/v4i16, so we need to match on the memory
+// load/store size.
+//===----------------------------------------------------------------------===//
+
+class mubuf_intrinsic_load<SDPatternOperator name, ValueType vt> : PatFrag <
+  (ops node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$auxiliary, node:$idxen),
+  (name node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$auxiliary, node:$idxen)> {
+  let IsLoad = 1;
+  let MemoryVT = vt;
+}
+
+class mubuf_intrinsic_store<SDPatternOperator name, ValueType vt> : PatFrag <
+  (ops node:$vdata, node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$auxiliary, node:$idxen),
+  (name node:$vdata, node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$auxiliary, node:$idxen)> {
+  let IsStore = 1;
+  let MemoryVT = vt;
+}
+
+class mtbuf_intrinsic_load<SDPatternOperator name, ValueType vt> : PatFrag <
+  (ops node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$format, node:$auxiliary, node:$idxen),
+  (name node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$format, node:$auxiliary, node:$idxen)> {
+  let IsLoad = 1;
+  let MemoryVT = vt;
+}
+
+class mtbuf_intrinsic_store<SDPatternOperator name, ValueType vt> : PatFrag <
+  (ops node:$vdata, node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$format, node:$auxiliary, node:$idxen),
+  (name node:$vdata, node:$rsrc, node:$vindex, node:$voffset, node:$soffset, node:$offset,
+            node:$format, node:$auxiliary, node:$idxen)> {
+  let IsStore = 1;
+  let MemoryVT = vt;
+}
 
 //===----------------------------------------------------------------------===//
 // SDNodes PatFrags for d16 loads
@@ -1084,8 +1099,14 @@ def clampmod0 : NamedOperandBit_0<"ClampSI", NamedMatchClass<"ClampSI">>;
 def highmod : NamedOperandBit<"High", NamedMatchClass<"High">>;
 
 def DLC : NamedOperandBit<"DLC", NamedMatchClass<"DLC">>;
+def DLC_0 : NamedOperandBit_0<"DLC", NamedMatchClass<"DLC">>;
+
 def GLC : NamedOperandBit<"GLC", NamedMatchClass<"GLC">>;
+def GLC_0 : NamedOperandBit_0<"GLC", NamedMatchClass<"GLC">>;
+
 def SLC : NamedOperandBit<"SLC", NamedMatchClass<"SLC">>;
+def SLC_0 : NamedOperandBit_0<"SLC", NamedMatchClass<"SLC">>;
+
 def TFE : NamedOperandBit<"TFE", NamedMatchClass<"TFE">>;
 def SWZ : NamedOperandBit<"SWZ", NamedMatchClass<"SWZ">>;
 def UNorm : NamedOperandBit<"UNorm", NamedMatchClass<"UNorm">>;
@@ -1290,6 +1311,7 @@ def PackedI16InputMods : PackedIntInputMods<PackedI16InputModsMatchClass>;
 
 def DS1Addr1Offset : ComplexPattern<i32, 2, "SelectDS1Addr1Offset">;
 def DS64Bit4ByteAligned : ComplexPattern<i32, 3, "SelectDS64Bit4ByteAligned">;
+def DS128Bit8ByteAligned : ComplexPattern<i64, 3, "SelectDS128Bit8ByteAligned">;
 
 def MOVRELOffset : ComplexPattern<i32, 2, "SelectMOVRELOffset">;
 
@@ -1508,6 +1530,10 @@ class getVOPSrc0ForVT<ValueType VT> {
           )
        )
     );
+}
+
+class getSOPSrcForVT<ValueType VT> {
+  RegisterOperand ret = !if(!eq(VT.Size, 64), SSrc_b64, SSrc_b32);
 }
 
 // Returns the vreg register class to use for source operand given VT

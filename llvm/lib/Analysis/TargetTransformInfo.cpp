@@ -570,11 +570,11 @@ int TargetTransformInfo::getIntImmCost(const APInt &Imm, Type *Ty,
   return Cost;
 }
 
-int
-TargetTransformInfo::getIntImmCostInst(unsigned Opcode, unsigned Idx,
-                                       const APInt &Imm, Type *Ty,
-                                       TTI::TargetCostKind CostKind) const {
-  int Cost = TTIImpl->getIntImmCostInst(Opcode, Idx, Imm, Ty, CostKind);
+int TargetTransformInfo::getIntImmCostInst(unsigned Opcode, unsigned Idx,
+                                           const APInt &Imm, Type *Ty,
+                                           TTI::TargetCostKind CostKind,
+                                           Instruction *Inst) const {
+  int Cost = TTIImpl->getIntImmCostInst(Opcode, Idx, Imm, Ty, CostKind, Inst);
   assert(Cost >= 0 && "TTI should not produce negative costs!");
   return Cost;
 }
@@ -1011,6 +1011,16 @@ unsigned TargetTransformInfo::getStoreVectorFactor(unsigned VF,
 bool TargetTransformInfo::useReductionIntrinsic(unsigned Opcode, Type *Ty,
                                                 ReductionFlags Flags) const {
   return TTIImpl->useReductionIntrinsic(Opcode, Ty, Flags);
+}
+
+bool TargetTransformInfo::preferInLoopReduction(unsigned Opcode, Type *Ty,
+                                                ReductionFlags Flags) const {
+  return TTIImpl->preferInLoopReduction(Opcode, Ty, Flags);
+}
+
+bool TargetTransformInfo::preferPredicatedReductionSelect(
+    unsigned Opcode, Type *Ty, ReductionFlags Flags) const {
+  return TTIImpl->preferPredicatedReductionSelect(Opcode, Ty, Flags);
 }
 
 bool TargetTransformInfo::shouldExpandReduction(const IntrinsicInst *II) const {
