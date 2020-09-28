@@ -79,6 +79,18 @@ bool DWARFDebugLine::Prologue::hasFileAtIndex(uint64_t FileIndex) const {
   return FileIndex != 0 && FileIndex <= FileNames.size();
 }
 
+Optional<uint64_t> DWARFDebugLine::Prologue::getLastValidFileIndex() const {
+  if (FileNames.empty())
+    return None;
+  uint16_t DwarfVersion = getVersion();
+  assert(DwarfVersion != 0 &&
+         "line table prologue has no dwarf version information");
+  // In DWARF v5 the file names are 0-indexed.
+  if (DwarfVersion >= 5)
+    return FileNames.size() - 1;
+  return FileNames.size();
+}
+
 const llvm::DWARFDebugLine::FileNameEntry &
 DWARFDebugLine::Prologue::getFileNameEntry(uint64_t Index) const {
   uint16_t DwarfVersion = getVersion();
@@ -1406,25 +1418,20 @@ bool DWARFDebugLine::LineTable::getFileLineInfoForAddress(
 // Therefore, collect up handles on all the Units that point into the
 // line-table section.
 static DWARFDebugLine::SectionParser::LineToUnitMap
-buildLineToUnitMap(DWARFDebugLine::SectionParser::cu_range CUs,
-                   DWARFDebugLine::SectionParser::tu_range TUs) {
+buildLineToUnitMap(DWARFUnitVector::iterator_range Units) {
   DWARFDebugLine::SectionParser::LineToUnitMap LineToUnit;
-  for (const auto &CU : CUs)
-    if (auto CUDIE = CU->getUnitDIE())
+  for (const auto &U : Units)
+    if (auto CUDIE = U->getUnitDIE())
       if (auto StmtOffset = toSectionOffset(CUDIE.find(DW_AT_stmt_list)))
-        LineToUnit.insert(std::make_pair(*StmtOffset, &*CU));
-  for (const auto &TU : TUs)
-    if (auto TUDIE = TU->getUnitDIE())
-      if (auto StmtOffset = toSectionOffset(TUDIE.find(DW_AT_stmt_list)))
-        LineToUnit.insert(std::make_pair(*StmtOffset, &*TU));
+        LineToUnit.insert(std::make_pair(*StmtOffset, &*U));
   return LineToUnit;
 }
 
-DWARFDebugLine::SectionParser::SectionParser(DWARFDataExtractor &Data,
-                                             const DWARFContext &C,
-                                             cu_range CUs, tu_range TUs)
+DWARFDebugLine::SectionParser::SectionParser(
+    DWARFDataExtractor &Data, const DWARFContext &C,
+    DWARFUnitVector::iterator_range Units)
     : DebugLineData(Data), Context(C) {
-  LineToUnit = buildLineToUnitMap(CUs, TUs);
+  LineToUnit = buildLineToUnitMap(Units);
   if (!DebugLineData.isValidOffset(Offset))
     Done = true;
 }

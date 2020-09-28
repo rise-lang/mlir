@@ -1414,6 +1414,6 @@ void ConvertRiseToImperativePass::runOnFunction() {
 }
 
 std::unique_ptr<OperationPass<FuncOp>>
-mlir::rise::createConvertRiseToImperativePass() {
+mlir::createConvertRiseToImperativePass() {
   return std::make_unique<ConvertRiseToImperativePass>();
 }

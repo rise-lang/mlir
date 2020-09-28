@@ -40,6 +40,7 @@ public:
   Expected<Effect> apply(const Selection &Inputs) override;
   std::string title() const override { return "Swap if branches"; }
   Intent intent() const override { return Refactor; }
+  bool hidden() const override { return true; }
 
 private:
   const IfStmt *If = nullptr;
@@ -68,15 +69,11 @@ Expected<Tweak::Effect> SwapIfBranches::apply(const Selection &Inputs) {
   auto ThenRng = toHalfOpenFileRange(SrcMgr, Ctx.getLangOpts(),
                                      If->getThen()->getSourceRange());
   if (!ThenRng)
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Could not obtain range of the 'then' branch. Macros?");
+    return error("Could not obtain range of the 'then' branch. Macros?");
   auto ElseRng = toHalfOpenFileRange(SrcMgr, Ctx.getLangOpts(),
                                      If->getElse()->getSourceRange());
   if (!ElseRng)
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Could not obtain range of the 'else' branch. Macros?");
+    return error("Could not obtain range of the 'else' branch. Macros?");
 
   auto ThenCode = toSourceCode(SrcMgr, *ThenRng);
   auto ElseCode = toSourceCode(SrcMgr, *ElseRng);

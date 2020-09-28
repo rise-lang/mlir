@@ -64,11 +64,14 @@ struct BlockMergeInfo {
   Block *mergeBlock;
   Block *continueBlock; // nullptr for spv.selection
   Location loc;
+  uint32_t control;
 
-  BlockMergeInfo(Location location)
-      : mergeBlock(nullptr), continueBlock(nullptr), loc(location) {}
-  BlockMergeInfo(Location location, Block *m, Block *c = nullptr)
-      : mergeBlock(m), continueBlock(c), loc(location) {}
+  BlockMergeInfo(Location location, uint32_t control)
+      : mergeBlock(nullptr), continueBlock(nullptr), loc(location),
+        control(control) {}
+  BlockMergeInfo(Location location, uint32_t control, Block *m,
+                 Block *c = nullptr)
+      : mergeBlock(m), continueBlock(c), loc(location), control(control) {}
 };
 
 /// A struct for containing OpLine instruction information.
@@ -103,7 +106,7 @@ public:
   LogicalResult deserialize();
 
   /// Collects the final SPIR-V ModuleOp.
-  Optional<spirv::ModuleOp> collect();
+  spirv::OwningSPIRVModuleRef collect();
 
 private:
   //===--------------------------------------------------------------------===//
@@ -111,7 +114,7 @@ private:
   //===--------------------------------------------------------------------===//
 
   /// Initializes the `module` ModuleOp in this deserializer instance.
-  spirv::ModuleOp createModuleOp();
+  spirv::OwningSPIRVModuleRef createModuleOp();
 
   /// Processes SPIR-V module header in `binary`.
   LogicalResult processHeader();
@@ -425,7 +428,7 @@ private:
   Location unknownLoc;
 
   /// The SPIR-V ModuleOp.
-  Optional<spirv::ModuleOp> module;
+  spirv::OwningSPIRVModuleRef module;
 
   /// The current function under construction.
   Optional<spirv::FuncOp> curFunction;
@@ -556,13 +559,15 @@ LogicalResult Deserializer::deserialize() {
   return success();
 }
 
-Optional<spirv::ModuleOp> Deserializer::collect() { return module; }
+spirv::OwningSPIRVModuleRef Deserializer::collect() {
+  return std::move(module);
+}
 
 //===----------------------------------------------------------------------===//
 // Module structure
 //===----------------------------------------------------------------------===//
 
-spirv::ModuleOp Deserializer::createModuleOp() {
+spirv::OwningSPIRVModuleRef Deserializer::createModuleOp() {
   OpBuilder builder(context);
   OperationState state(unknownLoc, spirv::ModuleOp::getOperationName());
   spirv::ModuleOp::build(builder, state);
@@ -1679,16 +1684,12 @@ LogicalResult Deserializer::processSelectionMerge(ArrayRef<uint32_t> operands) {
         "OpSelectionMerge must specify merge target and selection control");
   }
 
-  if (static_cast<uint32_t>(spirv::SelectionControl::None) != operands[1]) {
-    return emitError(unknownLoc,
-                     "unimplmented OpSelectionMerge selection control: ")
-           << operands[2];
-  }
-
   auto *mergeBlock = getOrCreateBlock(operands[0]);
   auto loc = createFileLineColLoc(opBuilder);
+  auto selectionControl = operands[1];
 
-  if (!blockMergeInfo.try_emplace(curBlock, loc, mergeBlock).second) {
+  if (!blockMergeInfo.try_emplace(curBlock, loc, selectionControl, mergeBlock)
+           .second) {
     return emitError(
         unknownLoc,
         "a block cannot have more than one OpSelectionMerge instruction");
@@ -1707,16 +1708,13 @@ LogicalResult Deserializer::processLoopMerge(ArrayRef<uint32_t> operands) {
                                  "continue target and loop control");
   }
 
-  if (static_cast<uint32_t>(spirv::LoopControl::None) != operands[2]) {
-    return emitError(unknownLoc, "unimplmented OpLoopMerge loop control: ")
-           << operands[2];
-  }
-
   auto *mergeBlock = getOrCreateBlock(operands[0]);
   auto *continueBlock = getOrCreateBlock(operands[1]);
   auto loc = createFileLineColLoc(opBuilder);
+  uint32_t loopControl = operands[2];
 
-  if (!blockMergeInfo.try_emplace(curBlock, loc, mergeBlock, continueBlock)
+  if (!blockMergeInfo
+           .try_emplace(curBlock, loc, loopControl, mergeBlock, continueBlock)
            .second) {
     return emitError(
         unknownLoc,
@@ -1769,25 +1767,27 @@ public:
   /// the `headerBlock` will be redirected to the `mergeBlock`.
   /// This method will also update `mergeInfo` by remapping all blocks inside to
   /// the newly cloned ones inside structured control flow op's regions.
-  static LogicalResult structurize(Location loc, BlockMergeInfoMap &mergeInfo,
+  static LogicalResult structurize(Location loc, uint32_t control,
+                                   BlockMergeInfoMap &mergeInfo,
                                    Block *headerBlock, Block *mergeBlock,
                                    Block *continueBlock) {
-    return ControlFlowStructurizer(loc, mergeInfo, headerBlock, mergeBlock,
-                                   continueBlock)
+    return ControlFlowStructurizer(loc, control, mergeInfo, headerBlock,
+                                   mergeBlock, continueBlock)
         .structurizeImpl();
   }
 
 private:
-  ControlFlowStructurizer(Location loc, BlockMergeInfoMap &mergeInfo,
-                          Block *header, Block *merge, Block *cont)
-      : location(loc), blockMergeInfo(mergeInfo), headerBlock(header),
-        mergeBlock(merge), continueBlock(cont) {}
+  ControlFlowStructurizer(Location loc, uint32_t control,
+                          BlockMergeInfoMap &mergeInfo, Block *header,
+                          Block *merge, Block *cont)
+      : location(loc), control(control), blockMergeInfo(mergeInfo),
+        headerBlock(header), mergeBlock(merge), continueBlock(cont) {}
 
   /// Creates a new spv.selection op at the beginning of the `mergeBlock`.
-  spirv::SelectionOp createSelectionOp();
+  spirv::SelectionOp createSelectionOp(uint32_t selectionControl);
 
   /// Creates a new spv.loop op at the beginning of the `mergeBlock`.
-  spirv::LoopOp createLoopOp();
+  spirv::LoopOp createLoopOp(uint32_t loopControl);
 
   /// Collects all blocks reachable from `headerBlock` except `mergeBlock`.
   void collectBlocksInConstruct();
@@ -1795,6 +1795,7 @@ private:
   LogicalResult structurizeImpl();
 
   Location location;
+  uint32_t control;
 
   BlockMergeInfoMap &blockMergeInfo;
 
@@ -1806,26 +1807,26 @@ private:
 };
 } // namespace
 
-spirv::SelectionOp ControlFlowStructurizer::createSelectionOp() {
+spirv::SelectionOp
+ControlFlowStructurizer::createSelectionOp(uint32_t selectionControl) {
   // Create a builder and set the insertion point to the beginning of the
   // merge block so that the newly created SelectionOp will be inserted there.
   OpBuilder builder(&mergeBlock->front());
 
-  auto control = builder.getI32IntegerAttr(
-      static_cast<uint32_t>(spirv::SelectionControl::None));
+  auto control = builder.getI32IntegerAttr(selectionControl);
   auto selectionOp = builder.create<spirv::SelectionOp>(location, control);
   selectionOp.addMergeBlock();
 
   return selectionOp;
 }
 
-spirv::LoopOp ControlFlowStructurizer::createLoopOp() {
+spirv::LoopOp ControlFlowStructurizer::createLoopOp(uint32_t loopControl) {
   // Create a builder and set the insertion point to the beginning of the
   // merge block so that the newly created LoopOp will be inserted there.
   OpBuilder builder(&mergeBlock->front());
 
-  // TODO: handle loop control properly
-  auto loopOp = builder.create<spirv::LoopOp>(location);
+  auto control = builder.getI32IntegerAttr(loopControl);
+  auto loopOp = builder.create<spirv::LoopOp>(location, control);
   loopOp.addEntryAndMergeBlock();
 
   return loopOp;
@@ -1850,10 +1851,10 @@ LogicalResult ControlFlowStructurizer::structurizeImpl() {
   Operation *op = nullptr;
   bool isLoop = continueBlock != nullptr;
   if (isLoop) {
-    if (auto loopOp = createLoopOp())
+    if (auto loopOp = createLoopOp(control))
       op = loopOp.getOperation();
   } else {
-    if (auto selectionOp = createSelectionOp())
+    if (auto selectionOp = createSelectionOp(control))
       op = selectionOp.getOperation();
   }
   if (!op)
@@ -1912,10 +1913,10 @@ LogicalResult ControlFlowStructurizer::structurizeImpl() {
   // Go through all ops and remap the operands.
   auto remapOperands = [&](Operation *op) {
     for (auto &operand : op->getOpOperands())
-      if (auto mappedOp = mapper.lookupOrNull(operand.get()))
+      if (Value mappedOp = mapper.lookupOrNull(operand.get()))
         operand.set(mappedOp);
     for (auto &succOp : op->getBlockOperands())
-      if (auto mappedOp = mapper.lookupOrNull(succOp.get()))
+      if (Block *mappedOp = mapper.lookupOrNull(succOp.get()))
         succOp.set(mappedOp);
   };
   for (auto &block : body) {
@@ -1990,7 +1991,8 @@ LogicalResult ControlFlowStructurizer::structurizeImpl() {
       // The iterator should be erased before adding a new entry into
       // blockMergeInfo to avoid iterator invalidation.
       blockMergeInfo.erase(it);
-      blockMergeInfo.try_emplace(newHeader, loc, newMerge, newContinue);
+      blockMergeInfo.try_emplace(newHeader, loc, it->second.control, newMerge,
+                                 newContinue);
     }
 
     // The structured selection/loop's entry block does not have arguments.
@@ -2094,9 +2096,9 @@ LogicalResult Deserializer::structurizeControlFlow() {
     // Erase this case before calling into structurizer, who will update
     // blockMergeInfo.
     blockMergeInfo.erase(blockMergeInfo.begin());
-    if (failed(ControlFlowStructurizer::structurize(mergeInfo.loc,
-                                                    blockMergeInfo, headerBlock,
-                                                    mergeBlock, continueBlock)))
+    if (failed(ControlFlowStructurizer::structurize(
+            mergeInfo.loc, mergeInfo.control, blockMergeInfo, headerBlock,
+            mergeBlock, continueBlock)))
       return failure();
   }
 
@@ -2354,7 +2356,7 @@ Deserializer::processOp<spirv::EntryPointOp>(ArrayRef<uint32_t> words) {
     return emitError(unknownLoc,
                      "missing Execution Model specification in OpEntryPoint");
   }
-  auto exec_model = opBuilder.getI32IntegerAttr(words[wordIndex++]);
+  auto execModel = opBuilder.getI32IntegerAttr(words[wordIndex++]);
   if (wordIndex >= words.size()) {
     return emitError(unknownLoc, "missing <id> in OpEntryPoint");
   }
@@ -2382,7 +2384,7 @@ Deserializer::processOp<spirv::EntryPointOp>(ArrayRef<uint32_t> words) {
     interface.push_back(opBuilder.getSymbolRefAttr(arg.getOperation()));
     wordIndex++;
   }
-  opBuilder.create<spirv::EntryPointOp>(unknownLoc, exec_model,
+  opBuilder.create<spirv::EntryPointOp>(unknownLoc, execModel,
                                         opBuilder.getSymbolRefAttr(fnName),
                                         opBuilder.getArrayAttr(interface));
   return success();
@@ -2594,5 +2596,5 @@ spirv::OwningSPIRVModuleRef spirv::deserialize(ArrayRef<uint32_t> binary,
   if (failed(deserializer.deserialize()))
     return nullptr;
 
-  return deserializer.collect().getValueOr(nullptr);
+  return deserializer.collect();
 }

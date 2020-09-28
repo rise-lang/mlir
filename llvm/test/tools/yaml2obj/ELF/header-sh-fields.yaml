@@ -16,10 +16,9 @@
 
 --- !ELF
 FileHeader:
-  Class:   ELFCLASS64
-  Data:    ELFDATA2LSB
-  Type:    ET_REL
-  Machine: EM_X86_64
+  Class: ELFCLASS64
+  Data:  ELFDATA2LSB
+  Type:  ET_REL
 ProgramHeaders:
   - Type:     PT_LOAD
     Sections: []
@@ -33,14 +32,13 @@ ProgramHeaders:
 
 --- !ELF
 FileHeader:
-  Class:     ELFCLASS64
-  Data:      ELFDATA2LSB
-  Type:      ET_REL
-  Machine:   EM_X86_64
-  SHEntSize:  [[SHENTSIZE=64]]
-  SHOff:      [[SHOFF=200]]
-  SHNum:      [[SHNUM=3]]
-  SHStrNdx:   [[SHSTRNDX=2]]
+  Class:      ELFCLASS64
+  Data:       ELFDATA2LSB
+  Type:       ET_REL
+  EShEntSize: [[SHENTSIZE=64]]
+  EShOff:     [[SHOFF=200]]
+  EShNum:     [[SHNUM=3]]
+  EShStrNdx:  [[SHSTRNDX=2]]
   EPhOff:     [[PHOFF=64]]
   EPhEntSize: [[PHENTSIZE=56]]
   EPhNum:     [[PHNUM=2]]

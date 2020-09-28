@@ -24,6 +24,8 @@
 #include "mlir/Dialect/Rise/variant.hpp"
 
 namespace mlir {
+std::unique_ptr<OperationPass<FuncOp>> createConvertRiseToImperativePass();
+
 namespace rise {
 
 using OutputPathType = mpark::variant<int, Value>;

@@ -52,17 +52,19 @@ using namespace mlir::edsc;
 using namespace mlir::edsc::intrinsics;
 
 static MLIRContext &globalContext() {
-  static bool init_once = []() {
-    registerDialect<AffineDialect>();
-    registerDialect<linalg::LinalgDialect>();
-    registerDialect<scf::SCFDialect>();
-    registerDialect<StandardOpsDialect>();
-    registerDialect<vector::VectorDialect>();
-    registerDialect<RiseDialect>();
+  static thread_local MLIRContext context(/*loadAllDialects=*/false);
+  static thread_local bool initOnce = [&]() {
+    // clang-format off
+    context.loadDialect<AffineDialect,
+        scf::SCFDialect,
+        linalg::LinalgDialect,
+        StandardOpsDialect,
+        vector::VectorDialect,
+        rise::RiseDialect>();
+    // clang-format on
     return true;
   }();
-  (void)init_once;
-  static thread_local MLIRContext context;
+  (void)initOnce;
   context.allowUnregisteredDialects();
   return context;
 }
@@ -239,48 +241,48 @@ TEST_FUNC(test_conv2) {
   testFun.erase();
 }
 
-TEST_FUNC(test_conv2_separable) {
-  int64_t width = 9;
-  int64_t height = 9;
-  int64_t kernelSize = 3;
-  auto f32Type = FloatType::getF32(&globalContext());
-
-  auto f = makeFunction("conv2DSeparable", {},
-                        {MemRefType::get({height, width}, f32Type, {}, 0),
-                         MemRefType::get({kernelSize}, f32Type, {}, 0),
-                         MemRefType::get({kernelSize}, f32Type, {}, 0),
-                         MemRefType::get({height, width}, f32Type, {}, 0)});
-
-  OpBuilder builder(f.getBody());
-  ScopedContext scope(builder, f.getLoc());
-
-  Value A = f.getArgument(0);
-  Value kernelH = f.getArgument(1);
-  Value kernelV = f.getArgument(2);
-  Value output = f.getArgument(3);
-
-  makeRiseProgram(output, A, kernelH,
-                  kernelV)([](Value A, Value kernelH, Value kernelV) {
-    return conv2DSeparated(A, kernelH, kernelV, 1, 1, 1, 1);
-  });
-
-  std_ret();
-
-  // generate test
-  auto testFun = makeFunction("conv2DSeparable_test", {}, {});
-  OpBuilder test_builder(testFun.getBody());
-  ScopedContext test_scope(test_builder, testFun.getLoc());
-
-  makeRiseTest(f, {height, width}, getFilledMemRef({height, width}),
-               getFilledMemRef({3}, 1.0f), getFilledMemRef({3}, 1.0f));
-
-  std_ret();
-
-  f.print(llvm::outs());
-  testFun.print(llvm::outs());
-  f.erase();
-  testFun.erase();
-}
+//TEST_FUNC(test_conv2_separable) {
+//  int64_t width = 9;
+//  int64_t height = 9;
+//  int64_t kernelSize = 3;
+//  auto f32Type = FloatType::getF32(&globalContext());
+//
+//  auto f = makeFunction("conv2DSeparable", {},
+//                        {MemRefType::get({height, width}, f32Type, {}, 0),
+//                         MemRefType::get({kernelSize}, f32Type, {}, 0),
+//                         MemRefType::get({kernelSize}, f32Type, {}, 0),
+//                         MemRefType::get({height, width}, f32Type, {}, 0)});
+//
+//  OpBuilder builder(f.getBody());
+//  ScopedContext scope(builder, f.getLoc());
+//
+//  Value A = f.getArgument(0);
+//  Value kernelH = f.getArgument(1);
+//  Value kernelV = f.getArgument(2);
+//  Value output = f.getArgument(3);
+//
+//  makeRiseProgram(output, A, kernelH,
+//                  kernelV)([](Value A, Value kernelH, Value kernelV) {
+//    return conv2DSeparated(A, kernelH, kernelV, 1, 1, 1, 1);
+//  });
+//
+//  std_ret();
+//
+//  // generate test
+//  auto testFun = makeFunction("conv2DSeparable_test", {}, {});
+//  OpBuilder test_builder(testFun.getBody());
+//  ScopedContext test_scope(test_builder, testFun.getLoc());
+//
+//  makeRiseTest(f, {height, width}, getFilledMemRef({height, width}),
+//               getFilledMemRef({3}, 1.0f), getFilledMemRef({3}, 1.0f));
+//
+//  std_ret();
+//
+//  f.print(llvm::outs());
+//  testFun.print(llvm::outs());
+//  f.erase();
+//  testFun.erase();
+//}
 
 //
 // TEST_FUNC(test_conv_tf) {

@@ -1,3 +1,4 @@
+add_subdirectory(CAPI)
 add_subdirectory(EDSC)
 add_subdirectory(mlir-cpu-runner)
 add_subdirectory(SDBM)
@@ -40,6 +41,7 @@ configure_lit_site_cfg(
 set(MLIR_TEST_DEPENDS
   FileCheck count not
   MLIRUnitTests
+  mlir-capi-ir-test
   mlir-cpu-runner
   mlir-edsc-builder-api-test
   mlir-linalg-ods-gen
@@ -97,5 +99,5 @@ add_lit_testsuite(check-mlir "Running the MLIR regression tests"
 set_target_properties(check-mlir PROPERTIES FOLDER "Tests")
 
 add_lit_testsuites(MLIR ${CMAKE_CURRENT_SOURCE_DIR}
-  DEPENDS ${MLIR_TEST_DEPS}
+  DEPENDS ${MLIR_TEST_DEPENDS}
 )

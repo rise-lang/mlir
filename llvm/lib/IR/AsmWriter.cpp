@@ -656,9 +656,9 @@ void TypePrinting::print(Type *Ty, raw_ostream &OS) {
     VectorType *PTy = cast<VectorType>(Ty);
     ElementCount EC = PTy->getElementCount();
     OS << "<";
-    if (EC.Scalable)
+    if (EC.isScalable())
       OS << "vscale x ";
-    OS << EC.Min << " x ";
+    OS << EC.getKnownMinValue() << " x ";
     print(PTy->getElementType(), OS);
     OS << '>';
     return;
@@ -1511,7 +1511,7 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
   }
 
   if (isa<ConstantVector>(CV) || isa<ConstantDataVector>(CV)) {
-    auto *CVVTy = cast<VectorType>(CV->getType());
+    auto *CVVTy = cast<FixedVectorType>(CV->getType());
     Type *ETy = CVVTy->getElementType();
     Out << '<';
     TypePrinter.print(ETy, Out);
@@ -1916,6 +1916,23 @@ static void writeDIBasicType(raw_ostream &Out, const DIBasicType *N,
   Out << ")";
 }
 
+static void writeDIStringType(raw_ostream &Out, const DIStringType *N,
+                              TypePrinting *TypePrinter, SlotTracker *Machine,
+                              const Module *Context) {
+  Out << "!DIStringType(";
+  MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
+  if (N->getTag() != dwarf::DW_TAG_string_type)
+    Printer.printTag(N);
+  Printer.printString("name", N->getName());
+  Printer.printMetadata("stringLength", N->getRawStringLength());
+  Printer.printMetadata("stringLengthExpression", N->getRawStringLengthExp());
+  Printer.printInt("size", N->getSizeInBits());
+  Printer.printInt("align", N->getAlignInBits());
+  Printer.printDwarfEnum("encoding", N->getEncoding(),
+                         dwarf::AttributeEncodingString);
+  Out << ")";
+}
+
 static void writeDIDerivedType(raw_ostream &Out, const DIDerivedType *N,
                                TypePrinting *TypePrinter, SlotTracker *Machine,
                                const Module *Context) {
@@ -1962,6 +1979,8 @@ static void writeDICompositeType(raw_ostream &Out, const DICompositeType *N,
   Printer.printString("identifier", N->getIdentifier());
   Printer.printMetadata("discriminator", N->getRawDiscriminator());
   Printer.printMetadata("dataLocation", N->getRawDataLocation());
+  Printer.printMetadata("associated", N->getRawAssociated());
+  Printer.printMetadata("allocated", N->getRawAllocated());
   Out << ")";
 }
 
@@ -2861,6 +2880,8 @@ static const char *getWholeProgDevirtResByArgKindName(
 
 static const char *getTTResKindName(TypeTestResolution::Kind K) {
   switch (K) {
+  case TypeTestResolution::Unknown:
+    return "unknown";
   case TypeTestResolution::Unsat:
     return "unsat";
   case TypeTestResolution::ByteArray:
@@ -3085,7 +3106,7 @@ void AssemblyWriter::printFunctionSummary(const FunctionSummary *FS) {
     printTypeIdInfo(*TIdInfo);
 
   auto PrintRange = [&](const ConstantRange &Range) {
-    Out << "[" << Range.getLower() << ", " << Range.getSignedMax() << "]";
+    Out << "[" << Range.getSignedMin() << ", " << Range.getSignedMax() << "]";
   };
 
   if (!FS->paramAccesses().empty()) {
@@ -3101,7 +3122,7 @@ void AssemblyWriter::printFunctionSummary(const FunctionSummary *FS) {
         FieldSeparator IFS;
         for (auto &Call : PS.Calls) {
           Out << IFS;
-          Out << "(callee: ^" << Machine.getGUIDSlot(Call.Callee);
+          Out << "(callee: ^" << Machine.getGUIDSlot(Call.Callee.getGUID());
           Out << ", param: " << Call.ParamNo;
           Out << ", offset: ";
           PrintRange(Call.Offsets);
@@ -4267,11 +4288,14 @@ void AssemblyWriter::writeAttribute(const Attribute &Attr, bool InAttrGroup) {
   }
 
   assert((Attr.hasAttribute(Attribute::ByVal) ||
+          Attr.hasAttribute(Attribute::ByRef) ||
           Attr.hasAttribute(Attribute::Preallocated)) &&
          "unexpected type attr");
 
   if (Attr.hasAttribute(Attribute::ByVal)) {
     Out << "byval";
+  } else if (Attr.hasAttribute(Attribute::ByRef)) {
+    Out << "byref";
   } else {
     Out << "preallocated";
   }

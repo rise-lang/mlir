@@ -17,6 +17,7 @@
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Interpreter/OptionGroupPythonClassWithDict.h"
 #include "lldb/Interpreter/OptionValueBoolean.h"
+#include "lldb/Interpreter/OptionValueFileColonLine.h"
 #include "lldb/Interpreter/OptionValueString.h"
 #include "lldb/Interpreter/OptionValueUInt64.h"
 #include "lldb/Interpreter/Options.h"
@@ -443,7 +444,22 @@ public:
       case 'X':
         m_source_regex_func_names.insert(std::string(option_arg));
         break;
-
+        
+      case 'y':
+      {
+        OptionValueFileColonLine value;
+        Status fcl_err = value.SetValueFromString(option_arg);
+        if (!fcl_err.Success()) {
+          error.SetErrorStringWithFormat(
+              "Invalid value for file:line specifier: %s",
+              fcl_err.AsCString());
+        } else {
+          m_filenames.AppendIfUnique(value.GetFileSpec());
+          m_line_num = value.GetLineNumber();
+          m_column = value.GetColumnNumber();
+        }
+      } break;
+      
       default:
         llvm_unreachable("Unimplemented option");
       }
@@ -2081,7 +2097,79 @@ public:
       return llvm::makeArrayRef(g_breakpoint_read_options);
     }
 
-    // Instance variables to hold the values for command options.
+    void HandleOptionArgumentCompletion(
+        CompletionRequest &request, OptionElementVector &opt_element_vector,
+        int opt_element_index, CommandInterpreter &interpreter) override {
+      int opt_arg_pos = opt_element_vector[opt_element_index].opt_arg_pos;
+      int opt_defs_index = opt_element_vector[opt_element_index].opt_defs_index;
+
+      switch (GetDefinitions()[opt_defs_index].short_option) {
+      case 'f':
+        CommandCompletions::InvokeCommonCompletionCallbacks(
+            interpreter, CommandCompletions::eDiskFileCompletion, request,
+            nullptr);
+        break;
+
+      case 'N':
+        llvm::Optional<FileSpec> file_spec;
+        const llvm::StringRef dash_f("-f");
+        for (int arg_idx = 0; arg_idx < opt_arg_pos; arg_idx++) {
+          if (dash_f == request.GetParsedLine().GetArgumentAtIndex(arg_idx)) {
+            file_spec.emplace(
+                request.GetParsedLine().GetArgumentAtIndex(arg_idx + 1));
+            break;
+          }
+        }
+        if (!file_spec)
+          return;
+
+        FileSystem::Instance().Resolve(*file_spec);
+        Status error;
+        StructuredData::ObjectSP input_data_sp =
+            StructuredData::ParseJSONFromFile(*file_spec, error);
+        if (!error.Success())
+          return;
+
+        StructuredData::Array *bkpt_array = input_data_sp->GetAsArray();
+        if (!bkpt_array)
+          return;
+
+        const size_t num_bkpts = bkpt_array->GetSize();
+        for (size_t i = 0; i < num_bkpts; i++) {
+          StructuredData::ObjectSP bkpt_object_sp =
+              bkpt_array->GetItemAtIndex(i);
+          if (!bkpt_object_sp)
+            return;
+
+          StructuredData::Dictionary *bkpt_dict =
+              bkpt_object_sp->GetAsDictionary();
+          if (!bkpt_dict)
+            return;
+
+          StructuredData::ObjectSP bkpt_data_sp =
+              bkpt_dict->GetValueForKey(Breakpoint::GetSerializationKey());
+          if (!bkpt_data_sp)
+            return;
+
+          bkpt_dict = bkpt_data_sp->GetAsDictionary();
+          if (!bkpt_dict)
+            return;
+
+          StructuredData::Array *names_array;
+
+          if (!bkpt_dict->GetValueForKeyAsArray("Names", names_array))
+            return;
+
+          size_t num_names = names_array->GetSize();
+
+          for (size_t i = 0; i < num_names; i++) {
+            llvm::StringRef name;
+            if (names_array->GetItemAtIndexAsString(i, name))
+              request.TryCompleteCurrentArg(name);
+          }
+        }
+      }
+    }
 
     std::string m_filename;
     std::vector<std::string> m_names;

@@ -11,6 +11,7 @@
 #include "InputChunks.h"
 #include "InputEvent.h"
 #include "InputGlobal.h"
+#include "MapFile.h"
 #include "OutputSections.h"
 #include "OutputSegment.h"
 #include "Relocations.h"
@@ -304,7 +305,8 @@ void Writer::layoutMemory() {
   if (WasmSym::heapBase)
     WasmSym::heapBase->setVirtualAddress(memoryPtr);
 
-  uint64_t maxMemorySetting = 1ULL << (config->is64 ? 48 : 32);
+  uint64_t maxMemorySetting = 1ULL
+                              << (config->is64.getValueOr(false) ? 48 : 32);
 
   if (config->initialMemory != 0) {
     if (config->initialMemory != alignTo(config->initialMemory, WasmPageSize))
@@ -353,8 +355,8 @@ static void addStartStopSymbols(const OutputSegment *seg) {
   if (!isValidCIdentifier(name))
     return;
   LLVM_DEBUG(dbgs() << "addStartStopSymbols: " << name << "\n");
-  uint32_t start = seg->startVA;
-  uint32_t stop = start + seg->size;
+  uint64_t start = seg->startVA;
+  uint64_t stop = start + seg->size;
   symtab->addOptionalDataSymbol(saver.save("__start_" + name), start);
   symtab->addOptionalDataSymbol(saver.save("__stop_" + name), stop);
 }
@@ -459,6 +461,25 @@ void Writer::populateTargetFeatures() {
 
   if (!config->checkFeatures)
     return;
+
+  if (!config->relocatable && used.count("mutable-globals") == 0) {
+    for (const Symbol *sym : out.importSec->importedSymbols) {
+      if (auto *global = dyn_cast<GlobalSymbol>(sym)) {
+        if (global->getGlobalType()->Mutable) {
+          error(Twine("mutable global imported but 'mutable-globals' feature "
+                      "not present in inputs: `") +
+                toString(*sym) + "`. Use --no-check-features to suppress.");
+        }
+      }
+    }
+    for (const Symbol *sym : out.exportSec->exportedSymbols) {
+      if (isa<GlobalSymbol>(sym)) {
+        error(Twine("mutable global exported but 'mutable-globals' feature "
+                    "not present in inputs: `") +
+              toString(*sym) + "`. Use --no-check-features to suppress.");
+      }
+    }
+  }
 
   if (config->sharedMemory) {
     if (disallowed.count("shared-mem"))
@@ -578,6 +599,7 @@ void Writer::calculateExports() {
 
     LLVM_DEBUG(dbgs() << "Export: " << name << "\n");
     out.exportSec->exports.push_back(export_);
+    out.exportSec->exportedSymbols.push_back(sym);
   }
 }
 
@@ -837,7 +859,12 @@ void Writer::createInitMemoryFunction() {
       for (const OutputSegment *s : segments) {
         if (needsPassiveInitialization(s)) {
           // destination address
-          writeI32Const(os, s->startVA, "destination address");
+          if (config->is64.getValueOr(false)) {
+            writeI64Const(os, s->startVA, "destination address");
+          } else {
+            writeI32Const(os, static_cast<int32_t>(s->startVA),
+                          "destination address");
+          }
           // source segment offset
           writeI32Const(os, 0, "segment offset");
           // memory region size
@@ -959,6 +986,7 @@ void Writer::createInitTLSFunction() {
       writeU8(os, WASM_OPCODE_GLOBAL_SET, "global.set");
       writeUleb128(os, WasmSym::tlsBase->getGlobalIndex(), "global index");
 
+      // FIXME(wvo): this local needs to be I64 in wasm64, or we need an extend op.
       writeU8(os, WASM_OPCODE_LOCAL_GET, "local.get");
       writeUleb128(os, 0, "local index");
 
@@ -1044,8 +1072,6 @@ void Writer::run() {
   createSyntheticSections();
   log("-- populateProducers");
   populateProducers();
-  log("-- populateTargetFeatures");
-  populateTargetFeatures();
   log("-- calculateImports");
   calculateImports();
   log("-- layoutMemory");
@@ -1088,6 +1114,8 @@ void Writer::run() {
   calculateCustomSections();
   log("-- populateSymtab");
   populateSymtab();
+  log("-- populateTargetFeatures");
+  populateTargetFeatures();
   log("-- addSections");
   addSections();
 
@@ -1106,6 +1134,9 @@ void Writer::run() {
   createHeader();
   log("-- finalizeSections");
   finalizeSections();
+
+  log("-- writeMapFile");
+  writeMapFile(outputSections);
 
   log("-- openFile");
   openFile();

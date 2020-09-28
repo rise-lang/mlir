@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Annotations.h"
+#include "Config.h"
 #include "SourceCode.h"
 #include "TestFS.h"
 #include "TestTU.h"
@@ -605,6 +606,9 @@ TEST_F(ExtractFunctionTest, FunctionTest) {
   EXPECT_THAT(apply(" if(true) [[{ return; }]] "), HasSubstr("extracted"));
   // Don't extract uncertain return
   EXPECT_THAT(apply(" if(true) [[if (false) return;]] "), StartsWith("fail"));
+
+  FileName = "a.c";
+  EXPECT_THAT(apply(" for([[int i = 0;]];);"), HasSubstr("unavailable"));
 }
 
 TEST_F(ExtractFunctionTest, FileTest) {
@@ -1092,6 +1096,11 @@ TEST_F(DefineInlineTest, TemplateSpec) {
 
     template<> void f^oo<int>() {
       bar();
+    })cpp");
+  EXPECT_UNAVAILABLE(R"cpp(
+    namespace bar {
+      template <typename T> void f^oo() {}
+      template void foo<int>();
     })cpp");
 }
 
@@ -2003,6 +2012,13 @@ TEST_F(DefineOutlineTest, TriggersOnFunctionDecl) {
   EXPECT_UNAVAILABLE(R"cpp(
     template <typename> struct Foo { void fo^o(){} };
     )cpp");
+
+  // Not available on function templates and specializations, as definition must
+  // be visible to all translation units.
+  EXPECT_UNAVAILABLE(R"cpp(
+    template <typename> void fo^o() {};
+    template <> void fo^o<int>() {};
+  )cpp");
 }
 
 TEST_F(DefineOutlineTest, FailsWithoutSource) {
@@ -2031,27 +2047,6 @@ TEST_F(DefineOutlineTest, ApplyTest) {
           "void fo^o() { return; }",
           "void foo() ;",
           "void foo() { return; }",
-      },
-      // Templated function.
-      {
-          "template <typename T> void fo^o(T, T x) { return; }",
-          "template <typename T> void foo(T, T x) ;",
-          "template <typename T> void foo(T, T x) { return; }",
-      },
-      {
-          "template <typename> void fo^o() { return; }",
-          "template <typename> void foo() ;",
-          "template <typename> void foo() { return; }",
-      },
-      // Template specialization.
-      {
-          R"cpp(
-            template <typename> void foo();
-            template <> void fo^o<int>() { return; })cpp",
-          R"cpp(
-            template <typename> void foo();
-            template <> void foo<int>() ;)cpp",
-          "template <> void foo<int>() { return; }",
       },
       // Default args.
       {
@@ -2477,8 +2472,14 @@ TEST_F(DefineOutlineTest, FailsMacroSpecifier) {
 
 TWEAK_TEST(AddUsing);
 TEST_F(AddUsingTest, Prepare) {
+  Config Cfg;
+  Cfg.Style.FullyQualifiedNamespaces.push_back("ban");
+  WithContextValue WithConfig(Config::Key, std::move(Cfg));
+
   const std::string Header = R"cpp(
 #define NS(name) one::two::name
+namespace ban { void foo() {} }
+namespace banana { void foo() {} }
 namespace one {
 void oo() {}
 template<typename TT> class tt {};
@@ -2512,6 +2513,10 @@ public:
   // Test that we don't crash or misbehave on unnamed DeclRefExpr.
   EXPECT_UNAVAILABLE(Header +
                      "void fun() { one::two::cc() ^| one::two::cc(); }");
+  // Do not offer code action when operating on a banned namespace.
+  EXPECT_UNAVAILABLE(Header + "void fun() { ban::fo^o(); }");
+  EXPECT_UNAVAILABLE(Header + "void fun() { ::ban::fo^o(); }");
+  EXPECT_AVAILABLE(Header + "void fun() { banana::fo^o(); }");
 
   // Check that we do not trigger in header files.
   FileName = "test.h";
@@ -2728,6 +2733,63 @@ using one::two::ff;
 namespace foo { void fun(); }
 
 void foo::fun() {
+  ff();
+})cpp"},
+            // If all other using are fully qualified, add ::
+            {R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using ::one::two::ee;
+
+void fun() {
+  one::two::f^f();
+})cpp",
+             R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using ::one::two::ff;using ::one::two::ee;
+
+void fun() {
+  ff();
+})cpp"},
+            // Make sure we don't add :: if it's already there
+            {R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using ::one::two::ee;
+
+void fun() {
+  ::one::two::f^f();
+})cpp",
+             R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using ::one::two::ff;using ::one::two::ee;
+
+void fun() {
+  ff();
+})cpp"},
+            // If even one using doesn't start with ::, do not add it
+            {R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using one::two::ee;
+
+void fun() {
+  one::two::f^f();
+})cpp",
+             R"cpp(
+#include "test.hpp"
+
+using ::one::two::cc;
+using one::two::ff;using one::two::ee;
+
+void fun() {
   ff();
 })cpp"}};
   llvm::StringMap<std::string> EditedFiles;

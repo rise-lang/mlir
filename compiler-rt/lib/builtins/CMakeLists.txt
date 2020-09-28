@@ -3,7 +3,7 @@
 # architecture-specific code in various subdirectories.
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  cmake_minimum_required(VERSION 3.4.3)
+  cmake_minimum_required(VERSION 3.13.4)
 
   project(CompilerRTBuiltins C ASM)
   set(COMPILER_RT_STANDALONE_BUILD TRUE)
@@ -20,10 +20,19 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   if(APPLE)
     include(CompilerRTDarwinUtils)
   endif()
-  if(CMAKE_HOST_APPLE AND APPLE)
+  if(APPLE)
     include(UseLibtool)
   endif()
   include(AddCompilerRT)
+
+  if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+    set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> -X32_64 qc <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> -X32_64 qc <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> -X32_64 q <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> -X32_64 q <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> -X32_64 <TARGET>")
+    set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -X32_64 <TARGET>")
+  endif()
 endif()
 
 if (COMPILER_RT_STANDALONE_BUILD)
@@ -71,6 +80,7 @@ set(GENERIC_SOURCES
   divdi3.c
   divmoddi4.c
   divmodsi4.c
+  divmodti4.c
   divsc3.c
   divsf3.c
   divsi3.c
@@ -161,6 +171,8 @@ set(GENERIC_SOURCES
   umodti3.c
 )
 
+# TODO: Several "tf" files (and divtc3.c, but not multc3.c) are in
+# GENERIC_SOURCES instead of here.
 set(GENERIC_TF_SOURCES
   addtf3.c
   comparetf2.c
@@ -234,9 +246,21 @@ if (NOT FUCHSIA)
   )
 endif()
 
-# These sources work on all x86 variants, but only x86 variants.
+# These files are used on 32-bit and 64-bit x86.
 set(x86_ARCH_SOURCES
   cpu_model.c
+  )
+
+if (NOT MSVC)
+  set(x86_ARCH_SOURCES
+    ${x86_ARCH_SOURCES}
+    i386/fp_mode.c
+  )
+endif ()
+
+# Implement extended-precision builtins, assuming long double is 80 bits.
+# long double is not 80 bits on Android or MSVC.
+set(x86_80_BIT_SOURCES
   divxc3.c
   fixxfdi.c
   fixxfti.c
@@ -252,24 +276,24 @@ set(x86_ARCH_SOURCES
 )
 
 if (NOT MSVC)
-  set(x86_ARCH_SOURCES
-    ${x86_ARCH_SOURCES}
-    i386/fp_mode.c
-  )
-endif ()
-
-if (NOT MSVC)
   set(x86_64_SOURCES
     ${GENERIC_SOURCES}
     ${GENERIC_TF_SOURCES}
     ${x86_ARCH_SOURCES}
     x86_64/floatdidf.c
     x86_64/floatdisf.c
-    x86_64/floatdixf.c
     x86_64/floatundidf.S
     x86_64/floatundisf.S
-    x86_64/floatundixf.S
   )
+
+  if (NOT ANDROID)
+    set(x86_64_SOURCES
+      ${x86_64_SOURCES}
+      ${x86_80_BIT_SOURCES}
+      x86_64/floatdixf.c
+      x86_64/floatundixf.S
+    )
+  endif()
 
   # Darwin x86_64 Haswell
   set(x86_64h_SOURCES ${x86_64_SOURCES})
@@ -290,16 +314,23 @@ if (NOT MSVC)
     i386/divdi3.S
     i386/floatdidf.S
     i386/floatdisf.S
-    i386/floatdixf.S
     i386/floatundidf.S
     i386/floatundisf.S
-    i386/floatundixf.S
     i386/lshrdi3.S
     i386/moddi3.S
     i386/muldi3.S
     i386/udivdi3.S
     i386/umoddi3.S
   )
+
+  if (NOT ANDROID)
+    set(i386_SOURCES
+      ${i386_SOURCES}
+      ${x86_80_BIT_SOURCES}
+      i386/floatdixf.S
+      i386/floatundixf.S
+    )
+  endif()
 
   if (WIN32)
     set(i386_SOURCES
@@ -317,7 +348,6 @@ else () # MSVC
     ${x86_ARCH_SOURCES}
     x86_64/floatdidf.c
     x86_64/floatdisf.c
-    x86_64/floatdixf.c
   )
   set(i386_SOURCES ${GENERIC_SOURCES} ${x86_ARCH_SOURCES})
 endif () # if (NOT MSVC)
@@ -533,11 +563,8 @@ set(mips64el_SOURCES ${GENERIC_TF_SOURCES}
 
 set(powerpc64_SOURCES
   ppc/divtc3.c
-  ppc/fixtfti.c
   ppc/fixtfdi.c
-  ppc/fixunstfti.c
   ppc/fixunstfdi.c
-  ppc/floattitf.c
   ppc/floatditf.c
   ppc/floatunditf.c
   ppc/gcc_qadd.c
@@ -547,6 +574,15 @@ set(powerpc64_SOURCES
   ppc/multc3.c
   ${GENERIC_SOURCES}
 )
+# These routines require __int128, which isn't supported on AIX.
+if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+  set(powerpc64_SOURCES
+    ppc/floattitf.c
+    ppc/fixtfti.c
+    ppc/fixunstfti.c
+    ${powerpc64_SOURCES}
+  )
+endif()
 set(powerpc64le_SOURCES ${powerpc64_SOURCES})
 
 set(riscv_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})
@@ -554,7 +590,10 @@ set(riscv32_SOURCES
   riscv/mulsi3.S
   ${riscv_SOURCES}
 )
-set(riscv64_SOURCES ${riscv_SOURCES})
+set(riscv64_SOURCES
+  riscv/muldi3.S
+  ${riscv_SOURCES}
+)
 
 set(sparc_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})
 set(sparcv9_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})

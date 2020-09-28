@@ -515,6 +515,18 @@ CallInst *CallInst::Create(CallInst *CI, ArrayRef<OperandBundleDef> OpB,
   return NewCI;
 }
 
+CallInst *CallInst::CreateWithReplacedBundle(CallInst *CI, OperandBundleDef OpB,
+                                             Instruction *InsertPt) {
+  SmallVector<OperandBundleDef, 2> OpDefs;
+  for (unsigned i = 0, e = CI->getNumOperandBundles(); i < e; ++i) {
+    auto ChildOB = CI->getOperandBundleAt(i);
+    if (ChildOB.getTagName() != OpB.getTag())
+      OpDefs.emplace_back(ChildOB);
+  }
+  OpDefs.emplace_back(OpB);
+  return CallInst::Create(CI, OpDefs, InsertPt);
+}
+
 // Update profile weight for call instruction by scaling it using the ratio
 // of S/T. The meaning of "branch_weights" meta data for call instruction is
 // transfered to represent call count.
@@ -826,6 +838,18 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
   return NewII;
 }
 
+InvokeInst *InvokeInst::CreateWithReplacedBundle(InvokeInst *II,
+                                                 OperandBundleDef OpB,
+                                                 Instruction *InsertPt) {
+  SmallVector<OperandBundleDef, 2> OpDefs;
+  for (unsigned i = 0, e = II->getNumOperandBundles(); i < e; ++i) {
+    auto ChildOB = II->getOperandBundleAt(i);
+    if (ChildOB.getTagName() != OpB.getTag())
+      OpDefs.emplace_back(ChildOB);
+  }
+  OpDefs.emplace_back(OpB);
+  return InvokeInst::Create(II, OpDefs, InsertPt);
+}
 
 LandingPadInst *InvokeInst::getLandingPadInst() const {
   return cast<LandingPadInst>(getUnwindDest()->getFirstNonPHI());
@@ -1262,11 +1286,15 @@ static Value *getAISize(LLVMContext &Context, Value *Amt) {
 }
 
 static Align computeAllocaDefaultAlign(Type *Ty, BasicBlock *BB) {
+  assert(BB && "Insertion BB cannot be null when alignment not provided!");
+  assert(BB->getParent() &&
+         "BB must be in a Function when alignment not provided!");
   const DataLayout &DL = BB->getModule()->getDataLayout();
   return DL.getPrefTypeAlign(Ty);
 }
 
 static Align computeAllocaDefaultAlign(Type *Ty, Instruction *I) {
+  assert(I && "Insertion position cannot be null when alignment not provided!");
   return computeAllocaDefaultAlign(Ty, I->getParent());
 }
 
@@ -1342,11 +1370,15 @@ void LoadInst::AssertOK() {
 }
 
 static Align computeLoadStoreDefaultAlign(Type *Ty, BasicBlock *BB) {
+  assert(BB && "Insertion BB cannot be null when alignment not provided!");
+  assert(BB->getParent() &&
+         "BB must be in a Function when alignment not provided!");
   const DataLayout &DL = BB->getModule()->getDataLayout();
   return DL.getABITypeAlign(Ty);
 }
 
 static Align computeLoadStoreDefaultAlign(Type *Ty, Instruction *I) {
+  assert(I && "Insertion position cannot be null when alignment not provided!");
   return computeLoadStoreDefaultAlign(Ty, I->getParent());
 }
 
@@ -1911,7 +1943,7 @@ ShuffleVectorInst::ShuffleVectorInst(Value *V1, Value *V2, ArrayRef<int> Mask,
 }
 
 void ShuffleVectorInst::commute() {
-  int NumOpElts = cast<VectorType>(Op<0>()->getType())->getNumElements();
+  int NumOpElts = cast<FixedVectorType>(Op<0>()->getType())->getNumElements();
   int NumMaskElts = ShuffleMask.size();
   SmallVector<int, 16> NewMask(NumMaskElts);
   for (int i = 0; i != NumMaskElts; ++i) {
@@ -1935,7 +1967,8 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
     return false;
 
   // Make sure the mask elements make sense.
-  int V1Size = cast<VectorType>(V1->getType())->getElementCount().Min;
+  int V1Size =
+      cast<VectorType>(V1->getType())->getElementCount().getKnownMinValue();
   for (int Elem : Mask)
     if (Elem != UndefMaskElem && Elem >= V1Size * 2)
       return false;
@@ -1965,7 +1998,7 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
     return true;
 
   if (const auto *MV = dyn_cast<ConstantVector>(Mask)) {
-    unsigned V1Size = cast<VectorType>(V1->getType())->getNumElements();
+    unsigned V1Size = cast<FixedVectorType>(V1->getType())->getNumElements();
     for (Value *Op : MV->operands()) {
       if (auto *CI = dyn_cast<ConstantInt>(Op)) {
         if (CI->uge(V1Size*2))
@@ -1978,8 +2011,9 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
   }
 
   if (const auto *CDS = dyn_cast<ConstantDataSequential>(Mask)) {
-    unsigned V1Size = cast<VectorType>(V1->getType())->getNumElements();
-    for (unsigned i = 0, e = MaskTy->getNumElements(); i != e; ++i)
+    unsigned V1Size = cast<FixedVectorType>(V1->getType())->getNumElements();
+    for (unsigned i = 0, e = cast<FixedVectorType>(MaskTy)->getNumElements();
+         i != e; ++i)
       if (CDS->getElementAsInteger(i) >= V1Size*2)
         return false;
     return true;
@@ -1990,12 +2024,26 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
 
 void ShuffleVectorInst::getShuffleMask(const Constant *Mask,
                                        SmallVectorImpl<int> &Result) {
-  unsigned NumElts = cast<VectorType>(Mask->getType())->getElementCount().Min;
+  ElementCount EC = cast<VectorType>(Mask->getType())->getElementCount();
+
   if (isa<ConstantAggregateZero>(Mask)) {
-    Result.resize(NumElts, 0);
+    Result.resize(EC.getKnownMinValue(), 0);
     return;
   }
-  Result.reserve(NumElts);
+
+  Result.reserve(EC.getKnownMinValue());
+
+  if (EC.isScalable()) {
+    assert((isa<ConstantAggregateZero>(Mask) || isa<UndefValue>(Mask)) &&
+           "Scalable vector shuffle mask must be undef or zeroinitializer");
+    int MaskVal = isa<UndefValue>(Mask) ? -1 : 0;
+    for (unsigned I = 0; I < EC.getKnownMinValue(); ++I)
+      Result.emplace_back(MaskVal);
+    return;
+  }
+
+  unsigned NumElts = EC.getKnownMinValue();
+
   if (auto *CDS = dyn_cast<ConstantDataSequential>(Mask)) {
     for (unsigned i = 0; i != NumElts; ++i)
       Result.push_back(CDS->getElementAsInteger(i));
@@ -2177,8 +2225,8 @@ bool ShuffleVectorInst::isExtractSubvectorMask(ArrayRef<int> Mask,
 bool ShuffleVectorInst::isIdentityWithPadding() const {
   if (isa<UndefValue>(Op<2>()))
     return false;
-  int NumOpElts = cast<VectorType>(Op<0>()->getType())->getNumElements();
-  int NumMaskElts = cast<VectorType>(getType())->getNumElements();
+  int NumOpElts = cast<FixedVectorType>(Op<0>()->getType())->getNumElements();
+  int NumMaskElts = cast<FixedVectorType>(getType())->getNumElements();
   if (NumMaskElts <= NumOpElts)
     return false;
 
@@ -2218,8 +2266,8 @@ bool ShuffleVectorInst::isConcat() const {
       isa<UndefValue>(Op<2>()))
     return false;
 
-  int NumOpElts = cast<VectorType>(Op<0>()->getType())->getNumElements();
-  int NumMaskElts = getType()->getNumElements();
+  int NumOpElts = cast<FixedVectorType>(Op<0>()->getType())->getNumElements();
+  int NumMaskElts = cast<FixedVectorType>(getType())->getNumElements();
   if (NumMaskElts != NumOpElts * 2)
     return false;
 
@@ -2960,8 +3008,8 @@ CastInst *CastInst::CreatePointerCast(Value *S, Type *Ty,
          "Invalid cast");
   assert(Ty->isVectorTy() == S->getType()->isVectorTy() && "Invalid cast");
   assert((!Ty->isVectorTy() ||
-          cast<VectorType>(Ty)->getNumElements() ==
-              cast<VectorType>(S->getType())->getNumElements()) &&
+          cast<FixedVectorType>(Ty)->getNumElements() ==
+              cast<FixedVectorType>(S->getType())->getNumElements()) &&
          "Invalid cast");
 
   if (Ty->isIntOrIntVectorTy())
@@ -2979,8 +3027,8 @@ CastInst *CastInst::CreatePointerCast(Value *S, Type *Ty,
          "Invalid cast");
   assert(Ty->isVectorTy() == S->getType()->isVectorTy() && "Invalid cast");
   assert((!Ty->isVectorTy() ||
-          cast<VectorType>(Ty)->getNumElements() ==
-              cast<VectorType>(S->getType())->getNumElements()) &&
+          cast<FixedVectorType>(Ty)->getNumElements() ==
+              cast<FixedVectorType>(S->getType())->getNumElements()) &&
          "Invalid cast");
 
   if (Ty->isIntOrIntVectorTy())
@@ -3091,7 +3139,8 @@ bool CastInst::isCastable(Type *SrcTy, Type *DestTy) {
 
   if (VectorType *SrcVecTy = dyn_cast<VectorType>(SrcTy))
     if (VectorType *DestVecTy = dyn_cast<VectorType>(DestTy))
-      if (SrcVecTy->getNumElements() == DestVecTy->getNumElements()) {
+      if (cast<FixedVectorType>(SrcVecTy)->getNumElements() ==
+          cast<FixedVectorType>(DestVecTy)->getNumElements()) {
         // An element by element cast.  Valid if casting the elements is valid.
         SrcTy = SrcVecTy->getElementType();
         DestTy = DestVecTy->getElementType();
@@ -3213,7 +3262,7 @@ CastInst::getCastOpcode(
   // FIXME: Check address space sizes here
   if (VectorType *SrcVecTy = dyn_cast<VectorType>(SrcTy))
     if (VectorType *DestVecTy = dyn_cast<VectorType>(DestTy))
-      if (SrcVecTy->getNumElements() == DestVecTy->getNumElements()) {
+      if (SrcVecTy->getElementCount() == DestVecTy->getElementCount()) {
         // An element by element cast.  Find the appropriate opcode based on the
         // element types.
         SrcTy = SrcVecTy->getElementType();
@@ -3322,9 +3371,9 @@ CastInst::castIsValid(Instruction::CastOps op, Value *S, Type *DstTy) {
   // scalar types means that checking that vector lengths match also checks that
   // scalars are not being converted to vectors or vectors to scalars).
   ElementCount SrcEC = SrcIsVec ? cast<VectorType>(SrcTy)->getElementCount()
-                                : ElementCount(0, false);
+                                : ElementCount::getFixed(0);
   ElementCount DstEC = DstIsVec ? cast<VectorType>(DstTy)->getElementCount()
-                                : ElementCount(0, false);
+                                : ElementCount::getFixed(0);
 
   // Switch on the opcode provided
   switch (op) {
@@ -3382,9 +3431,9 @@ CastInst::castIsValid(Instruction::CastOps op, Value *S, Type *DstTy) {
     if (SrcIsVec && DstIsVec)
       return SrcEC == DstEC;
     if (SrcIsVec)
-      return SrcEC == ElementCount(1, false);
+      return SrcEC == ElementCount::getFixed(1);
     if (DstIsVec)
-      return DstEC == ElementCount(1, false);
+      return DstEC == ElementCount::getFixed(1);
 
     return true;
   }

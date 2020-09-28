@@ -18,6 +18,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/RegionKindInterface.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Interfaces/CallInterfaces.h"
@@ -28,7 +29,6 @@
 
 #include "TestOpEnums.h.inc"
 
-namespace mlir {
 
 #include "TestOpStructs.h.inc"
 #include "TestOpsDialect.h.inc"
@@ -36,6 +36,8 @@ namespace mlir {
 #define GET_OP_CLASSES
 #include "TestOps.h.inc"
 
+namespace mlir {
+void registerTestDialect(DialectRegistry &registry);
 } // end namespace mlir
 
 #endif // MLIR_TESTDIALECT_H

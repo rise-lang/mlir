@@ -20,7 +20,6 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include <cassert>
@@ -134,6 +133,10 @@ class AArch64FunctionInfo final : public MachineFunctionInfo {
   /// OutliningStyle denotes, if a function was outined, how it was outlined,
   /// e.g. Tail Call, Thunk, or Function if none apply.
   Optional<std::string> OutliningStyle;
+
+  // Offset from SP-after-callee-saved-spills (i.e. SP-at-entry minus
+  // CalleeSavedStackSize) to the address of the frame record.
+  int CalleeSaveBaseToFrameRecordOffset = 0;
 
 public:
   AArch64FunctionInfo() = default;
@@ -281,15 +284,14 @@ public:
   void setSRetReturnReg(unsigned Reg) { SRetReturnReg = Reg; }
 
   unsigned getJumpTableEntrySize(int Idx) const {
-    auto It = JumpTableEntryInfo.find(Idx);
-    if (It != JumpTableEntryInfo.end())
-      return It->second.first;
-    return 4;
+    return JumpTableEntryInfo[Idx].first;
   }
   MCSymbol *getJumpTableEntryPCRelSymbol(int Idx) const {
-    return JumpTableEntryInfo.find(Idx)->second.second;
+    return JumpTableEntryInfo[Idx].second;
   }
   void setJumpTableEntryInfo(int Idx, unsigned Size, MCSymbol *PCRelSym) {
+    if ((unsigned)Idx >= JumpTableEntryInfo.size())
+      JumpTableEntryInfo.resize(Idx+1);
     JumpTableEntryInfo[Idx] = std::make_pair(Size, PCRelSym);
   }
 
@@ -338,12 +340,19 @@ public:
     TaggedBasePointerOffset = Offset;
   }
 
+  int getCalleeSaveBaseToFrameRecordOffset() const {
+    return CalleeSaveBaseToFrameRecordOffset;
+  }
+  void setCalleeSaveBaseToFrameRecordOffset(int Offset) {
+    CalleeSaveBaseToFrameRecordOffset = Offset;
+  }
+
 private:
   // Hold the lists of LOHs.
   MILOHContainer LOHContainerSet;
   SetOfInstructions LOHRelated;
 
-  DenseMap<int, std::pair<unsigned, MCSymbol *>> JumpTableEntryInfo;
+  SmallVector<std::pair<unsigned, MCSymbol *>, 2> JumpTableEntryInfo;
 };
 
 namespace yaml {

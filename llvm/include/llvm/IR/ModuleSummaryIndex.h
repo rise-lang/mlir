@@ -562,12 +562,11 @@ public:
     /// offsets from the beginning of the value that are passed.
     struct Call {
       uint64_t ParamNo = 0;
-      GlobalValue::GUID Callee = 0;
+      ValueInfo Callee;
       ConstantRange Offsets{/*BitWidth=*/RangeWidth, /*isFullSet=*/true};
 
       Call() = default;
-      Call(uint64_t ParamNo, GlobalValue::GUID Callee,
-           const ConstantRange &Offsets)
+      Call(uint64_t ParamNo, ValueInfo Callee, const ConstantRange &Offsets)
           : ParamNo(ParamNo), Callee(Callee), Offsets(Offsets) {}
     };
 
@@ -597,7 +596,7 @@ public:
             GlobalValue::LinkageTypes::AvailableExternallyLinkage,
             /*NotEligibleToImport=*/true, /*Live=*/true, /*IsLocal=*/false,
             /*CanAutoHide=*/false),
-        /*InsCount=*/0, FunctionSummary::FFlags{}, /*EntryCount=*/0,
+        /*NumInsts=*/0, FunctionSummary::FFlags{}, /*EntryCount=*/0,
         std::vector<ValueInfo>(), std::move(Edges),
         std::vector<GlobalValue::GUID>(),
         std::vector<FunctionSummary::VFuncId>(),
@@ -894,7 +893,8 @@ struct TypeTestResolution {
     Single,    ///< Single element (last example in "Short Inline Bit Vectors")
     AllOnes,   ///< All-ones bit vector ("Eliminating Bit Vector Checks for
                ///  All-Ones Bit Vectors")
-  } TheKind = Unsat;
+    Unknown,   ///< Unknown (analysis not performed, don't lower)
+  } TheKind = Unknown;
 
   /// Range of size-1 expressed as a bit width. For example, if the size is in
   /// range [1,256], this number will be 8. This helps generate the most compact
@@ -1060,6 +1060,9 @@ private:
   // some were not. Set when the combined index is created during the thin link.
   bool PartiallySplitLTOUnits = false;
 
+  /// True if some of the FunctionSummary contains a ParamAccess.
+  bool HasParamAccess = false;
+
   std::set<std::string> CfiFunctionDefs;
   std::set<std::string> CfiFunctionDecls;
 
@@ -1092,7 +1095,7 @@ public:
   // in the way some record are interpreted, like flags for instance.
   // Note that incrementing this may require changes in both BitcodeReader.cpp
   // and BitcodeWriter.cpp.
-  static constexpr uint64_t BitcodeSummaryVersion = 8;
+  static constexpr uint64_t BitcodeSummaryVersion = 9;
 
   // Regular LTO module name for ASM writer
   static constexpr const char *getRegularLTOModuleName() {
@@ -1212,6 +1215,8 @@ public:
   bool partiallySplitLTOUnits() const { return PartiallySplitLTOUnits; }
   void setPartiallySplitLTOUnits() { PartiallySplitLTOUnits = true; }
 
+  bool hasParamAccess() const { return HasParamAccess; }
+
   bool isGlobalValueLive(const GlobalValueSummary *GVS) const {
     return !WithGlobalValueDeadStripping || GVS->isLive();
   }
@@ -1283,6 +1288,8 @@ public:
   /// Add a global value summary for the given ValueInfo.
   void addGlobalValueSummary(ValueInfo VI,
                              std::unique_ptr<GlobalValueSummary> Summary) {
+    if (const FunctionSummary *FS = dyn_cast<FunctionSummary>(Summary.get()))
+      HasParamAccess |= !FS->paramAccesses().empty();
     addOriginalName(VI.getGUID(), Summary->getOriginalName());
     // Here we have a notionally const VI, but the value it points to is owned
     // by the non-const *this.

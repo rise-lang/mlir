@@ -21,7 +21,8 @@ static StructuredData::ObjectSP ParseJSONValue(json::Value &value);
 static StructuredData::ObjectSP ParseJSONObject(json::Object *object);
 static StructuredData::ObjectSP ParseJSONArray(json::Array *array);
 
-StructuredData::ObjectSP StructuredData::ParseJSON(std::string json_text) {
+StructuredData::ObjectSP
+StructuredData::ParseJSON(const std::string &json_text) {
   llvm::Expected<json::Value> value = json::parse(json_text);
   if (!value) {
     llvm::consumeError(value.takeError());
@@ -41,7 +42,12 @@ StructuredData::ParseJSONFromFile(const FileSpec &input_spec, Status &error) {
                                     buffer_or_error.getError().message());
     return return_sp;
   }
-  return ParseJSON(buffer_or_error.get()->getBuffer().str());
+  llvm::Expected<json::Value> value =
+      json::parse(buffer_or_error.get()->getBuffer().str());
+  if (value)
+    return ParseJSONValue(*value);
+  error.SetErrorString(toString(value.takeError()));
+  return StructuredData::ObjectSP();
 }
 
 static StructuredData::ObjectSP ParseJSONValue(json::Value &value) {

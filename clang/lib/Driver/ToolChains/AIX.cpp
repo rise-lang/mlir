@@ -44,12 +44,6 @@ void aix::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-a64");
   }
 
-  // Accept an undefined symbol as an extern so that an error message is not
-  // displayed. Otherwise, undefined symbols are flagged with error messages.
-  // FIXME: This should be removed when the assembly generation from the
-  // compiler is able to write externs properly.
-  CmdArgs.push_back("-u");
-
   // Accept any mixture of instructions.
   // On Power for AIX and Linux, this behaviour matches that of GCC for both the
   // user-provided assembler source case and the compiler-produced assembler
@@ -98,6 +92,12 @@ void aix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_static))
     CmdArgs.push_back("-bnso");
 
+  // Add options for shared libraries.
+  if (Args.hasArg(options::OPT_shared)) {
+    CmdArgs.push_back("-bM:SRE");
+    CmdArgs.push_back("-bnoentry");
+  }
+
   // Specify linker output file.
   assert((Output.isFilename() || Output.isNothing()) && "Invalid output.");
   if (Output.isFilename()) {
@@ -129,9 +129,14 @@ void aix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       return IsArch32Bit ? "crt0.o" : "crt0_64.o";
   };
 
-  if (!Args.hasArg(options::OPT_nostdlib)) {
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles,
+                   options::OPT_shared)) {
     CmdArgs.push_back(
         Args.MakeArgString(ToolChain.GetFilePath(getCrt0Basename())));
+
+    if (D.CCCIsCXX())
+      CmdArgs.push_back(Args.MakeArgString(
+          ToolChain.GetFilePath(IsArch32Bit ? "crti.o" : "crti_64.o")));
   }
 
   // Collect all static constructor and destructor functions in CXX mode. This
@@ -146,6 +151,9 @@ void aix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // Add directory to library search path.
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   ToolChain.AddFilePathLibArgs(Args, CmdArgs);
+
+  if (getToolChain().ShouldLinkCXXStdlib(Args))
+    getToolChain().AddCXXStdlibLibArgs(Args, CmdArgs);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     // Support POSIX threads if "-pthreads" or "-pthread" is present.
@@ -201,6 +209,23 @@ void AIX::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   SmallString<128> UP(Sysroot);
   path::append(UP, "/usr/include");
   addSystemInclude(DriverArgs, CC1Args, UP.str());
+}
+
+void AIX::AddCXXStdlibLibArgs(const llvm::opt::ArgList &DriverArgs,
+                              llvm::opt::ArgStringList &CC1Args) const {
+  switch (GetCXXStdlibType(DriverArgs)) {
+  case ToolChain::CST_Libcxx:
+    CC1Args.push_back("-lc++");
+    return;
+  case ToolChain::CST_Libstdcxx:
+    llvm::report_fatal_error("linking libstdc++ unimplemented on AIX");
+  }
+
+  llvm_unreachable("Unexpected C++ library type; only libc++ is supported.");
+}
+
+ToolChain::CXXStdlibType AIX::GetDefaultCXXStdlibType() const {
+  return ToolChain::CST_Libcxx;
 }
 
 auto AIX::buildAssembler() const -> Tool * { return new aix::Assembler(*this); }

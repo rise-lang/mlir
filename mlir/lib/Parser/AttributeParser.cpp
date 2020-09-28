@@ -12,6 +12,7 @@
 
 #include "Parser.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/Dialect.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/StandardTypes.h"
 #include "llvm/ADT/StringExtras.h"
@@ -187,6 +188,44 @@ Attribute Parser::parseAttribute(Type type) {
   }
 }
 
+/// Parse an optional attribute with the provided type.
+OptionalParseResult Parser::parseOptionalAttribute(Attribute &attribute,
+                                                   Type type) {
+  switch (getToken().getKind()) {
+  case Token::at_identifier:
+  case Token::floatliteral:
+  case Token::integer:
+  case Token::hash_identifier:
+  case Token::kw_affine_map:
+  case Token::kw_affine_set:
+  case Token::kw_dense:
+  case Token::kw_false:
+  case Token::kw_loc:
+  case Token::kw_opaque:
+  case Token::kw_sparse:
+  case Token::kw_true:
+  case Token::kw_unit:
+  case Token::l_brace:
+  case Token::l_square:
+  case Token::minus:
+  case Token::string:
+    attribute = parseAttribute(type);
+    return success(attribute != nullptr);
+
+  default:
+    // Parse an optional type attribute.
+    Type type;
+    OptionalParseResult result = parseOptionalType(type);
+    if (result.hasValue() && succeeded(*result))
+      attribute = TypeAttr::get(type);
+    return result;
+  }
+}
+OptionalParseResult Parser::parseOptionalAttribute(ArrayAttr &attribute,
+                                                   Type type) {
+  return parseOptionalAttributeWithToken(Token::l_square, attribute, type);
+}
+
 /// Attribute dictionary.
 ///
 ///   attribute-dict ::= `{` `}`
@@ -211,6 +250,11 @@ ParseResult Parser::parseAttributeDict(NamedAttrList &attributes) {
     if (!seenKeys.insert(*nameId).second)
       return emitError("duplicate key in dictionary attribute");
     consumeToken();
+
+    // Lazy load a dialect in the context if there is a possible namespace.
+    auto splitName = nameId->strref().split('.');
+    if (!splitName.second.empty())
+      getContext()->getOrLoadDialect(splitName.first);
 
     // Try to parse the '=' for the attribute value.
     if (!consumeIf(Token::equal)) {
@@ -783,7 +827,9 @@ Attribute Parser::parseOpaqueElementsAttr(Type attrType) {
     return (emitError("expected dialect namespace"), nullptr);
 
   auto name = getToken().getStringValue();
-  auto *dialect = builder.getContext()->getRegisteredDialect(name);
+  // Lazy load a dialect in the context if there is a possible namespace.
+  Dialect *dialect = builder.getContext()->getOrLoadDialect(name);
+
   // TODO: Allow for having an unknown dialect on an opaque
   // attribute. Otherwise, it can't be roundtripped without having the dialect
   // registered.

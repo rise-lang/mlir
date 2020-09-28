@@ -181,13 +181,9 @@ static Error processLoadCommands(const CopyConfig &Config, Object &Obj) {
   for (LoadCommand &LC : Obj.LoadCommands) {
     switch (LC.MachOLoadCommand.load_command_data.cmd) {
     case MachO::LC_ID_DYLIB:
-      if (Config.SharedLibId) {
-        StringRef Id = Config.SharedLibId.getValue();
-        if (Id.empty())
-          return createStringError(errc::invalid_argument,
-                                   "cannot specify an empty id");
-        updateLoadCommandPayloadString<MachO::dylib_command>(LC, Id);
-      }
+      if (Config.SharedLibId)
+        updateLoadCommandPayloadString<MachO::dylib_command>(
+            LC, *Config.SharedLibId);
       break;
 
     case MachO::LC_RPATH: {
@@ -219,7 +215,7 @@ static Error processLoadCommands(const CopyConfig &Config, Object &Obj) {
                                "rpath " + RPath +
                                    " would create a duplicate load command");
     RPaths.insert(RPath);
-    Obj.addLoadCommand(buildRPathLoadCommand(RPath));
+    Obj.LoadCommands.push_back(buildRPathLoadCommand(RPath));
   }
 
   return Error::success();
@@ -311,8 +307,7 @@ static Error handleArgs(const CopyConfig &Config, Object &Obj) {
       Config.ExtractDWO || Config.LocalizeHidden || Config.PreserveDates ||
       Config.StripAllGNU || Config.StripDWO || Config.StripNonAlloc ||
       Config.StripSections || Config.Weaken || Config.DecompressDebugSections ||
-      Config.StripNonAlloc || Config.StripSections || Config.StripUnneeded ||
-      Config.DiscardMode == DiscardType::Locals ||
+      Config.StripUnneeded || Config.DiscardMode == DiscardType::Locals ||
       !Config.SymbolsToAdd.empty() || Config.EntryExpr) {
     return createStringError(llvm::errc::invalid_argument,
                              "option not supported by llvm-objcopy for MachO");

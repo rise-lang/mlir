@@ -13,6 +13,7 @@ class ModuleOp;
 template <typename T>
 class OperationPass;
 class OwningRewritePatternList;
+class AffineDialect;
 
 void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);

@@ -1423,6 +1423,25 @@ Raw pointers and references to uncounted types can't be used as class members. O
    // ...
  };
 
+.. _webkit-UncountedLambdaCapturesChecker:
+
+webkit.UncountedLambdaCapturesChecker
+"""""""""""""""""""""""""""""""""""""
+Raw pointers and references to uncounted types can't be captured in lambdas. Only ref-counted types are allowed.
+
+.. code-block:: cpp
+
+ struct RefCntbl {
+   void ref() {}
+   void deref() {}
+ };
+
+ void foo(RefCntbl* a, RefCntbl& b) {
+   [&, a](){ // warn about 'a'
+     do_something(b); // warn about 'b'
+   };
+ };
+
 .. _alpha-checkers:
 
 Experimental Checkers
@@ -1471,6 +1490,23 @@ Warn about assigning non-{0,1} values to boolean variables.
 
 alpha.core
 ^^^^^^^^^^
+
+.. _alpha-core-C11Lock:
+
+alpha.core.C11Lock
+""""""""""""""""""
+Similarly to :ref:`alpha.unix.PthreadLock <alpha-unix-PthreadLock>`, checks for
+the locking/unlocking of ``mtx_t`` mutexes.
+
+.. code-block:: cpp
+
+ mtx_t mtx1;
+
+ void bad1(void)
+ {
+   mtx_lock(&mtx1);
+   mtx_lock(&mtx1); // warn: This lock has already been acquired
+ }
 
 .. _alpha-core-CallAndMessageUnInitRefArg:
 
@@ -1728,7 +1764,7 @@ Check for integer to enumeration casts that could result in undefined values.
  void foo() {
    TestEnum t = static_cast(-1);
        // warn: the value provided to the cast expression is not in
-                the valid range of values for the enum
+       //       the valid range of values for the enum
 
 .. _alpha-cplusplus-InvalidatedIterator:
 
@@ -1847,6 +1883,26 @@ Check for dereference of null smart pointers.
  void deref_smart_ptr() {
    std::unique_ptr<int> P;
    *P; // warn: dereference of a default constructed smart unique_ptr
+ }
+
+alpha.fuchsia
+^^^^^^^^^^^^^
+
+.. _alpha-fuchsia-lock:
+
+alpha.fuchsia.Lock
+""""""""""""""""""
+Similarly to :ref:`alpha.unix.PthreadLock <alpha-unix-PthreadLock>`, checks for
+the locking/unlocking of fuchsia mutexes.
+
+.. code-block:: cpp
+
+ spin_lock_t mtx1;
+
+ void bad1(void)
+ {
+   spin_lock(&mtx1);
+   spin_lock(&mtx1);	// warn: This lock has already been acquired
  }
 
 alpha.llvm

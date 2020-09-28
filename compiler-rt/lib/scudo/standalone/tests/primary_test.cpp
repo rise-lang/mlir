@@ -149,10 +149,10 @@ TEST(ScudoPrimaryTest, PrimaryIterate) {
 
 static std::mutex Mutex;
 static std::condition_variable Cv;
-static bool Ready = false;
+static bool Ready;
 
 template <typename Primary> static void performAllocations(Primary *Allocator) {
-  static THREADLOCAL typename Primary::CacheT Cache;
+  static thread_local typename Primary::CacheT Cache;
   Cache.init(nullptr, Allocator);
   std::vector<std::pair<scudo::uptr, void *>> V;
   {
@@ -176,6 +176,7 @@ template <typename Primary> static void performAllocations(Primary *Allocator) {
 }
 
 template <typename Primary> static void testPrimaryThreaded() {
+  Ready = false;
   auto Deleter = [](Primary *P) {
     P->unmapTestOnly();
     delete P;

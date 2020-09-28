@@ -111,6 +111,9 @@ llvm::raw_ostream &operator<<(
     }
   }
   os << (sep == '(' ? "()" : ")");
+  if (x.stmtFunction_) {
+    os << " -> " << x.stmtFunction_->AsFortran();
+  }
   return os;
 }
 
@@ -538,13 +541,11 @@ const DerivedTypeSpec *Symbol::GetParentTypeSpec(const Scope *scope) const {
 
 const Symbol *Symbol::GetParentComponent(const Scope *scope) const {
   if (const auto *dtDetails{detailsIf<DerivedTypeDetails>()}) {
-    if (!scope) {
-      scope = scope_;
+    if (const Scope * localScope{scope ? scope : scope_}) {
+      return dtDetails->GetParentComponent(DEREF(localScope));
     }
-    return dtDetails->GetParentComponent(DEREF(scope));
-  } else {
-    return nullptr;
   }
+  return nullptr;
 }
 
 void DerivedTypeDetails::add_component(const Symbol &symbol) {

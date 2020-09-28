@@ -19,7 +19,7 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 
 def SCF_Dialect : Dialect {
   let name = "scf";
-  let cppNamespace = "";
+  let cppNamespace = "::mlir::scf";
 }
 
 // Base class for SCF dialect ops.
@@ -39,7 +39,7 @@ class SCF_Op<string mnemonic, list<OpTrait> traits = []> :
 def ForOp : SCF_Op<"for",
       [DeclareOpInterfaceMethods<LoopLikeOpInterface>,
        DeclareOpInterfaceMethods<RegionBranchOpInterface>,
-       SingleBlockImplicitTerminator<"YieldOp">,
+       SingleBlockImplicitTerminator<"scf::YieldOp">,
        RecursiveSideEffects]> {
   let summary = "for operation";
   let description = [{
@@ -183,7 +183,7 @@ def ForOp : SCF_Op<"for",
 
 def IfOp : SCF_Op<"if",
       [DeclareOpInterfaceMethods<RegionBranchOpInterface>,
-       SingleBlockImplicitTerminator<"YieldOp">, RecursiveSideEffects,
+       SingleBlockImplicitTerminator<"scf::YieldOp">, RecursiveSideEffects,
        NoRegionArguments]> {
   let summary = "if-then-else operation";
   let description = [{
@@ -271,7 +271,7 @@ def ParallelOp : SCF_Op<"parallel",
     [AttrSizedOperandSegments,
      DeclareOpInterfaceMethods<LoopLikeOpInterface>,
      RecursiveSideEffects,
-     SingleBlockImplicitTerminator<"YieldOp">]> {
+     SingleBlockImplicitTerminator<"scf::YieldOp">]> {
   let summary = "parallel for operation";
   let description = [{
     The "scf.parallel" operation represents a loop nest taking 4 groups of SSA
@@ -418,7 +418,8 @@ def ReduceReturnOp :
   let assemblyFormat = "$result attr-dict `:` type($result)";
 }
 
-def YieldOp : SCF_Op<"yield", [NoSideEffect, ReturnLike, Terminator]> {
+def YieldOp : SCF_Op<"yield", [NoSideEffect, ReturnLike, Terminator,
+                               ParentOneOf<["IfOp, ForOp", "ParallelOp"]>]> {
   let summary = "loop yield and termination operation";
   let description = [{
     "scf.yield" yields an SSA value from the SCF dialect op region and
@@ -437,5 +438,8 @@ def YieldOp : SCF_Op<"yield", [NoSideEffect, ReturnLike, Terminator]> {
     OpBuilder<"OpBuilder &builder, OperationState &result",
               [{ /* nothing to do */ }]>
   ];
+  // Override default verifier (defined in SCF_Op), no custom verification
+  // needed.
+  let verifier = ?;
 }
 #endif // MLIR_DIALECT_SCF_SCFOPS

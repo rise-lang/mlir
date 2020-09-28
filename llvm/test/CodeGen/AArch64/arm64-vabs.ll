@@ -956,8 +956,8 @@ define <2 x i32> @abspattern1(<2 x i32> %a) nounwind {
 ; DAG: abs.2s
 ; DAG-NEXT: ret
 
+; GISEL: neg.2s
 ; GISEL: cmge.2s
-; GISEL: sub.2s
 ; GISEL: fcsel
 ; GISEL: fcsel
         %tmp1neg = sub <2 x i32> zeroinitializer, %a
@@ -968,8 +968,16 @@ define <2 x i32> @abspattern1(<2 x i32> %a) nounwind {
 
 define <4 x i16> @abspattern2(<4 x i16> %a) nounwind {
 ; CHECK-LABEL: abspattern2:
-; CHECK: abs.4h
-; CHECK-NEXT: ret
+; DAG: abs.4h
+; DAG-NEXT: ret
+
+; For GlobalISel, this generates terrible code until we can pattern match this to abs.
+; GISEL-DAG: sub.4h
+; GISEL-DAG: cmgt.4h
+; GISEL: csel
+; GISEL: csel
+; GISEL: csel
+; GISEL: csel
         %tmp1neg = sub <4 x i16> zeroinitializer, %a
         %b = icmp sgt <4 x i16> %a, zeroinitializer
         %abs = select <4 x i1> %b, <4 x i16> %a, <4 x i16> %tmp1neg
@@ -1038,8 +1046,8 @@ define <2 x i64> @abspattern7(<2 x i64> %a) nounwind {
 ; DAG: abs.2d
 ; DAG-NEXT: ret
 
+; GISEL: neg.2d
 ; GISEL: cmge.2d
-; GISEL: sub.2d
 ; GISEL: fcsel
 ; GISEL: fcsel
         %tmp1neg = sub <2 x i64> zeroinitializer, %a

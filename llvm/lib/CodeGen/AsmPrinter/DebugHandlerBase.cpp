@@ -21,10 +21,15 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "dwarfdebug"
+
+/// If true, we drop variable location ranges which exist entirely outside the
+/// variable's lexical scope instruction ranges.
+static cl::opt<bool> TrimVarLocs("trim-var-locs", cl::Hidden, cl::init(true));
 
 Optional<DbgVariableLocation>
 DbgVariableLocation::extractFromMachineInstruction(
@@ -191,6 +196,9 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
   assert(DbgLabels.empty() && "DbgLabels map wasn't cleaned!");
   calculateDbgEntityHistory(MF, Asm->MF->getSubtarget().getRegisterInfo(),
                             DbgValues, DbgLabels);
+  InstOrdering.initialize(*MF);
+  if (TrimVarLocs)
+    DbgValues.trimLocationRanges(*MF, LScopes, InstOrdering);
   LLVM_DEBUG(DbgValues.dump());
 
   // Request labels for the full history.
@@ -326,6 +334,7 @@ void DebugHandlerBase::endFunction(const MachineFunction *MF) {
   DbgLabels.clear();
   LabelsBeforeInsn.clear();
   LabelsAfterInsn.clear();
+  InstOrdering.clear();
 }
 
 void DebugHandlerBase::beginBasicBlock(const MachineBasicBlock &MBB) {

@@ -863,26 +863,18 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
 
   int FPOffset = 0;
   if (HasFP) {
-    if (isSVR4ABI) {
-      MachineFrameInfo &MFI = MF.getFrameInfo();
-      int FPIndex = FI->getFramePointerSaveIndex();
-      assert(FPIndex && "No Frame Pointer Save Slot!");
-      FPOffset = MFI.getObjectOffset(FPIndex);
-    } else {
-      FPOffset = getFramePointerSaveOffset();
-    }
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    int FPIndex = FI->getFramePointerSaveIndex();
+    assert(FPIndex && "No Frame Pointer Save Slot!");
+    FPOffset = MFI.getObjectOffset(FPIndex);
   }
 
   int BPOffset = 0;
   if (HasBP) {
-    if (isSVR4ABI) {
-      MachineFrameInfo &MFI = MF.getFrameInfo();
-      int BPIndex = FI->getBasePointerSaveIndex();
-      assert(BPIndex && "No Base Pointer Save Slot!");
-      BPOffset = MFI.getObjectOffset(BPIndex);
-    } else {
-      BPOffset = getBasePointerSaveOffset();
-    }
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    int BPIndex = FI->getBasePointerSaveIndex();
+    assert(BPIndex && "No Base Pointer Save Slot!");
+    BPOffset = MFI.getObjectOffset(BPIndex);
   }
 
   int PBPOffset = 0;
@@ -1466,11 +1458,10 @@ void PPCFrameLowering::inlineStackProbe(MachineFunction &MF,
           .addImm(0)
           .addImm(32 - Log2(MaxAlign))
           .addImm(31);
-    BuildMI(PrologMBB, {MI}, DL, TII.get(isPPC64 ? PPC::STDUX : PPC::STWUX),
+    BuildMI(PrologMBB, {MI}, DL, TII.get(isPPC64 ? PPC::SUBFC8 : PPC::SUBFC),
             SPReg)
-        .addReg(FPReg)
-        .addReg(SPReg)
-        .addReg(ScratchReg);
+        .addReg(ScratchReg)
+        .addReg(SPReg);
   }
   // Probe residual part.
   if (NegResidualSize) {
@@ -1552,8 +1543,6 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
 
   // Get processor type.
   bool isPPC64 = Subtarget.isPPC64();
-  // Get the ABI.
-  bool isSVR4ABI = Subtarget.isSVR4ABI();
 
   // Check if the link register (LR) has been saved.
   PPCFunctionInfo *FI = MF.getInfo<PPCFunctionInfo>();
@@ -1601,24 +1590,16 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
   SingleScratchReg = ScratchReg == TempReg;
 
   if (HasFP) {
-    if (isSVR4ABI) {
-      int FPIndex = FI->getFramePointerSaveIndex();
-      assert(FPIndex && "No Frame Pointer Save Slot!");
-      FPOffset = MFI.getObjectOffset(FPIndex);
-    } else {
-      FPOffset = getFramePointerSaveOffset();
-    }
+    int FPIndex = FI->getFramePointerSaveIndex();
+    assert(FPIndex && "No Frame Pointer Save Slot!");
+    FPOffset = MFI.getObjectOffset(FPIndex);
   }
 
   int BPOffset = 0;
   if (HasBP) {
-    if (isSVR4ABI) {
       int BPIndex = FI->getBasePointerSaveIndex();
       assert(BPIndex && "No Base Pointer Save Slot!");
       BPOffset = MFI.getObjectOffset(BPIndex);
-    } else {
-      BPOffset = getBasePointerSaveOffset();
-    }
   }
 
   int PBPOffset = 0;

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ConfigFragment.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -37,6 +38,8 @@ public:
     DictParser Dict("Config", this);
     Dict.handle("If", [&](Node &N) { parse(F.If, N); });
     Dict.handle("CompileFlags", [&](Node &N) { parse(F.CompileFlags, N); });
+    Dict.handle("Index", [&](Node &N) { parse(F.Index, N); });
+    Dict.handle("Style", [&](Node &N) { parse(F.Style, N); });
     Dict.parse(N);
     return !(N.failed() || HadError);
   }
@@ -63,6 +66,26 @@ private:
       if (auto Values = scalarValues(N))
         F.Add = std::move(*Values);
     });
+    Dict.handle("Remove", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.Remove = std::move(*Values);
+    });
+    Dict.parse(N);
+  }
+
+  void parse(Fragment::StyleBlock &F, Node &N) {
+    DictParser Dict("Style", this);
+    Dict.handle("FullyQualifiedNamespaces", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.FullyQualifiedNamespaces = std::move(*Values);
+    });
+    Dict.parse(N);
+  }
+
+  void parse(Fragment::IndexBlock &F, Node &N) {
+    DictParser Dict("Index", this);
+    Dict.handle("Background",
+                [&](Node &N) { F.Background = scalarValue(N, "Background"); });
     Dict.parse(N);
   }
 

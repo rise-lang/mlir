@@ -151,6 +151,17 @@ public:
   // Returns the total number of arguments.
   int getNumArgs() const { return arguments.size(); }
 
+  // Returns true of the operation has a single variadic arg.
+  bool hasSingleVariadicArg() const;
+
+  // Returns true if the operation has a single variadic result.
+  bool hasSingleVariadicResult() const {
+    return getNumResults() == 1 && getResult(0).isVariadic();
+  }
+
+  // Returns true of the operation has no variadic regions.
+  bool hasNoVariadicRegions() const { return getNumVariadicRegions() == 0; }
+
   using arg_iterator = const Argument *;
   using arg_range = llvm::iterator_range<arg_iterator>;
 
@@ -230,6 +241,17 @@ public:
   // Prints the contents in this operator to the given `os`. This is used for
   // debugging purposes.
   void print(llvm::raw_ostream &os) const;
+
+  // A helper RAII class to emit nested namespaces for this op.
+  class NamespaceEmitter {
+  public:
+    NamespaceEmitter(raw_ostream &os, Operator &op);
+    ~NamespaceEmitter();
+
+  private:
+    raw_ostream &os;
+    SmallVector<StringRef, 2> namespaces;
+  };
 
   // Return whether all the result types are known.
   bool allResultTypesKnown() const { return allResultsHaveKnownTypes; };

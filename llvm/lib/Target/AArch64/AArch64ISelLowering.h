@@ -72,19 +72,42 @@ enum NodeType : unsigned {
   ADC,
   SBC, // adc, sbc instructions
 
-  // Arithmetic instructions
+  // Predicated instructions where inactive lanes produce undefined results.
   ADD_PRED,
   FADD_PRED,
-  SDIV_PRED,
-  UDIV_PRED,
+  FDIV_PRED,
   FMA_PRED,
-  SMIN_MERGE_OP1,
-  UMIN_MERGE_OP1,
-  SMAX_MERGE_OP1,
-  UMAX_MERGE_OP1,
-  SHL_MERGE_OP1,
-  SRL_MERGE_OP1,
-  SRA_MERGE_OP1,
+  FMAXNM_PRED,
+  FMINNM_PRED,
+  FMUL_PRED,
+  FSUB_PRED,
+  MUL_PRED,
+  SDIV_PRED,
+  SHL_PRED,
+  SMAX_PRED,
+  SMIN_PRED,
+  SRA_PRED,
+  SRL_PRED,
+  SUB_PRED,
+  UDIV_PRED,
+  UMAX_PRED,
+  UMIN_PRED,
+
+  // Predicated instructions with the result of inactive lanes provided by the
+  // last operand.
+  FCEIL_MERGE_PASSTHRU,
+  FFLOOR_MERGE_PASSTHRU,
+  FNEARBYINT_MERGE_PASSTHRU,
+  FNEG_MERGE_PASSTHRU,
+  FRINT_MERGE_PASSTHRU,
+  FROUND_MERGE_PASSTHRU,
+  FROUNDEVEN_MERGE_PASSTHRU,
+  FSQRT_MERGE_PASSTHRU,
+  FTRUNC_MERGE_PASSTHRU,
+  FCVTZU_MERGE_PASSTHRU,
+  FCVTZS_MERGE_PASSTHRU,
+  SIGN_EXTEND_INREG_MERGE_PASSTHRU,
+  ZERO_EXTEND_INREG_MERGE_PASSTHRU,
 
   SETCC_MERGE_ZERO,
 
@@ -188,6 +211,10 @@ enum NodeType : unsigned {
   SADDV,
   UADDV,
 
+  // Vector halving addition
+  SHADD,
+  UHADD,
+
   // Vector rounding halving addition
   SRHADD,
   URHADD,
@@ -199,6 +226,8 @@ enum NodeType : unsigned {
   SMAXV,
   UMAXV,
 
+  SADDV_PRED,
+  UADDV_PRED,
   SMAXV_PRED,
   UMAXV_PRED,
   SMINV_PRED,
@@ -391,12 +420,14 @@ namespace {
 // Any instruction that defines a 32-bit result zeros out the high half of the
 // register. Truncate can be lowered to EXTRACT_SUBREG. CopyFromReg may
 // be copying from a truncate. But any other 32-bit operation will zero-extend
-// up to 64 bits.
+// up to 64 bits. AssertSext/AssertZext aren't saying anything about the upper
+// 32 bits, they're probably just qualifying a CopyFromReg.
 // FIXME: X86 also checks for CMOV here. Do we need something similar?
 static inline bool isDef32(const SDNode &N) {
   unsigned Opc = N.getOpcode();
   return Opc != ISD::TRUNCATE && Opc != TargetOpcode::EXTRACT_SUBREG &&
-         Opc != ISD::CopyFromReg;
+         Opc != ISD::CopyFromReg && Opc != ISD::AssertSext &&
+         Opc != ISD::AssertZext;
 }
 
 } // end anonymous namespace
@@ -454,12 +485,6 @@ public:
   const char *getTargetNodeName(unsigned Opcode) const override;
 
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
-
-  /// Returns true if a cast between SrcAS and DestAS is a noop.
-  bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override {
-    // Addrspacecasts are always noops.
-    return true;
-  }
 
   /// This method returns a target specific FastISel object, or null if the
   /// target does not support "fast" ISel.
@@ -858,10 +883,13 @@ private:
   SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSPLAT_VECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDUPQLane(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerToPredicatedOp(SDValue Op, SelectionDAG &DAG,
-                              unsigned NewOp) const;
+  SDValue LowerToPredicatedOp(SDValue Op, SelectionDAG &DAG, unsigned NewOp,
+                              bool OverrideNEON = false) const;
+  SDValue LowerToScalableOp(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINSERT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerDIV(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerMUL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVectorSRA_SRL_SHL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG) const;
@@ -876,6 +904,7 @@ private:
   SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVectorOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerXOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVSCALE(SDValue Op, SelectionDAG &DAG) const;
@@ -890,7 +919,13 @@ private:
   SDValue LowerSVEStructLoad(unsigned Intrinsic, ArrayRef<SDValue> LoadOps,
                              EVT VT, SelectionDAG &DAG, const SDLoc &DL) const;
 
+  SDValue LowerFixedLengthVectorIntDivideToSVE(SDValue Op,
+                                               SelectionDAG &DAG) const;
+  SDValue LowerFixedLengthVectorIntExtendToSVE(SDValue Op,
+                                               SelectionDAG &DAG) const;
   SDValue LowerFixedLengthVectorLoadToSVE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFixedLengthVectorSelectToSVE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFixedLengthVectorSetccToSVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFixedLengthVectorStoreToSVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFixedLengthVectorTruncateToSVE(SDValue Op,
                                               SelectionDAG &DAG) const;
@@ -960,7 +995,10 @@ private:
                       const TargetTransformInfo *TTI) const override;
 
   bool useSVEForFixedLengthVectors() const;
-  bool useSVEForFixedLengthVectorVT(EVT VT) const;
+  // Normally SVE is only used for byte size vectors that do not fit within a
+  // NEON vector. This changes when OverrideNEON is true, allowing SVE to be
+  // used for 64bit and 128bit vectors as well.
+  bool useSVEForFixedLengthVectorVT(EVT VT, bool OverrideNEON = false) const;
 };
 
 namespace AArch64 {
