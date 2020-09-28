@@ -1,5 +1,6 @@
 add_subdirectory(AffineToStandard)
 add_subdirectory(AVX512ToLLVM)
+add_subdirectory(ElevateRewriting)
 add_subdirectory(GPUCommon)
 add_subdirectory(GPUToNVVM)
 add_subdirectory(GPUToROCDL)

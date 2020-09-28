@@ -19,13 +19,16 @@ void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
 void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
-
+void populateElevatePatterns(OwningRewritePatternList &patterns,
+                                         MLIRContext *ctx);
 #define GEN_PASS_CLASSES
 #include "mlir/Dialect/Rise/Passes.h.inc"
 
 namespace rise {
 
 std::unique_ptr<OperationPass<FuncOp>> createConvertRiseToImperativePass();
+std::unique_ptr<OperationPass<FuncOp>> createElevateRewritingPass();
+
 
 } // namespace rise
 } // namespace mlir

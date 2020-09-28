@@ -19,7 +19,6 @@ def ConvertAffineToStandard : Pass<"lower-affine"> {
   let summary = "Lower Affine operations to a combination of Standard and SCF "
                 "operations";
   let description = [{
-
     Convert operations from the affine dialect into operations from the SCF and
     standard dialects.
 
@@ -66,11 +65,8 @@ def ConvertAffineToStandard : Pass<"lower-affine"> {
         `affine.apply`.
   }];
   let constructor = "mlir::createLowerAffinePass()";
-  let dependentDialects = [
-    "scf::SCFDialect",
-    "StandardOpsDialect",
-    "vector::VectorDialect"
-  ];
+  let dependentDialects =
+      ["scf::SCFDialect", "StandardOpsDialect", "vector::VectorDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -85,6 +81,17 @@ def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm", "ModuleOp"> {
 }
 
 //===----------------------------------------------------------------------===//
+// ElevateRewriting
+// ===----------------------------------------------------------------------===//
+
+def ElevateRewriting : FunctionPass<"elevate-rewriting"> {
+  let summary = "";
+  let constructor = "mlir::rise::createElevateRewritingPass()";
+  let dependentDialects =
+      ["AffineDialect", "scf::SCFDialect", "StandardOpsDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // GPUCommon
 //===----------------------------------------------------------------------===//
 
@@ -92,8 +99,8 @@ def GpuToLLVMConversionPass : Pass<"gpu-to-llvm", "ModuleOp"> {
   let summary = "Convert GPU dialect to LLVM dialect with GPU runtime calls";
   let constructor = "mlir::createGpuToLLVMConversionPass()";
   let options = [
-    Option<"gpuBinaryAnnotation", "gpu-binary-annotation", "std::string",
-           "", "Annotation attribute string for GPU binary">,
+    Option<"gpuBinaryAnnotation", "gpu-binary-annotation", "std::string", "",
+           "Annotation attribute string for GPU binary">,
   ];
 }
 
@@ -105,11 +112,10 @@ def ConvertGpuOpsToNVVMOps : Pass<"convert-gpu-to-nvvm", "gpu::GPUModuleOp"> {
   let summary = "Generate NVVM operations for gpu operations";
   let constructor = "mlir::createLowerGpuOpsToNVVMOpsPass()";
   let dependentDialects = ["NVVM::NVVMDialect"];
-  let options = [
-    Option<"indexBitwidth", "index-bitwidth", "unsigned",
-           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
-           "Bitwidth of the index type, 0 to use size of machine word">
-  ];
+  let options =
+      [Option<"indexBitwidth", "index-bitwidth", "unsigned",
+              /*default=kDeriveIndexBitwidthFromDataLayout*/ "0",
+              "Bitwidth of the index type, 0 to use size of machine word">];
 }
 
 //===----------------------------------------------------------------------===//
@@ -120,11 +126,10 @@ def ConvertGpuOpsToROCDLOps : Pass<"convert-gpu-to-rocdl", "gpu::GPUModuleOp"> {
   let summary = "Generate ROCDL operations for gpu operations";
   let constructor = "mlir::createLowerGpuOpsToROCDLOpsPass()";
   let dependentDialects = ["ROCDL::ROCDLDialect"];
-  let options = [
-    Option<"indexBitwidth", "index-bitwidth", "unsigned",
-           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
-           "Bitwidth of the index type, 0 to use size of machine word">
-  ];
+  let options =
+      [Option<"indexBitwidth", "index-bitwidth", "unsigned",
+              /*default=kDeriveIndexBitwidthFromDataLayout*/ "0",
+              "Bitwidth of the index type, 0 to use size of machine word">];
 }
 
 //===----------------------------------------------------------------------===//
@@ -203,8 +208,11 @@ def ConvertOpenMPToLLVM : Pass<"convert-openmp-to-llvm", "ModuleOp"> {
 // ===----------------------------------------------------------------------===//
 
 def ConvertRiseToImperative : FunctionPass<"convert-rise-to-imperative"> {
-  let summary = "Lower all functional primitives of the rise dialect to imperative";
+  let summary =
+      "Lower all functional primitives of the rise dialect to imperative";
   let constructor = "mlir::createConvertRiseToImperativePass()";
+  let dependentDialects =
+      ["AffineDialect", "scf::SCFDialect", "StandardOpsDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -271,26 +279,31 @@ def ConvertStandardToLLVM : Pass<"convert-std-to-llvm", "ModuleOp"> {
   let description = [{
     Convert standard operations into the LLVM IR dialect operations.
 
-    #### Input invariant
+        ####Input invariant
 
-    -   operations including: arithmetic on integers and floats, constants,
-        direct calls, returns and branches;
-    -   no `tensor` types;
-    -   all `vector` are one-dimensional;
-    -   all blocks are reachable by following the successors of the first basic
+        - operations including : arithmetic on integers and floats,
+        constants, direct calls, returns and branches;
+    -no `tensor` types;
+    -all `vector` are one - dimensional;
+    -all blocks are reachable by following the successors of the first basic
         block;
 
     If other operations are present and their results are required by the LLVM
-    IR dialect operations, the pass will fail.  Any LLVM IR operations or types
-    already present in the IR will be kept as is.
+        IR dialect operations,
+        the pass will
+                fail.Any LLVM IR operations or types already present in the IR
+                    will be kept as is
+                        .
 
-    #### Output IR
+            ####Output IR
 
-    Functions converted to LLVM IR. Function arguments types are converted
-    one-to-one. Function results are converted one-to-one and, in case more than
-    1 value is returned, packed into an LLVM IR struct type. Function calls and
-    returns are updated accordingly. Block argument types are updated to use
-    LLVM IR types.
+                Functions converted to LLVM IR.Function arguments types are
+                    converted one -
+            to - one.Function results are converted one - to - one and,
+        in case more than 1 value is returned,
+        packed into an LLVM
+            IR struct type.Function calls and returns are updated accordingly
+                .Block argument types are updated to use LLVM IR types.
   }];
   let constructor = "mlir::createLowerToLLVMPass()";
   let dependentDialects = ["LLVM::LLVMDialect"];
@@ -305,7 +318,7 @@ def ConvertStandardToLLVM : Pass<"convert-std-to-llvm", "ModuleOp"> {
            "Emit wrappers for C-compatible pointer-to-struct memref "
            "descriptors">,
     Option<"indexBitwidth", "index-bitwidth", "unsigned",
-           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/ "0",
            "Bitwidth of the index type, 0 to use size of machine word">,
     Option<"dataLayout", "data-layout", "std::string",
            /*default=*/"\"\"",
@@ -355,12 +368,13 @@ def ConvertVectorToLLVM : Pass<"convert-vector-to-llvm", "ModuleOp"> {
   let constructor = "mlir::createConvertVectorToLLVMPass()";
   let dependentDialects = ["LLVM::LLVMDialect"];
   let options = [
-    Option<"reassociateFPReductions", "reassociate-fp-reductions",
-           "bool", /*default=*/"false",
+    Option<"reassociateFPReductions", "reassociate-fp-reductions", "bool",
+           /*default=*/"false",
            "Allows llvm to reassociate floating-point reductions for speed">,
-    Option<"enableIndexOptimizations", "enable-index-optimizations",
-           "bool", /*default=*/"true",
-           "Allows compiler to assume indices fit in 32-bit if that yields faster code">
+    Option<"enableIndexOptimizations", "enable-index-optimizations", "bool",
+           /*default=*/"true",
+           "Allows compiler to assume indices fit in 32-bit if that yields "
+           "faster code">
   ];
 }
 
