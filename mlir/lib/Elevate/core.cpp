@@ -6,11 +6,11 @@
 #include "mlir/Elevate/core.h"
 
 int main() {
-  Expr e;
-  seq(id)(id)(e);
+//  Expr e;
+//  seq(id)(id)(e);
 
-  getExpr(leftChoice(fail)(fail)(e));
+//  getExpr(leftChoice(fail)(fail)(e));
 
-  id(e);
+//  id(e);
   std::cout << "done\n";
 }

@@ -22,6 +22,8 @@
 #include "mlir/Dialect/Rise/Passes.h"
 
 #include "mlir/Elevate/core.h"
+#include "mlir/Elevate/traversal.h"
+#include "mlir/Elevate/algorithmic.h"
 
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"

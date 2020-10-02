@@ -30,6 +30,7 @@
 using namespace mlir;
 using namespace mlir::rise;
 using namespace mlir::edsc;
+using namespace mlir::elevate;
 
 namespace {
 struct ElevateRewritingPass
@@ -62,18 +63,92 @@ LogicalResult ElevateRewritingPattern::match(FuncOp funcOp) const {
   }
 }
 
-
 void ElevateRewritingPattern::rewrite(FuncOp funcOp,
                                       PatternRewriter &rewriter) const {
-  OpBuilder builder(funcOp.getBody());
-  ScopedContext scope(builder, funcOp.getLoc());
+
+  LoweringUnitOp loweringUnit;
+  funcOp.getBody().walk([&](Operation *op) {
+    if (LoweringUnitOp loweringUnitOp = dyn_cast<LoweringUnitOp>(op))
+      loweringUnit = loweringUnitOp;
+  });
+  if (!loweringUnit) {
+    emitError(funcOp.getLoc()) << "No rise.lowering_unit found!";
+    return;
+  }
+  // Start at the back and find the rise.out op
+  Block &block = loweringUnit.region().front();
+  auto _outOp = std::find_if(block.rbegin(), block.rend(),
+                             [](auto &op) { return isa<OutOp>(op); });
+  if (_outOp == block.rend()) {
+    emitError(funcOp.getLoc()) << "Could not find rise.out operation!";
+    return;
+  }
+  OutOp outOp = dyn_cast<OutOp>(*_outOp);
+  auto lastApply = outOp.input().getDefiningOp();
+
+  OpBuilder builder(loweringUnit.getRegion());
+  ScopedContext scope(builder, loweringUnit.getLoc());
+  // clang-format off
   // Start Elevate Rewriting from here
 
-  Expr e;
-  seq(id)(id)(e); // works
+  // test one
+  RewriteResult oneTestResult = one(seq(debug("one"))(fail))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&oneTestResult)) {
+    std::cout << "one: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
 
-  getExpr(leftChoice(fail)(fail)(e)); // prints the expected logic error
+  // test function
+  RewriteResult functionTestResult = function(debug("function"))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&functionTestResult)) {
+    std::cout << "function: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
 
+  // test argument
+  RewriteResult argumentTestResult = argument(1, debug("argument"))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&argumentTestResult)) {
+    std::cout << "argument: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+  // test body for lambda
+  RewriteResult bodyTestResult = argument(1, body(debug("body")))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&argumentTestResult)) {
+    std::cout << "body: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+  // test body for embed
+  RewriteResult bodyEmbedTestResult = argument(1,
+                                               body(
+                                                   seq(
+                                                       debug("body"))(
+                                                       body(debug("body"))
+                                                       )
+                                                   )
+                                               )(*lastApply);
+  if (auto _ = std::get_if<Failure>(&bodyEmbedTestResult)) {
+    std::cout << "bodyEmbed: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+  // test topdown
+  RewriteResult topdownTestResult = topdown(seq(debug("topdown"))(fail))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&topdownTestResult)) {
+    std::cout << "topdown: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+
+  RewriteResult fuseReduceMapResult = topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap()))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&fuseReduceMapResult)) {
+    std::cout << "fuseReduceMapResult: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+  std::cout << "///////////////////// finished rewriting! /////////////////////\n\n\n";
+  // clang-format on
   return;
 }
 } // namespace
