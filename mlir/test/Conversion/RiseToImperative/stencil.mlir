@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=STENCIL
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=STENCIL
 
 func @print_memref_f32(memref<*xf32>)
 
@@ -23,7 +23,7 @@ func @rise_fun(%outArg: memref<11xf32>, %in: memref<9xf32>) {
             %result = rise.apply %reduce, %reductionAdd, %initializer, %window
             rise.return %result : !rise.scalar<f32>
         }
-        %map = rise.mapSeq {to = "affine"}  #rise.nat<11> #rise.array<3, scalar<f32>> #rise.scalar<f32>
+        %map = rise.mapSeq #rise.nat<11> #rise.array<3, scalar<f32>> #rise.scalar<f32>
         %result = rise.apply %map, %reduceWindow, %slided
 
         rise.out %outArg <- %result

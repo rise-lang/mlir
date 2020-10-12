@@ -24,6 +24,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "mlir/Elevate/ElevateRewriter.h"
+
 #include <iostream>
 #include <mlir/EDSC/Builders.h>
 
@@ -65,6 +67,9 @@ LogicalResult ElevateRewritingPattern::match(FuncOp funcOp) const {
 
 void ElevateRewritingPattern::rewrite(FuncOp funcOp,
                                       PatternRewriter &rewriter) const {
+
+  ElevateRewriter::getInstance().rewriter = &rewriter;
+
 
   LoweringUnitOp loweringUnit;
   funcOp.getBody().walk([&](Operation *op) {
@@ -140,13 +145,20 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
   }
   std::cout << "\n\n" << std::flush;
 
+//  RewriteResult fuseReduceMapResult = topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap))(*lastApply);
+//  RewriteResult fuseReduceMapResult = seq(topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap)))(topdown(betaReduction))(*lastApply);
+  RewriteResult fuseReduceMapResult = topdown(seq(debug("betaReduction:"))(betaReduction))(*lastApply);
+  RewriteResult fuseReduceMapResult2 = topdown(seq(debug("betaReduction2:"))(betaReduction))(*lastApply);
 
-  RewriteResult fuseReduceMapResult = topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap()))(*lastApply);
   if (auto _ = std::get_if<Failure>(&fuseReduceMapResult)) {
     std::cout << "fuseReduceMapResult: logic error!\n" << std::flush;
   }
   std::cout << "\n\n" << std::flush;
 
+  if (auto _ = std::get_if<Failure>(&fuseReduceMapResult2)) {
+    std::cout << "fuseReduceMapResult2: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
   std::cout << "///////////////////// finished rewriting! /////////////////////\n\n\n";
   // clang-format on
   return;

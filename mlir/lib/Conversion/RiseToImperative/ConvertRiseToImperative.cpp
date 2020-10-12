@@ -253,7 +253,6 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       loweringUnit.getRegion().front().begin(),
       Block::iterator(loweringUnit.region().front().end()));
   rewriter.eraseOp(loweringUnit);
-
   return;
 }
 
@@ -363,8 +362,7 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
     return;
   }
   if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
-    emitRemark(expr.getLoc()) << "lowerAndStore of EmbedOp. Copy "
-                                 "operations from this block to result.";
+    emitRemark(expr.getLoc()) << "lowerAndStore of EmbedOp.";
     assert(
         embedOp.getNumOperands() ==
             embedOp.region().front().getNumArguments() &&
@@ -459,6 +457,24 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
                       dyn_cast<LambdaOp>(apply.getOperand(1).getDefiningOp()),
                       apply.getOperand(2), apply.getType(), mapOp.getLoc(),
                       rewriter);
+    } else if (LambdaOp lambdaOp = dyn_cast<LambdaOp>(apply.fun().getDefiningOp())) {
+      emitRemark(expr.getLoc()) << "lower of Applied Lambda, performing on the fly beta reduction!";
+      SmallVector<Value, 10> args = SmallVector<Value, 10>();
+      for (int i = apply.getNumOperands() - 1; i > 0; i--) {
+        args.push_back(apply.getOperand(i));
+      }
+      Substitute(lambdaOp, args);
+      Value lambdaResult = lambdaOp.getRegion().front().getTerminator()->getOperand(0);
+      apply.getOperation()->getBlock()->getOperations().splice(
+          Block::iterator(apply),
+          lambdaOp.getRegion().front().getOperations(),
+          lambdaOp.getRegion().front().begin(), Block::iterator(lambdaOp.getRegion().front().getTerminator()));
+      // remove both apply and lambda
+      apply.replaceAllUsesWith(lambdaResult);
+
+      rewriter.eraseOp(apply);
+//      rewriter.eraseOp(lambdaOp);
+      return lower(lambdaResult, rewriter.getInsertionPoint(), rewriter);
     }
     emitError(apply.getLoc()) << "Cannot perform lowering for this apply!";
     return expr;
@@ -470,6 +486,10 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
       auto operand = embedOp.getOperand(i);
       auto operandCont = lower(operand, rewriter.getInsertionPoint(), rewriter);
       embedOp.setOperand(i, operandCont);
+    }
+    if (embedOp.getOperands().size() > 0) {
+      auto newEmbed = rewriter.clone(*embedOp.getOperation());
+      return newEmbed->getResult(0);
     }
 
     // This the embedded operations will be inlined later
@@ -1022,9 +1042,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
   }
   if (EmbedOp embedOp = dyn_cast<EmbedOp>(val.getDefiningOp())) {
     emitRemark(embedOp.getLoc()) << "resolveIndexing for Embed";
-
     auto oldInsertPoint = rewriter.saveInsertionPoint();
-
     rewriter.setInsertionPointAfter(embedOp);
 
     // Do codegen for all operands of embed first
@@ -1033,6 +1051,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
       embedOp.setOperand(i, resolveIndexing(operand, path, rewriter));
       i++;
     }
+
     // replace blockArgs in the region with results of the codegen for the
     // operands
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
@@ -1041,6 +1060,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
             return embedOp.getOperation()->isAncestor(operand.getOwner());
           });
     }
+
     // replace uses of embed value with returned value
     rise::ReturnOp embedReturn = dyn_cast<rise::ReturnOp>(
         embedOp.getRegion().front().getOperations().back());

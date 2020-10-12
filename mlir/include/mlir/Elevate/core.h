@@ -10,6 +10,7 @@
 #include <variant>
 #include <stdexcept>
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/Elevate/ElevateRewriter.h"
 
 namespace mlir {
 namespace elevate {
@@ -66,8 +67,9 @@ auto getExpr(RewriteResult rr) -> Expr & {
                          },
                          [](const Failure &f) -> Expr & {
                            std::cout << "elevate logic error!\n";
-                           //        throw std::logic_error("");
-                           //        return {}; // what Expr do we want to return here?
+                           // throw std::logic_error("");
+                           // return {}; // what Expr do we want to return here?
+                           // this obviously segfaults
                          }});
 }
 
@@ -104,6 +106,9 @@ struct DebugStrategy : Strategy {
   DebugStrategy(const std::string msg) : msg{msg} {};
 
   RewriteResult operator()(Expr &expr) const override {
+    if (FileLineColLoc loc = expr.getLoc().dyn_cast<FileLineColLoc>()) {
+      std::cout << loc.getFilename().str() << ":" << loc.getLine() << ":" << loc.getColumn() << " ";
+    }
     std::cout << expr.getName().getStringRef().str() << ": " << msg.c_str() << "\n";
     return success(expr);
   };

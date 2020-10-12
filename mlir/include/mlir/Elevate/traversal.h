@@ -11,6 +11,9 @@
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 
+#include "mlir/Dialect/StandardOps/EDSC/Builders.h"
+#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+
 using namespace mlir;
 using namespace mlir::rise;
 using namespace mlir::elevate;
@@ -84,7 +87,7 @@ struct OneStrategy : Strategy {
         RewriteResult rr = s(*op);
         if (auto success = std::get_if<Success>(&rr)) {
           // Does this have to happen here or in the strategy
-          apply.setOperand(i, getExpr(*success).getResult(0));
+//          apply.setOperand(i, getExpr(*success).getResult(0));
           return rr;
         }
       }
@@ -102,7 +105,7 @@ struct OneStrategy : Strategy {
         auto op = embed.getOperand(i).getDefiningOp();
         RewriteResult rr = s(*op);
         if (auto success = std::get_if<Success>(&rr)) {
-          embed.setOperand(i, getExpr(*success).getResult(0));
+//          embed.setOperand(i, getExpr(*success).getResult(0));
           return rr;
         }
       }
@@ -114,7 +117,6 @@ struct OneStrategy : Strategy {
 auto one = [](const auto &s) { return OneStrategy(s); };
 
 // not rise specific
-
 struct TopDownStrategy : Strategy {
   const Strategy &s;
   TopDownStrategy(const Strategy &s) : s{s} {};
@@ -136,4 +138,72 @@ struct BottomUpStrategy : Strategy {
 };
 
 auto bottomUp = [](const Strategy &s) { return BottomUpStrategy(s); };
+
+// package
+struct NormalizeStrategy : Strategy {
+  const Strategy &s;
+
+  NormalizeStrategy(const Strategy &s) : s{s} {};
+
+  RewriteResult operator()(Expr &expr) const override {
+    return repeat(topdown(s))(expr);
+  };
+};
+
+auto normalize = [](const auto &s) { return NormalizeStrategy(s); };
+
+
+void substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
+  if (lambda.region().front().getArguments().size() < args.size()) {
+    emitError(lambda.getLoc())
+        << "Too many arguments given for Lambda substitution";
+  }
+  for (int i = 0; i < args.size(); i++) {
+    lambda.region().front().getArgument(i).replaceAllUsesWith(args[i]);
+  }
+  return;
+}
+
+/*
+ * Inline the operations of a Lambda after op
+ */
+Value inlineLambda(LambdaOp lambda, Block *insertionBlock, Operation *op) {
+  Value lambdaResult = lambda.getRegion().front().getTerminator()->getOperand(0);
+  insertionBlock->getOperations().splice(
+      Block::iterator(op),
+      lambda.getRegion().front().getOperations(),
+      lambda.getRegion().front().begin(), Block::iterator(lambda.getRegion().front().getTerminator()));
+  return lambdaResult;
+}
+
+struct BetaReductionStrategy : Strategy {
+  BetaReductionStrategy(){};
+
+  RewriteResult operator()(Expr &expr) const override {
+    if (!isa<ApplyOp>(expr)) return Failure();
+    auto apply = cast<ApplyOp>(expr);
+    if (!isa<LambdaOp>(apply.getOperand(0).getDefiningOp())) return Failure();
+    // match success
+    PatternRewriter &rewriter = *ElevateRewriter::getInstance().rewriter;
+    auto lambda = cast<LambdaOp>(apply.getOperand(0).getDefiningOp());
+
+    SmallVector<Value, 10> args = SmallVector<Value, 10>();
+    for (int i = 1; i < apply.getNumOperands(); i++) {
+        args.push_back(apply.getOperand(i));
+    }
+    substitute(lambda, args);
+    Value inlinedLambdaResult = inlineLambda(lambda, expr.getBlock(), apply);
+    Expr *newExpr = inlinedLambdaResult.getDefiningOp();
+
+    expr.replaceAllUsesWith(newExpr); // TODO: factor out
+    // problem: we want to delete expr afterwards in this case!
+
+    rewriter.eraseOp(&expr);
+    rewriter.eraseOp(lambda);
+    return success(*newExpr);
+  };
+};
+
+auto betaReduction = BetaReductionStrategy();
+
 #endif // LLVM_ELEVATE_TRAVERSAL_H
