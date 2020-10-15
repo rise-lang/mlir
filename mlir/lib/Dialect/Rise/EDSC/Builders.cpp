@@ -239,6 +239,12 @@ Value mlir::edsc::op::padClamp(Nat l, Nat r, Value array) {
   return padClamp(arrayT.getSize(), l, r, arrayT.getElementType(), array);
 }
 
+Value mlir::edsc::op::id(Value val) {
+  MLIRContext *context = ScopedContext::getContext();
+  Type valT = val.getType();
+  return ValueBuilder<ApplyOp>(valT, id(valT), val);
+}
+
 Value mlir::edsc::op::literal(DataType t, StringRef literal) {
   MLIRContext *context = ScopedContext::getContext();
   return ValueBuilder<LiteralOp>(t,
@@ -253,6 +259,19 @@ Value mlir::edsc::abstraction::mapSeq2D(
     DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
     Value array2D) {
   return mapSeq2D("scf", resultElemType, bodyBuilder, array2D);
+}
+
+Value mlir::edsc::abstraction::mapSeq2D(
+    DataType resultElemType, Value lambda,
+    Value array2D) {
+  ArrayType arrayT = array2D.getType().dyn_cast<ArrayType>();
+  ArrayType nestedArrayT = arrayT.getElementType().dyn_cast<ArrayType>();
+  return mapSeq(
+      "scf", arrayType(nestedArrayT.getSize(), resultElemType),
+      [&](Value array) {
+        return mapSeq("scf", resultElemType, lambda, array);
+      },
+      array2D);
 }
 
 Value mlir::edsc::abstraction::mapSeq2D(
@@ -523,6 +542,12 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
   return mapSeq(lowerTo, arrayT.getSize(), s, t, lambda, array);
 }
 
+Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType t,
+                             Value lambda, Value array) {
+  ArrayType arrayT = array.getType().dyn_cast<ArrayType>();
+  return mapSeq(lowerTo, arrayT.getSize(), arrayT.getElementType(), t, lambda, array);
+}
+
 Value mlir::edsc::op::mapSeq(StringRef lowerTo, DataType s, DataType t,
                              function_ref<Value(BlockArgument)> bodyBuilder,
                              Value array) {
@@ -740,6 +765,16 @@ Value mlir::edsc::op::padClamp(Nat n, Nat l, Nat r, DataType t, Value array) {
                                            r.getIntValue()),
                      t),
       pad, ValueRange{array});
+}
+
+Value mlir::edsc::op::id(Type t) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<IdOp>(funType(t,t), TypeAttr::get(t));
+}
+
+Value mlir::edsc::op::id(Type t, Value val) {
+  MLIRContext *context = ScopedContext::getContext();
+  return ValueBuilder<ApplyOp>(t, id(t), val);
 }
 
 } // namespace edsc

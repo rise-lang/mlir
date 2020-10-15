@@ -27,7 +27,7 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
 
                     rise.return %result : !rise.scalar<f32>
                 }
-                %map = rise.mapPar #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
+                %map = rise.mapSeq #rise.nat<4> #rise.tuple<scalar<f32>, scalar<f32>> #rise.scalar<f32>
                 %multipliedArray = rise.apply %map, %f, %zippedArrays
 
                 //Reduction
@@ -44,11 +44,11 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
 
                 rise.return %result : !rise.scalar<f32>
             }
-            %m2 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.scalar<f32>
+            %m2 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.scalar<f32>
             %result = rise.apply %m2, %f2, %B
             rise.return %result : !rise.array<4, scalar<f32>>
         }
-        %m1 = rise.mapPar #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
+        %m1 = rise.mapSeq #rise.nat<4> #rise.array<4, scalar<f32>> #rise.array<4, scalar<f32>>
         %result = rise.apply %m1, %f1, %A
         rise.out %outArg <- %result
         rise.return

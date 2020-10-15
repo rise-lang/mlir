@@ -14,6 +14,9 @@ template <typename T>
 class OperationPass;
 class OwningRewritePatternList;
 class AffineDialect;
+namespace scf {
+  class SCFDialect;
+}
 
 void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);

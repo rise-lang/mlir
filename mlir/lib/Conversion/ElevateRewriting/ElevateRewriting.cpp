@@ -91,8 +91,6 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
   OutOp outOp = dyn_cast<OutOp>(*_outOp);
   auto lastApply = outOp.input().getDefiningOp();
 
-  OpBuilder builder(loweringUnit.getRegion());
-  ScopedContext scope(builder, loweringUnit.getLoc());
   // clang-format off
   // Start Elevate Rewriting from here
 
@@ -114,6 +112,13 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
   RewriteResult argumentTestResult = argument(1, debug("argument"))(*lastApply);
   if (auto _ = std::get_if<Failure>(&argumentTestResult)) {
     std::cout << "argument: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+
+  // test fMap
+  RewriteResult fMapTestResult = fmap(debug("fMap"))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&fMapTestResult)) {
+    std::cout << "fMap: logic error!\n" << std::flush;
   }
   std::cout << "\n\n" << std::flush;
 
@@ -145,19 +150,59 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
   }
   std::cout << "\n\n" << std::flush;
 
-//  RewriteResult fuseReduceMapResult = topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap))(*lastApply);
-//  RewriteResult fuseReduceMapResult = seq(topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap)))(topdown(betaReduction))(*lastApply);
-  RewriteResult fuseReduceMapResult = topdown(seq(debug("betaReduction:"))(betaReduction))(*lastApply);
-  RewriteResult fuseReduceMapResult2 = topdown(seq(debug("betaReduction2:"))(betaReduction))(*lastApply);
 
-  if (auto _ = std::get_if<Failure>(&fuseReduceMapResult)) {
-    std::cout << "fuseReduceMapResult: logic error!\n" << std::flush;
+
+  bool doSplitJoin = false;
+  if (doSplitJoin) {
+    RewriteResult splitjoinResult = topdown(seq(debug("splitjoin:"))(splitJoin(2)))(*lastApply);
+    if (auto _ = std::get_if<Failure>(&splitjoinResult)) {
+      std::cout << "splitjoin: logic error!\n" << std::flush;
+    }
+    std::cout << "\n\n" << std::flush;
+  }
+
+  // fuse reduceSeq and mapSeq
+  bool dofuseReduceMap = true;
+  if (dofuseReduceMap) {
+    RewriteResult fuseReduceMapResult = topdown(seq(debug("fuseReduceMap:"))(fuseReduceMap))(*lastApply);
+    RewriteResult betaRed1 = topdown(betaReduction)(getExpr(fuseReduceMapResult));
+    RewriteResult betaRed2 = topdown(betaReduction)(getExpr(betaRed1));
+  }
+  lastApply = outOp.input().getDefiningOp();  // has been changed by this rewrite
+
+  // test id
+  RewriteResult idTestResult = topdown(seq(debug("id"))(addIdAfter))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&idTestResult)) {
+    std::cout << "idTestResult: logic error!\n" << std::flush;
   }
   std::cout << "\n\n" << std::flush;
+  lastApply = outOp.input().getDefiningOp();  // has been changed by this rewrite
 
-  if (auto _ = std::get_if<Failure>(&fuseReduceMapResult2)) {
-    std::cout << "fuseReduceMapResult2: logic error!\n" << std::flush;
+  // test createTransposePair
+  RewriteResult transposePairTestResult = topdown(seq(debug("tranposePair"))(createTransposePair))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&transposePairTestResult)) {
+    std::cout << "transposePairTestResult: logic error!\n" << std::flush;
   }
+  std::cout << "\n\n" << std::flush;
+  lastApply = outOp.input().getDefiningOp();  // has been changed by this rewrite
+
+  // test removeTransposePair
+  RewriteResult removeTransposePairTestResult = topdown(seq(debug("removeTranposePair"))(removeTransposePair))(*lastApply);
+  if (auto _ = std::get_if<Failure>(&removeTransposePairTestResult)) {
+    std::cout << "removeTransposePairTestResult: logic error!\n" << std::flush;
+  }
+  std::cout << "\n\n" << std::flush;
+  lastApply = outOp.input().getDefiningOp();  // has been changed by this rewrite
+
+  // test createTransposePair
+//  RewriteResult moveTransposeTestResult = topdown(seq(debug("moveTranspose"))(transposeBeforeMapMap))(*lastApply);
+//  if (auto _ = std::get_if<Failure>(&moveTransposeTestResult)) {
+//    std::cout << "moveTransposeTestResult: logic error!\n" << std::flush;
+//  }
+//  std::cout << "\n\n" << std::flush;
+//  lastApply = outOp.input().getDefiningOp();  // has been changed by this rewrite
+
+
   std::cout << "\n\n" << std::flush;
   std::cout << "///////////////////// finished rewriting! /////////////////////\n\n\n";
   // clang-format on

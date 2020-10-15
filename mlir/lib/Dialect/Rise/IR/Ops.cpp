@@ -631,6 +631,22 @@ LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
+/// id: {t : data} → t → t
+LogicalResult parseIdOp(OpAsmParser &parser, OperationState &result) {
+  OpBuilder opBuilder(parser.getBuilder().getContext());
+  Location loc(result.location);
+  ScopedContext scope(opBuilder, loc);
+
+  TypeAttr t;
+
+  // type of first element
+  if (failed(parser.parseAttribute(t, "t", result.attributes)))
+    failure();
+
+  result.addTypes(funType(t.getValue(), t.getValue()));
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // ReturnOp
 //===----------------------------------------------------------------------===//

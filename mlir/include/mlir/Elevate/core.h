@@ -61,6 +61,10 @@ struct Strategy {
   virtual RewriteResult operator()(Expr &expr) const = 0;
 };
 
+// TODO:
+// automatic cleanup will be possible. We will always replace the matched operation with what ever the strategy returns.
+// We then check for all previous operands, if they have still uses and remove them accordingly
+
 auto getExpr(RewriteResult rr) -> Expr & {
   return match(rr, cases{[](const Success &s) -> Expr & {
                            return const_cast<Expr &>(s.expr);
@@ -90,9 +94,6 @@ auto flatMapFailure(RewriteResult rr, const F &f) -> RewriteResult {
                cases{[&](const Success &ss) -> RewriteResult { return ss; },
                      [&](const Failure &) -> RewriteResult { return f(); }});
 }
-
-// TODO: don't really understand this
-//auto mapFailure(RewriteResult rr, const Strategy& s)...
 
 struct IdStrategy : Strategy {
   RewriteResult operator()(Expr &expr) const override { return success(expr); };
@@ -152,7 +153,6 @@ struct LeftChoiceStrategy : Strategy {
 
 auto leftChoice = [](const auto &fs) {
   return [&](const auto &ss) { return LeftChoiceStrategy(fs, ss); };
-  // why 2 lambda?
 };
 
 struct TryStrategy : Strategy {

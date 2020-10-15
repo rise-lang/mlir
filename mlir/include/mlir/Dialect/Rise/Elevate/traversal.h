@@ -5,7 +5,7 @@
 #ifndef LLVM_ELEVATE_TRAVERSAL_H
 #define LLVM_ELEVATE_TRAVERSAL_H
 
-#include "core.h"
+#include "mlir/Elevate/core.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Types.h"
@@ -68,6 +68,25 @@ struct ArgumentStrategy : Strategy {
 
 auto argument = [](const auto n, const auto &s) {
   return ArgumentStrategy(n, s);
+};
+
+struct FMapStrategy : Strategy {
+  const Strategy &s;
+  FMapStrategy(const Strategy &s) : s{s} {};
+
+  RewriteResult operator()(Expr &expr) const override {
+    if (!isa<ApplyOp>(expr))
+      return elevate::failure();
+
+    auto apply = cast<ApplyOp>(expr);
+    if (!isa<MapSeqOp>(apply.getOperand(0).getDefiningOp())) return elevate::failure();
+
+    return argument(1, body(s))(expr);
+  };
+};
+
+auto fmap = [](const auto &s) {
+  return FMapStrategy(s);
 };
 
 struct OneStrategy : Strategy {
@@ -152,7 +171,7 @@ struct NormalizeStrategy : Strategy {
 
 auto normalize = [](const auto &s) { return NormalizeStrategy(s); };
 
-
+// utils
 void substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
   if (lambda.region().front().getArguments().size() < args.size()) {
     emitError(lambda.getLoc())
@@ -164,9 +183,7 @@ void substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
   return;
 }
 
-/*
- * Inline the operations of a Lambda after op
- */
+/* Inline the operations of a Lambda after op */
 Value inlineLambda(LambdaOp lambda, Block *insertionBlock, Operation *op) {
   Value lambdaResult = lambda.getRegion().front().getTerminator()->getOperand(0);
   insertionBlock->getOperations().splice(

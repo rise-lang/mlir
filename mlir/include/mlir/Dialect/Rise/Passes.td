@@ -15,14 +15,14 @@ def RiseToImperative
     : FunctionPass<"convert-rise-to-imperative"> {
   let summary = "Lower all functional primitives of the rise dialect to imperative";
   let constructor = "mlir::rise::createConvertRiseToImperativePass()";
-  let dependentDialects = ["mlir::rise::RiseDialect", "AffineDialect"];
+  let dependentDialects = ["mlir::rise::RiseDialect", "scf::SCFDialect", "AffineDialect"];
 }
 
 def ElevateRewriting
     : FunctionPass<"elevate-rewriting"> {
   let summary = "";
   let constructor = "mlir::rise::createElevateRewritingPass()";
-  let dependentDialects = ["mlir::rise::RiseDialect"];
+  let dependentDialects = ["mlir::rise::RiseDialect", "scf::SCFDialect", "AffineDialect"];
 }
 
 #endif // MLIR_DIALECT_RISE_PASSES

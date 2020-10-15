@@ -358,6 +358,14 @@ def LiteralOp : Rise_Op<"literal"> {
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
+def IdOp : Rise_Op<"id"> {
+  let summary = "id";
+  let description = "";
+  let arguments = (ins TypeAttr : $t);
+  let results = (outs FunType);
+  let parser = [{ return parse$cppClass(parser, result); }];
+}
+
 //===----------------------------------------------------------------------===//
 // Rise Operations: Intermediate Codegen
 //===----------------------------------------------------------------------===//

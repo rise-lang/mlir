@@ -14,10 +14,10 @@
 #ifndef MLIR_DIALECT_RISE_EDSC_BUILDERS_H_
 #define MLIR_DIALECT_RISE_EDSC_BUILDERS_H_
 
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/EDSC/Builders.h"
 #include "mlir/IR/Builders.h"
@@ -45,11 +45,12 @@ ScalarType scalarF32Type();
 ScalarType scalarF64Type();
 } // namespace type
 
-namespace abstraction{
-Value mapSeq2D(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
-             Value array2D);
+namespace abstraction {
+Value mapSeq2D(DataType resultElemType,
+               function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
+Value mapSeq2D(DataType resultElemType, Value lambda, Value array2D);
 Value mapSeq2D(StringRef lowerTo, DataType resultElemType,
-             function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
+               function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
 Value slide2D(Nat szOuter, Nat stOuter, Nat szInner, Nat stInner,
               Value array2DVal);
 Value pad2D(Nat lOuter, Nat rOuter, Nat lInner, Nat rInner, Value array);
@@ -80,12 +81,12 @@ void rise_return(Value returnValue);
 void lowering_unit(function_ref<void()> bodyBuilder);
 
 // Patterns
-Value mapSeq(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
-             Value array);
+Value mapSeq(DataType resultElemType,
+             function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 Value mapSeq(StringRef lowerTo, DataType resultElemType,
              function_ref<Value(BlockArgument)> bodyBuilder, Value array);
-Value map(DataType resultElemType, function_ref<Value(BlockArgument)> bodyBuilder,
-          Value array);
+Value map(DataType resultElemType,
+          function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 Value reduceSeq(DataType resulType,
                 function_ref<Value(BlockArgument, BlockArgument)> bodyBuilder,
                 Value initializer, Value array);
@@ -98,6 +99,7 @@ Value join(Value array);
 Value transpose(Value array);
 Value slide(Nat windowSize, Nat step, Value array);
 Value padClamp(Nat l, Nat r, Value array);
+Value id(Value val);
 Value literal(DataType t, StringRef literal);
 
 //===----------------------------------------------------------------------===//
@@ -136,6 +138,7 @@ Value mapSeq(StringRef lowerTo, DataType s, DataType t,
              function_ref<Value(BlockArgument)> bodyBuilder, Value array);
 Value mapSeq(StringRef lowerTo, DataType t,
              function_ref<Value(BlockArgument)> bodyBuilder, Value array);
+Value mapSeq(StringRef lowerTo, DataType t, Value lambda, Value array);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t);
 Value mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t, Value lambda,
              Value array);
@@ -167,6 +170,8 @@ Value slide(Nat n, Nat sz, Nat sp, DataType t);
 Value slide(Nat n, Nat sz, Nat sp, DataType t, Value array);
 Value padClamp(Nat n, Nat l, Nat r, DataType t);
 Value padClamp(Nat n, Nat l, Nat r, DataType t, Value array);
+Value id(Type t);
+Value id(Type t, Value val);
 
 } // namespace op
 
