@@ -20,9 +20,10 @@ using namespace mlir::elevate;
 
 struct BodyStrategy : Strategy {
   const Strategy &s;
+  bool traversal() const override {return true;};
   BodyStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<LambdaOp>(expr) && !isa<EmbedOp>(expr))
       return elevate::failure();
 
@@ -36,9 +37,10 @@ auto body = [](const auto &s) { return BodyStrategy(s); };
 
 struct FunctionStrategy : Strategy {
   const Strategy &s;
+  bool traversal() const override {return true;};
   FunctionStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr))
       return elevate::failure();
 
@@ -53,9 +55,10 @@ auto function = [](const auto &s) { return FunctionStrategy(s); };
 struct ArgumentStrategy : Strategy {
   int n;
   const Strategy &s;
+  bool traversal() const override {return true;};
   ArgumentStrategy(const int n, const Strategy &s) : n{n}, s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr))
       return elevate::failure();
 
@@ -71,10 +74,11 @@ auto argument = [](const auto n, const auto &s) {
 };
 
 struct FMapStrategy : Strategy {
+  bool traversal() const override {return true;};
   const Strategy &s;
   FMapStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr))
       return elevate::failure();
 
@@ -90,10 +94,11 @@ auto fmap = [](const auto &s) {
 };
 
 struct OneStrategy : Strategy {
+  bool traversal() const override {return true;};
   const Strategy &s;
   OneStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr) && !isa<LambdaOp>(expr) && !isa<EmbedOp>(expr))
       return elevate::failure();
 
@@ -137,10 +142,11 @@ auto one = [](const auto &s) { return OneStrategy(s); };
 
 // not rise specific
 struct TopDownStrategy : Strategy {
+  bool traversal() const override {return true;};
   const Strategy &s;
   TopDownStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     return leftChoice(s)(one(TopDownStrategy(s)))(expr);
   };
 };
@@ -148,10 +154,11 @@ struct TopDownStrategy : Strategy {
 auto topdown = [](const Strategy &s) { return TopDownStrategy(s); };
 
 struct BottomUpStrategy : Strategy {
+  bool traversal() const override {return true;};
   const Strategy &s;
   BottomUpStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     return leftChoice(one(BottomUpStrategy(s)))(s)(expr);
   };
 };
@@ -160,11 +167,12 @@ auto bottomUp = [](const Strategy &s) { return BottomUpStrategy(s); };
 
 // package
 struct NormalizeStrategy : Strategy {
+  bool traversal() const override {return true;};
   const Strategy &s;
 
   NormalizeStrategy(const Strategy &s) : s{s} {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     return repeat(topdown(s))(expr);
   };
 };
@@ -195,8 +203,9 @@ Value inlineLambda(LambdaOp lambda, Block *insertionBlock, Operation *op) {
 
 struct BetaReductionStrategy : Strategy {
   BetaReductionStrategy(){};
+  bool traversal() const override {return true;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply = cast<ApplyOp>(expr);
     if (!isa<LambdaOp>(apply.getOperand(0).getDefiningOp())) return Failure();

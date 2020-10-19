@@ -152,7 +152,7 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
 
 
 
-  bool doSplitJoin = false;
+  bool doSplitJoin = true;
   if (doSplitJoin) {
     RewriteResult splitjoinResult = topdown(seq(debug("splitjoin:"))(splitJoin(2)))(*lastApply);
     if (auto _ = std::get_if<Failure>(&splitjoinResult)) {
