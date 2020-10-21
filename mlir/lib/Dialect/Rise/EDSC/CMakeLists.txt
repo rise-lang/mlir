@@ -11,5 +11,4 @@ add_mlir_dialect_library(MLIRRiseEDSC
   MLIRRise
   MLIRAffineEDSC
   MLIRSCF
-  MLIRStandardOps
   )

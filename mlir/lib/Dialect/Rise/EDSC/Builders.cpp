@@ -706,7 +706,7 @@ Value mlir::edsc::op::transpose(Nat n, Nat m, DataType t) {
       context, ArrayType::get(context, n, ArrayType::get(context, m, t)),
       ArrayType::get(context, m, ArrayType::get(context, n, t)));
 
-  return ValueBuilder<TransposeOp>(transposeType, NatAttr::get(context, n),
+  return ValueBuilder<mlir::rise::TransposeOp>(transposeType, NatAttr::get(context, n),
                                    NatAttr::get(context, m),
                                    DataTypeAttr::get(context, t));
 }

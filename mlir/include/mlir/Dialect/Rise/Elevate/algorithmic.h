@@ -167,13 +167,13 @@ struct RemoveTransposePairStrategy : Strategy {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply1 = cast<ApplyOp>(expr);
-    if (!isa<TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
-    auto transpose1 = cast<TransposeOp>(apply1.getOperand(0).getDefiningOp());
+    if (!isa<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
+    auto transpose1 = cast<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp());
     if (!apply1.getOperand(1).isa<OpResult>()) return Failure();
     if (!isa<ApplyOp>(apply1.getOperand(1).getDefiningOp())) return Failure();
     auto apply2 = cast<ApplyOp>(apply1.getOperand(1).getDefiningOp());
-    if (!isa<TransposeOp>(apply2.getOperand(0).getDefiningOp())) return Failure();
-    auto transpose2 = cast<TransposeOp>(apply2.getOperand(0).getDefiningOp());
+    if (!isa<mlir::rise::TransposeOp>(apply2.getOperand(0).getDefiningOp())) return Failure();
+    auto transpose2 = cast<mlir::rise::TransposeOp>(apply2.getOperand(0).getDefiningOp());
     if (!apply2.getOperand(1).isa<OpResult>()) return Failure();
     // successful match
 
@@ -204,8 +204,8 @@ struct TransposeBeforeMapMapFStrategy : Strategy {
 
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply1 = cast<ApplyOp>(expr);
-    if (!isa<TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
-    auto transpose1 = cast<TransposeOp>(apply1.getOperand(0).getDefiningOp());
+    if (!isa<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
+    auto transpose1 = cast<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp());
     if (!apply1.getOperand(1).isa<OpResult>()) return Failure();
     if (!isa<ApplyOp>(apply1.getOperand(1).getDefiningOp())) return Failure();
     auto apply2 = cast<ApplyOp>(apply1.getOperand(1).getDefiningOp());

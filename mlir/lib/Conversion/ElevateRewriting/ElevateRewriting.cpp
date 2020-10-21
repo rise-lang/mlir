@@ -223,8 +223,8 @@ void ElevateRewritingPattern::rewrite(FuncOp funcOp,
     // to all required Values
     if (!isa<ApplyOp>(expr)) return;
     auto apply1 = cast<ApplyOp>(expr);
-    if (!isa<TransposeOp>(apply1.getOperand(0).getDefiningOp())) return;
-    auto transpose1 = cast<TransposeOp>(apply1.getOperand(0).getDefiningOp());
+    if (!isa<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp())) return;
+    auto transpose1 = cast<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp());
     if (!apply1.getOperand(1).isa<OpResult>()) return;
     if (!isa<ApplyOp>(apply1.getOperand(1).getDefiningOp())) return;
     auto apply2 = cast<ApplyOp>(apply1.getOperand(1).getDefiningOp());

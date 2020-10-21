@@ -184,7 +184,7 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
         isa<MapParOp>(inst) || isa<MapOp>(inst) || isa<ReduceSeqOp>(inst) ||
-        isa<OutOp>(inst) || isa<LiteralOp>(inst) || isa<TransposeOp>(inst) ||
+        isa<OutOp>(inst) || isa<LiteralOp>(inst) || isa<mlir::rise::TransposeOp>(inst) ||
         isa<SplitOp>(inst) || isa<JoinOp>(inst) || isa<SlideOp>(inst) ||
         isa<PadOp>(inst)) {
       if (!inst->getParentOfType<LambdaOp>()) {
@@ -325,7 +325,7 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
       lowerAndStoreJoin(joinOp.nAttr(), joinOp.mAttr(), joinOp.tAttr(),
                         apply.getOperand(1), out, joinOp.getLoc(), rewriter);
       return;
-    } else if (TransposeOp transposeOp = dyn_cast<TransposeOp>(appliedFun)) {
+    } else if (mlir::rise::TransposeOp transposeOp = dyn_cast<mlir::rise::TransposeOp>(appliedFun)) {
       emitRemark(transposeOp.getLoc()) << "lowerAndStore of Transpose";
       lowerAndStoreTranspose(transposeOp.nAttr(), transposeOp.mAttr(),
                              transposeOp.tAttr(), apply.getOperand(1), out,
@@ -423,8 +423,8 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
           joinOp.getLoc(), apply.getType(), arrayCont, joinOp.nAttr(),
           joinOp.mAttr(), joinOp.tAttr());
       return joinInterm;
-    } else if (TransposeOp transposeOp =
-                   dyn_cast<TransposeOp>(apply.fun().getDefiningOp())) {
+    } else if (mlir::rise::TransposeOp transposeOp =
+                   dyn_cast<mlir::rise::TransposeOp>(apply.fun().getDefiningOp())) {
       emitRemark(expr.getLoc()) << "lower of Applied transpose";
       return lowerTranspose(
           transposeOp.nAttr(), transposeOp.mAttr(), transposeOp.tAttr(),
