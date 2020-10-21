@@ -11,9 +11,11 @@
  */
 
 #include "mlir-c/AffineMap.h"
+#include "mlir-c/Diagnostics.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Registration.h"
 #include "mlir-c/StandardAttributes.h"
+#include "mlir-c/StandardDialect.h"
 #include "mlir-c/StandardTypes.h"
 
 #include <assert.h>
@@ -151,10 +153,12 @@ struct ModuleStats {
   unsigned numBlocks;
   unsigned numRegions;
   unsigned numValues;
+  unsigned numBlockArguments;
+  unsigned numOpResults;
 };
 typedef struct ModuleStats ModuleStats;
 
-void collectStatsSingle(OpListNode *head, ModuleStats *stats) {
+int collectStatsSingle(OpListNode *head, ModuleStats *stats) {
   MlirOperation operation = head->op;
   stats->numOperations += 1;
   stats->numValues += mlirOperationGetNumResults(operation);
@@ -164,12 +168,39 @@ void collectStatsSingle(OpListNode *head, ModuleStats *stats) {
 
   stats->numRegions += numRegions;
 
+  intptr_t numResults = mlirOperationGetNumResults(operation);
+  for (intptr_t i = 0; i < numResults; ++i) {
+    MlirValue result = mlirOperationGetResult(operation, i);
+    if (!mlirValueIsAOpResult(result))
+      return 1;
+    if (mlirValueIsABlockArgument(result))
+      return 2;
+    if (!mlirOperationEqual(operation, mlirOpResultGetOwner(result)))
+      return 3;
+    if (i != mlirOpResultGetResultNumber(result))
+      return 4;
+    ++stats->numOpResults;
+  }
+
   for (unsigned i = 0; i < numRegions; ++i) {
     MlirRegion region = mlirOperationGetRegion(operation, i);
     for (MlirBlock block = mlirRegionGetFirstBlock(region);
          !mlirBlockIsNull(block); block = mlirBlockGetNextInRegion(block)) {
       ++stats->numBlocks;
-      stats->numValues += mlirBlockGetNumArguments(block);
+      intptr_t numArgs = mlirBlockGetNumArguments(block);
+      stats->numValues += numArgs;
+      for (intptr_t j = 0; j < numArgs; ++j) {
+        MlirValue arg = mlirBlockGetArgument(block, j);
+        if (!mlirValueIsABlockArgument(arg))
+          return 5;
+        if (mlirValueIsAOpResult(arg))
+          return 6;
+        if (!mlirBlockEqual(block, mlirBlockArgumentGetOwner(arg)))
+          return 7;
+        if (j != mlirBlockArgumentGetArgNumber(arg))
+          return 8;
+        ++stats->numBlockArguments;
+      }
 
       for (MlirOperation child = mlirBlockGetFirstOperation(block);
            !mlirOperationIsNull(child);
@@ -181,9 +212,10 @@ void collectStatsSingle(OpListNode *head, ModuleStats *stats) {
       }
     }
   }
+  return 0;
 }
 
-void collectStats(MlirOperation operation) {
+int collectStats(MlirOperation operation) {
   OpListNode *head = malloc(sizeof(OpListNode));
   head->op = operation;
   head->next = NULL;
@@ -194,9 +226,13 @@ void collectStats(MlirOperation operation) {
   stats.numBlocks = 0;
   stats.numRegions = 0;
   stats.numValues = 0;
+  stats.numBlockArguments = 0;
+  stats.numOpResults = 0;
 
   do {
-    collectStatsSingle(head, &stats);
+    int retval = collectStatsSingle(head, &stats);
+    if (retval)
+      return retval;
     OpListNode *next = head->next;
     free(head);
     head = next;
@@ -207,6 +243,11 @@ void collectStats(MlirOperation operation) {
   fprintf(stderr, "Number of blocks: %u\n", stats.numBlocks);
   fprintf(stderr, "Number of regions: %u\n", stats.numRegions);
   fprintf(stderr, "Number of values: %u\n", stats.numValues);
+  fprintf(stderr, "Number of block arguments: %u\n", stats.numBlockArguments);
+  fprintf(stderr, "Number of op results: %u\n", stats.numOpResults);
+  if (stats.numValues != stats.numBlockArguments + stats.numOpResults)
+    return 100;
+  return 0;
 }
 
 static void printToStderr(const char *str, intptr_t len, void *userData) {
@@ -214,7 +255,7 @@ static void printToStderr(const char *str, intptr_t len, void *userData) {
   fwrite(str, 1, len, stderr);
 }
 
-static void printFirstOfEach(MlirOperation operation) {
+static void printFirstOfEach(MlirContext ctx, MlirOperation operation) {
   // Assuming we are given a module, go to the first operation of the first
   // function.
   MlirRegion region = mlirOperationGetRegion(operation, 0);
@@ -225,24 +266,121 @@ static void printFirstOfEach(MlirOperation operation) {
   operation = mlirBlockGetFirstOperation(block);
 
   // In the module we created, the first operation of the first function is an
-  // "std.dim", which has an attribute an a single result that we can use to
+  // "std.dim", which has an attribute and a single result that we can use to
   // test the printing mechanism.
   mlirBlockPrint(block, printToStderr, NULL);
   fprintf(stderr, "\n");
+  fprintf(stderr, "First operation: ");
   mlirOperationPrint(operation, printToStderr, NULL);
   fprintf(stderr, "\n");
 
-  MlirNamedAttribute namedAttr = mlirOperationGetAttribute(operation, 0);
-  mlirAttributePrint(namedAttr.attribute, printToStderr, NULL);
+  // Get the attribute by index.
+  MlirNamedAttribute namedAttr0 = mlirOperationGetAttribute(operation, 0);
+  fprintf(stderr, "Get attr 0: ");
+  mlirAttributePrint(namedAttr0.attribute, printToStderr, NULL);
   fprintf(stderr, "\n");
 
+  // Now re-get the attribute by name.
+  MlirAttribute attr0ByName =
+      mlirOperationGetAttributeByName(operation, namedAttr0.name);
+  fprintf(stderr, "Get attr 0 by name: ");
+  mlirAttributePrint(attr0ByName, printToStderr, NULL);
+  fprintf(stderr, "\n");
+
+  // Get a non-existing attribute and assert that it is null (sanity).
+  fprintf(stderr, "does_not_exist is null: %d\n",
+          mlirAttributeIsNull(
+              mlirOperationGetAttributeByName(operation, "does_not_exist")));
+
+  // Get result 0 and its type.
   MlirValue value = mlirOperationGetResult(operation, 0);
+  fprintf(stderr, "Result 0: ");
   mlirValuePrint(value, printToStderr, NULL);
   fprintf(stderr, "\n");
+  fprintf(stderr, "Value is null: %d\n", mlirValueIsNull(value));
 
   MlirType type = mlirValueGetType(value);
+  fprintf(stderr, "Result 0 type: ");
   mlirTypePrint(type, printToStderr, NULL);
   fprintf(stderr, "\n");
+
+  // Set a custom attribute.
+  mlirOperationSetAttributeByName(operation, "custom_attr",
+                                  mlirBoolAttrGet(ctx, 1));
+  fprintf(stderr, "Op with set attr: ");
+  mlirOperationPrint(operation, printToStderr, NULL);
+  fprintf(stderr, "\n");
+
+  // Remove the attribute.
+  fprintf(stderr, "Remove attr: %d\n",
+          mlirOperationRemoveAttributeByName(operation, "custom_attr"));
+  fprintf(stderr, "Remove attr again: %d\n",
+          mlirOperationRemoveAttributeByName(operation, "custom_attr"));
+  fprintf(stderr, "Removed attr is null: %d\n",
+          mlirAttributeIsNull(
+              mlirOperationGetAttributeByName(operation, "custom_attr")));
+}
+
+/// Creates an operation with a region containing multiple blocks with
+/// operations and dumps it. The blocks and operations are inserted using
+/// block/operation-relative API and their final order is checked.
+static void buildWithInsertionsAndPrint(MlirContext ctx) {
+  MlirLocation loc = mlirLocationUnknownGet(ctx);
+
+  MlirRegion owningRegion = mlirRegionCreate();
+  MlirBlock nullBlock = mlirRegionGetFirstBlock(owningRegion);
+  MlirOperationState state = mlirOperationStateGet("insertion.order.test", loc);
+  mlirOperationStateAddOwnedRegions(&state, 1, &owningRegion);
+  MlirOperation op = mlirOperationCreate(&state);
+  MlirRegion region = mlirOperationGetRegion(op, 0);
+
+  // Use integer types of different bitwidth as block arguments in order to
+  // differentiate blocks.
+  MlirType i1 = mlirIntegerTypeGet(ctx, 1);
+  MlirType i2 = mlirIntegerTypeGet(ctx, 2);
+  MlirType i3 = mlirIntegerTypeGet(ctx, 3);
+  MlirType i4 = mlirIntegerTypeGet(ctx, 4);
+  MlirBlock block1 = mlirBlockCreate(1, &i1);
+  MlirBlock block2 = mlirBlockCreate(1, &i2);
+  MlirBlock block3 = mlirBlockCreate(1, &i3);
+  MlirBlock block4 = mlirBlockCreate(1, &i4);
+  // Insert blocks so as to obtain the 1-2-3-4 order,
+  mlirRegionInsertOwnedBlockBefore(region, nullBlock, block3);
+  mlirRegionInsertOwnedBlockBefore(region, block3, block2);
+  mlirRegionInsertOwnedBlockAfter(region, nullBlock, block1);
+  mlirRegionInsertOwnedBlockAfter(region, block3, block4);
+
+  MlirOperationState op1State = mlirOperationStateGet("dummy.op1", loc);
+  MlirOperationState op2State = mlirOperationStateGet("dummy.op2", loc);
+  MlirOperationState op3State = mlirOperationStateGet("dummy.op3", loc);
+  MlirOperationState op4State = mlirOperationStateGet("dummy.op4", loc);
+  MlirOperationState op5State = mlirOperationStateGet("dummy.op5", loc);
+  MlirOperationState op6State = mlirOperationStateGet("dummy.op6", loc);
+  MlirOperationState op7State = mlirOperationStateGet("dummy.op7", loc);
+  MlirOperation op1 = mlirOperationCreate(&op1State);
+  MlirOperation op2 = mlirOperationCreate(&op2State);
+  MlirOperation op3 = mlirOperationCreate(&op3State);
+  MlirOperation op4 = mlirOperationCreate(&op4State);
+  MlirOperation op5 = mlirOperationCreate(&op5State);
+  MlirOperation op6 = mlirOperationCreate(&op6State);
+  MlirOperation op7 = mlirOperationCreate(&op7State);
+
+  // Insert operations in the first block so as to obtain the 1-2-3-4 order.
+  MlirOperation nullOperation = mlirBlockGetFirstOperation(block1);
+  assert(mlirOperationIsNull(nullOperation));
+  mlirBlockInsertOwnedOperationBefore(block1, nullOperation, op3);
+  mlirBlockInsertOwnedOperationBefore(block1, op3, op2);
+  mlirBlockInsertOwnedOperationAfter(block1, nullOperation, op1);
+  mlirBlockInsertOwnedOperationAfter(block1, op3, op4);
+
+  // Append operations to the rest of blocks to make them non-empty and thus
+  // printable.
+  mlirBlockAppendOwnedOperation(block2, op5);
+  mlirBlockAppendOwnedOperation(block3, op6);
+  mlirBlockAppendOwnedOperation(block4, op7);
+
+  mlirOperationDump(op);
+  mlirOperationDestroy(op);
 }
 
 /// Dumps instances of all standard types to check that C API works correctly.
@@ -381,6 +519,26 @@ static int printStandardTypes(MlirContext ctx) {
   mlirTypeDump(tuple);
   fprintf(stderr, "\n");
 
+  // Function type.
+  MlirType funcInputs[2] = {mlirIndexTypeGet(ctx), mlirIntegerTypeGet(ctx, 1)};
+  MlirType funcResults[3] = {mlirIntegerTypeGet(ctx, 16),
+                             mlirIntegerTypeGet(ctx, 32),
+                             mlirIntegerTypeGet(ctx, 64)};
+  MlirType funcType = mlirFunctionTypeGet(ctx, 2, funcInputs, 3, funcResults);
+  if (mlirFunctionTypeGetNumInputs(funcType) != 2)
+    return 21;
+  if (mlirFunctionTypeGetNumResults(funcType) != 3)
+    return 22;
+  if (!mlirTypeEqual(funcInputs[0], mlirFunctionTypeGetInput(funcType, 0)) ||
+      !mlirTypeEqual(funcInputs[1], mlirFunctionTypeGetInput(funcType, 1)))
+    return 23;
+  if (!mlirTypeEqual(funcResults[0], mlirFunctionTypeGetResult(funcType, 0)) ||
+      !mlirTypeEqual(funcResults[1], mlirFunctionTypeGetResult(funcType, 1)) ||
+      !mlirTypeEqual(funcResults[2], mlirFunctionTypeGetResult(funcType, 2)))
+    return 24;
+  mlirTypeDump(funcType);
+  fprintf(stderr, "\n");
+
   return 0;
 }
 
@@ -396,6 +554,10 @@ int printStandardAttributes(MlirContext ctx) {
       fabs(mlirFloatAttrGetValueDouble(floating) - 2.0) > 1E-6)
     return 1;
   mlirAttributeDump(floating);
+
+  // Exercise mlirAttributeGetType() just for the first one.
+  MlirType floatingType = mlirAttributeGetType(floating);
+  mlirTypeDump(floatingType);
 
   MlirAttribute integer = mlirIntegerAttrGet(mlirIntegerTypeGet(ctx, 32), 42);
   if (!mlirAttributeIsAInteger(integer) ||
@@ -629,8 +791,7 @@ int printAffineMap(MlirContext ctx) {
     return 2;
 
   if (!mlirAffineMapIsEmpty(emptyAffineMap) ||
-      mlirAffineMapIsEmpty(affineMap) ||
-      mlirAffineMapIsEmpty(constAffineMap) ||
+      mlirAffineMapIsEmpty(affineMap) || mlirAffineMapIsEmpty(constAffineMap) ||
       mlirAffineMapIsEmpty(multiDimIdentityAffineMap) ||
       mlirAffineMapIsEmpty(minorIdentityAffineMap) ||
       mlirAffineMapIsEmpty(permutationAffineMap))
@@ -709,6 +870,64 @@ int printAffineMap(MlirContext ctx) {
   return 0;
 }
 
+int registerOnlyStd() {
+  MlirContext ctx = mlirContextCreate();
+  // The built-in dialect is always loaded.
+  if (mlirContextGetNumLoadedDialects(ctx) != 1)
+    return 1;
+
+  MlirDialect std =
+      mlirContextGetOrLoadDialect(ctx, mlirStandardDialectGetNamespace());
+  if (!mlirDialectIsNull(std))
+    return 2;
+
+  mlirContextRegisterStandardDialect(ctx);
+  if (mlirContextGetNumRegisteredDialects(ctx) != 1)
+    return 3;
+  if (mlirContextGetNumLoadedDialects(ctx) != 1)
+    return 4;
+
+  std = mlirContextGetOrLoadDialect(ctx, mlirStandardDialectGetNamespace());
+  if (mlirDialectIsNull(std))
+    return 5;
+  if (mlirContextGetNumLoadedDialects(ctx) != 2)
+    return 6;
+
+  MlirDialect alsoStd = mlirContextLoadStandardDialect(ctx);
+  if (!mlirDialectEqual(std, alsoStd))
+    return 7;
+
+  MlirStringRef stdNs = mlirDialectGetNamespace(std);
+  MlirStringRef alsoStdNs = mlirStandardDialectGetNamespace();
+  if (stdNs.length != alsoStdNs.length ||
+      strncmp(stdNs.data, alsoStdNs.data, stdNs.length))
+    return 8;
+
+  return 0;
+}
+
+// Wraps a diagnostic into additional text we can match against.
+MlirLogicalResult errorHandler(MlirDiagnostic diagnostic) {
+  fprintf(stderr, "processing diagnostic <<\n");
+  mlirDiagnosticPrint(diagnostic, printToStderr, NULL);
+  fprintf(stderr, "\n");
+  MlirLocation loc = mlirDiagnosticGetLocation(diagnostic);
+  mlirLocationPrint(loc, printToStderr, NULL);
+  assert(mlirDiagnosticGetNumNotes(diagnostic) == 0);
+  fprintf(stderr, ">> end of diagnostic\n");
+  return mlirLogicalResultSuccess();
+}
+
+void testDiagnostics() {
+  MlirContext ctx = mlirContextCreate();
+  MlirDiagnosticHandlerID id =
+      mlirContextAttachDiagnosticHandler(ctx, errorHandler);
+  MlirLocation loc = mlirLocationUnknownGet(ctx);
+  mlirEmitError(loc, "test diagnostics");
+  mlirContextDetachDiagnosticHandler(ctx, id);
+  mlirEmitError(loc, "more test diagnostics");
+}
+
 int main() {
   MlirContext ctx = mlirContextCreate();
   mlirRegisterAllDialects(ctx);
@@ -734,16 +953,22 @@ int main() {
   // CHECK: }
   // clang-format on
 
-  collectStats(module);
+  fprintf(stderr, "@stats\n");
+  int errcode = collectStats(module);
+  fprintf(stderr, "%d\n", errcode);
   // clang-format off
+  // CHECK-LABEL: @stats
   // CHECK: Number of operations: 13
   // CHECK: Number of attributes: 4
   // CHECK: Number of blocks: 3
   // CHECK: Number of regions: 3
   // CHECK: Number of values: 9
+  // CHECK: Number of block arguments: 3
+  // CHECK: Number of op results: 6
+  // CHECK: 0
   // clang-format on
 
-  printFirstOfEach(module);
+  printFirstOfEach(ctx, module);
   // clang-format off
   // CHECK:   %[[C0:.*]] = constant 0 : index
   // CHECK:   %[[DIM:.*]] = dim %{{.*}}, %[[C0]] : memref<?xf32>
@@ -755,13 +980,36 @@ int main() {
   // CHECK:     store %[[SUM]], %{{.*}}[%[[I]]] : memref<?xf32>
   // CHECK:   }
   // CHECK: return
-  // CHECK: constant 0 : index
-  // CHECK: 0 : index
-  // CHECK: constant 0 : index
-  // CHECK: index
+  // CHECK: First operation: {{.*}} = constant 0 : index
+  // CHECK: Get attr 0: 0 : index
+  // CHECK: Get attr 0 by name: 0 : index
+  // CHECK: does_not_exist is null: 1
+  // CHECK: Result 0: {{.*}} = constant 0 : index
+  // CHECK: Value is null: 0
+  // CHECK: Result 0 type: index
+  // CHECK: Op with set attr: {{.*}} {custom_attr = true}
+  // CHECK: Remove attr: 1
+  // CHECK: Remove attr again: 0
+  // CHECK: Removed attr is null: 1
   // clang-format on
 
   mlirModuleDestroy(moduleOp);
+
+  buildWithInsertionsAndPrint(ctx);
+  // clang-format off
+  // CHECK-LABEL:  "insertion.order.test"
+  // CHECK:      ^{{.*}}(%{{.*}}: i1
+  // CHECK:        "dummy.op1"
+  // CHECK-NEXT:   "dummy.op2"
+  // CHECK-NEXT:   "dummy.op3"
+  // CHECK-NEXT:   "dummy.op4"
+  // CHECK:      ^{{.*}}(%{{.*}}: i2
+  // CHECK:        "dummy.op5"
+  // CHECK:      ^{{.*}}(%{{.*}}: i3
+  // CHECK:        "dummy.op6"
+  // CHECK:      ^{{.*}}(%{{.*}}: i4
+  // CHECK:        "dummy.op7"
+  // clang-format on
 
   // clang-format off
   // CHECK-LABEL: @types
@@ -781,15 +1029,17 @@ int main() {
   // CHECK: memref<2x3xf32, 2>
   // CHECK: memref<*xf32, 4>
   // CHECK: tuple<memref<*xf32, 4>, f32>
+  // CHECK: (index, i1) -> (i16, i32, i64)
   // CHECK: 0
   // clang-format on
   fprintf(stderr, "@types\n");
-  int errcode = printStandardTypes(ctx);
+  errcode = printStandardTypes(ctx);
   fprintf(stderr, "%d\n", errcode);
 
   // clang-format off
   // CHECK-LABEL: @attrs
   // CHECK: 2.000000e+00 : f64
+  // CHECK: f64
   // CHECK: 42 : i32
   // CHECK: true
   // CHECK: #std.abc
@@ -837,7 +1087,26 @@ int main() {
   errcode = printAffineMap(ctx);
   fprintf(stderr, "%d\n", errcode);
 
+  fprintf(stderr, "@registration\n");
+  errcode = registerOnlyStd();
+  fprintf(stderr, "%d\n", errcode);
+  // clang-format off
+  // CHECK-LABEL: @registration
+  // CHECK: 0
+  // clang-format on
+
   mlirContextDestroy(ctx);
+
+  fprintf(stderr, "@test_diagnostics\n");
+  testDiagnostics();
+  // clang-format off
+  // CHECK-LABEL: @test_diagnostics
+  // CHECK: processing diagnostic <<
+  // CHECK:   test diagnostics
+  // CHECK:   loc(unknown)
+  // CHECK: >> end of diagnostic
+  // CHECK-NOT: processing diagnostic
+  // CHECK:     more test diagnostics
 
   return 0;
 }

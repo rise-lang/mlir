@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "OpFormatGen.h"
+#include "mlir/TableGen/CodeGenHelpers.h"
 #include "mlir/TableGen/Format.h"
 #include "mlir/TableGen/GenInfo.h"
 #include "mlir/TableGen/Interfaces.h"
@@ -47,6 +48,7 @@ static cl::opt<std::string> opExcFilter(
 
 static const char *const tblgenNamePrefix = "tblgen_";
 static const char *const generatedArgName = "odsArg";
+static const char *const builder = "odsBuilder";
 static const char *const builderOpState = "odsState";
 
 // The logic to calculate the actual value range for a declared operand/result
@@ -157,23 +159,6 @@ static bool canUseUnwrappedRawValue(const tblgen::Attribute &attr) {
 //===----------------------------------------------------------------------===//
 // Op emitter
 //===----------------------------------------------------------------------===//
-
-namespace {
-// Simple RAII helper for defining ifdef-undef-endif scopes.
-class IfDefScope {
-public:
-  IfDefScope(StringRef name, raw_ostream &os) : name(name), os(os) {
-    os << "#ifdef " << name << "\n"
-       << "#undef " << name << "\n\n";
-  }
-
-  ~IfDefScope() { os << "\n#endif  // " << name << "\n\n"; }
-
-private:
-  StringRef name;
-  raw_ostream &os;
-};
-} // end anonymous namespace
 
 namespace {
 // Helper class to emit a record into the given output stream.
@@ -502,16 +487,7 @@ void OpEmitter::genAttrGetters() {
 
   // Emit with return type specified.
   auto emitAttrWithReturnType = [&](StringRef name, Attribute attr) {
-    Dialect attrDialect = attr.getDialect();
-    // Does the current operation have a different namespace than the attribute?
-    bool differentNamespace =
-        attrDialect && opDialect && attrDialect != opDialect;
-    std::string returnType = differentNamespace
-                                 ? (llvm::Twine(attrDialect.getCppNamespace()) +
-                                    "::" + attr.getReturnType())
-                                       .str()
-                                 : attr.getReturnType().str();
-    auto *method = opClass.addMethodAndPrune(returnType, name);
+    auto *method = opClass.addMethodAndPrune(attr.getReturnType(), name);
     auto &body = method->body();
     body << "  auto attr = " << name << "Attr();\n";
     if (attr.hasDefaultValue()) {
@@ -1168,6 +1144,82 @@ void OpEmitter::genUseAttrAsResultTypeBuilder() {
   body << "  }\n";
 }
 
+/// Returns a signature of the builder as defined by a dag-typed initializer.
+/// Updates the context `fctx` to enable replacement of $_builder and $_state
+/// in the body. Reports errors at `loc`.
+static std::string builderSignatureFromDAG(const DagInit *init,
+                                           ArrayRef<llvm::SMLoc> loc,
+                                           FmtContext &fctx) {
+  auto *defInit = dyn_cast<DefInit>(init->getOperator());
+  if (!defInit || !defInit->getDef()->getName().equals("ins"))
+    PrintFatalError(loc, "expected 'ins' in builders");
+
+  // Inject builder and state arguments.
+  llvm::SmallVector<std::string, 8> arguments;
+  arguments.reserve(init->getNumArgs() + 2);
+  arguments.push_back(llvm::formatv("::mlir::OpBuilder &{0}", builder).str());
+  arguments.push_back(
+      llvm::formatv("::mlir::OperationState &{0}", builderOpState).str());
+
+  // Accept either a StringInit or a DefInit with two string values as dag
+  // arguments. The former corresponds to the type, the latter to the type and
+  // the default value. Similarly to C++, once an argument with a default value
+  // is detected, the following arguments must have default values as well.
+  bool seenDefaultValue = false;
+  for (unsigned i = 0, e = init->getNumArgs(); i < e; ++i) {
+    // If no name is provided, generate one.
+    StringInit *argName = init->getArgName(i);
+    std::string name =
+        argName ? argName->getValue().str() : "odsArg" + std::to_string(i);
+
+    Init *argInit = init->getArg(i);
+    StringRef type;
+    std::string defaultValue;
+    if (StringInit *strType = dyn_cast<StringInit>(argInit)) {
+      type = strType->getValue();
+    } else {
+      const Record *typeAndDefaultValue = cast<DefInit>(argInit)->getDef();
+      type = typeAndDefaultValue->getValueAsString("type");
+      StringRef defaultValueRef =
+          typeAndDefaultValue->getValueAsString("defaultValue");
+      if (!defaultValueRef.empty()) {
+        seenDefaultValue = true;
+        defaultValue = llvm::formatv(" = {0}", defaultValueRef).str();
+      }
+    }
+    if (seenDefaultValue && defaultValue.empty())
+      PrintFatalError(loc,
+                      "expected an argument with default value after other "
+                      "arguments with default values");
+    arguments.push_back(
+        llvm::formatv("{0} {1}{2}", type, name, defaultValue).str());
+  }
+
+  fctx.withBuilder(builder);
+  fctx.addSubst("_state", builderOpState);
+
+  return llvm::join(arguments, ", ");
+}
+
+// Returns a signature fo the builder as defined by a string initializer,
+// optionally injecting the builder and state arguments.
+// TODO: to be removed after the transition is complete.
+static std::string builderSignatureFromString(StringRef params,
+                                              FmtContext &fctx) {
+  bool skipParamGen = params.startswith("OpBuilder") ||
+                      params.startswith("mlir::OpBuilder") ||
+                      params.startswith("::mlir::OpBuilder");
+  if (skipParamGen)
+    return params.str();
+
+  fctx.withBuilder(builder);
+  fctx.addSubst("_state", builderOpState);
+  return std::string(llvm::formatv("::mlir::OpBuilder &{0}, "
+                                   "::mlir::OperationState &{1}{2}{3}",
+                                   builder, builderOpState,
+                                   params.empty() ? "" : ", ", params));
+}
+
 void OpEmitter::genBuilder() {
   // Handle custom builders if provided.
   // TODO: Create wrapper class for OpBuilder to hide the native
@@ -1177,16 +1229,23 @@ void OpEmitter::genBuilder() {
     if (listInit) {
       for (Init *init : listInit->getValues()) {
         Record *builderDef = cast<DefInit>(init)->getDef();
-        StringRef params = builderDef->getValueAsString("params");
+        llvm::Optional<StringRef> params =
+            builderDef->getValueAsOptionalString("params");
+        FmtContext fctx;
+        std::string paramStr =
+            params.hasValue() ? builderSignatureFromString(params->trim(), fctx)
+                              : builderSignatureFromDAG(
+                                    builderDef->getValueAsDag("dagParams"),
+                                    op.getLoc(), fctx);
+
         StringRef body = builderDef->getValueAsString("body");
         bool hasBody = !body.empty();
-
         OpMethod::Property properties =
             hasBody ? OpMethod::MP_Static : OpMethod::MP_StaticDeclaration;
         auto *method =
-            opClass.addMethodAndPrune("void", "build", properties, params);
+            opClass.addMethodAndPrune("void", "build", properties, paramStr);
         if (hasBody)
-          method->body() << body;
+          method->body() << tgfmt(body, &fctx);
       }
     }
     if (op.skipDefaultBuilders()) {
@@ -1232,7 +1291,7 @@ void OpEmitter::genCollectiveParamBuilder() {
   SmallVector<OpMethodParameter, 4> paramList;
   paramList.emplace_back("::mlir::OpBuilder &", "");
   paramList.emplace_back("::mlir::OperationState &", builderOpState);
-  paramList.emplace_back("::llvm::ArrayRef<::mlir::Type>", "resultTypes");
+  paramList.emplace_back("::mlir::TypeRange", "resultTypes");
   paramList.emplace_back("::mlir::ValueRange", "operands");
   // Provide default value for `attributes` when its the last parameter
   StringRef attributesDefaultValue = op.getNumVariadicRegions() ? "" : "{}";
@@ -1302,8 +1361,8 @@ void OpEmitter::buildParamList(SmallVectorImpl<OpMethodParameter> &paramList,
       if (resultName.empty())
         resultName = std::string(formatv("resultType{0}", i));
 
-      StringRef type = result.isVariadic() ? "::llvm::ArrayRef<::mlir::Type>"
-                                           : "::mlir::Type";
+      StringRef type =
+          result.isVariadic() ? "::mlir::TypeRange" : "::mlir::Type";
       OpMethodParameter::Property properties = OpMethodParameter::PP_None;
       if (result.isOptional())
         properties = OpMethodParameter::PP_Optional;
@@ -1313,7 +1372,7 @@ void OpEmitter::buildParamList(SmallVectorImpl<OpMethodParameter> &paramList,
     }
   } break;
   case TypeParamKind::Collective: {
-    paramList.emplace_back("::llvm::ArrayRef<::mlir::Type>", "resultTypes");
+    paramList.emplace_back("::mlir::TypeRange", "resultTypes");
     resultTypeNames.push_back("resultTypes");
   } break;
   }
@@ -1400,8 +1459,8 @@ void OpEmitter::buildParamList(SmallVectorImpl<OpMethodParameter> &paramList,
 
   /// Insert parameters for each successor.
   for (const NamedSuccessor &succ : op.getSuccessors()) {
-    StringRef type = succ.isVariadic() ? "::llvm::ArrayRef<::mlir::Block *>"
-                                       : "::mlir::Block *";
+    StringRef type =
+        succ.isVariadic() ? "::mlir::BlockRange" : "::mlir::Block *";
     paramList.emplace_back(type, succ.name);
   }
 
@@ -1868,12 +1927,14 @@ void OpEmitter::genSuccessorVerifier(OpMethodBody &body) {
     if (successor.constraint.getPredicate().isNull())
       continue;
 
-    body << "    for (::mlir::Block *successor : ";
-    body << formatv(successor.isVariadic()
-                        ? "{0}()"
-                        : "::llvm::ArrayRef<::mlir::Block *>({0}())",
-                    successor.name);
-    body << ") {\n";
+    if (successor.isVariadic()) {
+      body << formatv("    for (::mlir::Block *successor : {0}()) {\n",
+                      successor.name);
+    } else {
+      body << "    {\n";
+      body << formatv("      ::mlir::Block *successor = {0}();\n",
+                      successor.name);
+    }
     auto constraint = tgfmt(successor.constraint.getConditionTemplate(),
                             &verifyCtx.withSelf("successor"))
                           .str();
@@ -1994,8 +2055,8 @@ void OpEmitter::genOpAsmInterface() {
   opClass.addTrait("::mlir::OpAsmOpInterface::Trait");
 
   // Generate the right accessor for the number of results.
-  auto *method = opClass.addMethodAndPrune("void", "getAsmResultNames",
-                                           "OpAsmSetValueNameFn", "setNameFn");
+  auto *method = opClass.addMethodAndPrune(
+      "void", "getAsmResultNames", "::mlir::OpAsmSetValueNameFn", "setNameFn");
   auto &body = method->body();
   for (int i = 0; i != numResults; ++i) {
     body << "  auto resultGroup" << i << " = getODSResults(" << i << ");\n"
@@ -2159,7 +2220,7 @@ static void emitOpClasses(const std::vector<Record *> &defs, raw_ostream &os,
     os << "#undef GET_OP_FWD_DEFINES\n";
     for (auto *def : defs) {
       Operator op(*def);
-      Operator::NamespaceEmitter emitter(os, op);
+      NamespaceEmitter emitter(os, op.getDialect());
       os << "class " << op.getCppClassName() << ";\n";
     }
     os << "#endif\n\n";
@@ -2168,7 +2229,7 @@ static void emitOpClasses(const std::vector<Record *> &defs, raw_ostream &os,
   IfDefScope scope("GET_OP_CLASSES", os);
   for (auto *def : defs) {
     Operator op(*def);
-    Operator::NamespaceEmitter emitter(os, op);
+    NamespaceEmitter emitter(os, op.getDialect());
     if (emitDecl) {
       os << formatv(opCommentHeader, op.getQualCppClassName(), "declarations");
       OpOperandAdaptorEmitter::emitDecl(op, os);

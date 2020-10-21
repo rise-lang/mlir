@@ -199,6 +199,11 @@ static bool isDimOpValidSymbol(DimOp dimOp, Region *region) {
   if (isTopLevelValue(dimOp.memrefOrTensor()))
     return true;
 
+  // Conservatively handle remaining BlockArguments as non-valid symbols.
+  // E.g. scf.for iterArgs.
+  if (dimOp.memrefOrTensor().isa<BlockArgument>())
+    return false;
+
   // The dim op is also okay if its operand memref/tensor is a view/subview
   // whose corresponding size is a valid symbol.
   Optional<int64_t> index = dimOp.getConstantIndex();
@@ -2460,7 +2465,7 @@ LogicalResult AffinePrefetchOp::fold(ArrayRef<Attribute> cstOperands,
 //===----------------------------------------------------------------------===//
 
 void AffineParallelOp::build(OpBuilder &builder, OperationState &result,
-                             ArrayRef<Type> resultTypes,
+                             TypeRange resultTypes,
                              ArrayRef<AtomicRMWKind> reductions,
                              ArrayRef<int64_t> ranges) {
   SmallVector<AffineExpr, 8> lbExprs(ranges.size(),
@@ -2475,7 +2480,7 @@ void AffineParallelOp::build(OpBuilder &builder, OperationState &result,
 }
 
 void AffineParallelOp::build(OpBuilder &builder, OperationState &result,
-                             ArrayRef<Type> resultTypes,
+                             TypeRange resultTypes,
                              ArrayRef<AtomicRMWKind> reductions,
                              AffineMap lbMap, ValueRange lbArgs,
                              AffineMap ubMap, ValueRange ubArgs) {
@@ -2490,7 +2495,7 @@ void AffineParallelOp::build(OpBuilder &builder, OperationState &result,
 }
 
 void AffineParallelOp::build(OpBuilder &builder, OperationState &result,
-                             ArrayRef<Type> resultTypes,
+                             TypeRange resultTypes,
                              ArrayRef<AtomicRMWKind> reductions,
                              AffineMap lbMap, ValueRange lbArgs,
                              AffineMap ubMap, ValueRange ubArgs,

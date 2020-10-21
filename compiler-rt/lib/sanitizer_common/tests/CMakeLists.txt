@@ -3,7 +3,7 @@ include(CompilerRTCompile)
 clang_compiler_add_cxx_check()
 
 # FIXME: use SANITIZER_COMMON_SUPPORTED_ARCH here
-filter_available_targets(SANITIZER_UNITTEST_SUPPORTED_ARCH x86_64 i386 mips64 mips64el)
+filter_available_targets(SANITIZER_UNITTEST_SUPPORTED_ARCH x86_64 i386 mips64 mips64el riscv64)
 if(APPLE)
   darwin_filter_host_archs(SANITIZER_UNITTEST_SUPPORTED_ARCH SANITIZER_UNITTEST_SUPPORTED_ARCH)
 endif()
@@ -53,7 +53,6 @@ endforeach()
 set(SANITIZER_TEST_CFLAGS_COMMON
   ${COMPILER_RT_UNITTEST_CFLAGS}
   ${COMPILER_RT_GTEST_CFLAGS}
-  ${COMPILER_RT_GMOCK_CFLAGS}
   -I${COMPILER_RT_SOURCE_DIR}/include
   -I${COMPILER_RT_SOURCE_DIR}/lib
   -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
@@ -152,7 +151,7 @@ macro(add_sanitizer_tests_for_arch arch)
   generate_compiler_rt_tests(SANITIZER_TEST_OBJECTS SanitizerUnitTests
     "Sanitizer-${arch}-Test" ${arch}
     RUNTIME "${SANITIZER_COMMON_LIB}"
-    SOURCES ${SANITIZER_UNITTESTS} ${COMPILER_RT_GTEST_SOURCE} ${COMPILER_RT_GMOCK_SOURCE}
+    SOURCES ${SANITIZER_UNITTESTS} ${COMPILER_RT_GTEST_SOURCE}
     COMPILE_DEPS ${SANITIZER_TEST_HEADERS}
     DEPS gtest
     CFLAGS  ${SANITIZER_TEST_CFLAGS_COMMON} ${extra_flags}
@@ -208,7 +207,6 @@ if(ANDROID)
     add_executable(SanitizerTest
       ${SANITIZER_UNITTESTS}
       ${COMPILER_RT_GTEST_SOURCE}
-      ${COMPILER_RT_GMOCK_SOURCE}
       $<TARGET_OBJECTS:RTSanitizerCommon.${arch}>
       $<TARGET_OBJECTS:RTSanitizerCommonLibc.${arch}>
       $<TARGET_OBJECTS:RTSanitizerCommonSymbolizer.${arch}>)

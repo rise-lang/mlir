@@ -237,7 +237,7 @@ Sema::InstantiatingTemplate::InstantiatingTemplate(
   // error have occurred. Any diagnostics we might have raised will not be
   // visible, and we do not need to construct a correct AST.
   if (SemaRef.Diags.hasFatalErrorOccurred() &&
-      SemaRef.Diags.hasUncompilableErrorOccurred()) {
+      SemaRef.hasUncompilableErrorOccurred()) {
     Invalid = true;
     return;
   }
@@ -856,6 +856,7 @@ Optional<TemplateDeductionInfo *> Sema::isSFINAEContext() const {
     case CodeSynthesisContext::DefaultTemplateArgumentInstantiation:
     case CodeSynthesisContext::PriorTemplateArgumentSubstitution:
     case CodeSynthesisContext::DefaultTemplateArgumentChecking:
+    case CodeSynthesisContext::RewritingOperatorAsSpaceship:
       // A default template argument instantiation and substitution into
       // template parameters with arguments for prior parameters may or may
       // not be a SFINAE context; look further up the stack.
@@ -874,7 +875,6 @@ Optional<TemplateDeductionInfo *> Sema::isSFINAEContext() const {
     case CodeSynthesisContext::DeclaringSpecialMember:
     case CodeSynthesisContext::DeclaringImplicitEqualityComparison:
     case CodeSynthesisContext::DefiningSynthesizedFunction:
-    case CodeSynthesisContext::RewritingOperatorAsSpaceship:
     case CodeSynthesisContext::InitializingStructuredBinding:
     case CodeSynthesisContext::MarkingClassDllexported:
       // This happens in a context unrelated to template instantiation, so
@@ -1414,46 +1414,10 @@ TemplateName TemplateInstantiator::TransformTemplateName(
                                           AllowInjectedClassName);
 }
 
-static ExprResult TransformUniqueStableName(TemplateInstantiator &TI,
-                                            PredefinedExpr *E) {
-  if (E->getIdentKind() == PredefinedExpr::UniqueStableNameType) {
-    TypeSourceInfo *Info =
-        TI.getDerived().TransformType(E->getTypeSourceInfo());
-
-    if (!Info)
-      return ExprError();
-
-    if (!TI.getDerived().AlwaysRebuild() && Info == E->getTypeSourceInfo())
-      return E;
-
-    return TI.getSema().BuildUniqueStableName(E->getLocation(), Info);
-  }
-
-  if (E->getIdentKind() == PredefinedExpr::UniqueStableNameExpr) {
-    EnterExpressionEvaluationContext Unevaluated(
-        TI.getSema(), Sema::ExpressionEvaluationContext::Unevaluated);
-    ExprResult SubExpr = TI.getDerived().TransformExpr(E->getExpr());
-
-    if (SubExpr.isInvalid())
-      return ExprError();
-
-    if (!TI.getDerived().AlwaysRebuild() && SubExpr.get() == E->getExpr())
-      return E;
-
-    return TI.getSema().BuildUniqueStableName(E->getLocation(), SubExpr.get());
-  }
-
-  llvm_unreachable("Only valid for UniqueStableNameType/Expr");
-}
-
 ExprResult
 TemplateInstantiator::TransformPredefinedExpr(PredefinedExpr *E) {
   if (!E->isTypeDependent())
     return E;
-
-  if (E->getIdentKind() == PredefinedExpr::UniqueStableNameType ||
-      E->getIdentKind() == PredefinedExpr::UniqueStableNameExpr)
-    return TransformUniqueStableName(*this, E);
 
   return getSema().BuildPredefinedExpr(E->getLocation(), E->getIdentKind());
 }
@@ -2732,7 +2696,10 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
 
     // BlockDecls can appear in a default-member-initializer. They must be the
     // child of a BlockExpr, so we only know how to instantiate them from there.
-    if (isa<BlockDecl>(Member))
+    // Similarly, lambda closure types are recreated when instantiating the
+    // corresponding LambdaExpr.
+    if (isa<BlockDecl>(Member) ||
+        (isa<CXXRecordDecl>(Member) && cast<CXXRecordDecl>(Member)->isLambda()))
       continue;
 
     if (Member->isInvalidDecl()) {
@@ -2972,9 +2939,10 @@ bool Sema::InstantiateInClassInitializer(
     RecordDecl *PatternRD = Pattern->getParent();
     RecordDecl *OutermostClass = PatternRD->getOuterLexicalRecordContext();
     Diag(PointOfInstantiation,
-         diag::err_in_class_initializer_not_yet_parsed)
+         diag::err_default_member_initializer_not_yet_parsed)
         << OutermostClass << Pattern;
-    Diag(Pattern->getEndLoc(), diag::note_in_class_initializer_not_yet_parsed);
+    Diag(Pattern->getEndLoc(),
+         diag::note_default_member_initializer_not_yet_parsed);
     Instantiation->setInvalidDecl();
     return true;
   }
@@ -2984,7 +2952,7 @@ bool Sema::InstantiateInClassInitializer(
     return true;
   if (Inst.isAlreadyInstantiating()) {
     // Error out if we hit an instantiation cycle for this initializer.
-    Diag(PointOfInstantiation, diag::err_in_class_initializer_cycle)
+    Diag(PointOfInstantiation, diag::err_default_member_initializer_cycle)
       << Instantiation;
     return true;
   }

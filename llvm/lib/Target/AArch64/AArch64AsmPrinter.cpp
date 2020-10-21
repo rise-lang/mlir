@@ -89,6 +89,8 @@ public:
   void emitStartOfAsmFile(Module &M) override;
   void emitJumpTableInfo() override;
 
+  void emitFunctionEntryLabel() override;
+
   void LowerJumpTableDest(MCStreamer &OutStreamer, const MachineInstr &MI);
 
   void LowerSTACKMAP(MCStreamer &OutStreamer, StackMaps &SM,
@@ -192,33 +194,16 @@ void AArch64AsmPrinter::emitStartOfAsmFile(Module &M) {
     return;
 
   // Assemble feature flags that may require creation of a note section.
-  unsigned Flags = ELF::GNU_PROPERTY_AARCH64_FEATURE_1_BTI |
-                   ELF::GNU_PROPERTY_AARCH64_FEATURE_1_PAC;
+  unsigned Flags = 0;
+  if (const auto *BTE = mdconst::extract_or_null<ConstantInt>(
+          M.getModuleFlag("branch-target-enforcement")))
+    if (BTE->getZExtValue())
+      Flags |= ELF::GNU_PROPERTY_AARCH64_FEATURE_1_BTI;
 
-  if (any_of(M, [](const Function &F) {
-        return !F.isDeclaration() &&
-               !F.hasFnAttribute("branch-target-enforcement");
-      })) {
-    Flags &= ~ELF::GNU_PROPERTY_AARCH64_FEATURE_1_BTI;
-  }
-
-  if ((Flags & ELF::GNU_PROPERTY_AARCH64_FEATURE_1_BTI) == 0 &&
-      any_of(M, [](const Function &F) {
-        return F.hasFnAttribute("branch-target-enforcement");
-      })) {
-    errs() << "warning: some functions compiled with BTI and some compiled "
-              "without BTI\n"
-           << "warning: not setting BTI in feature flags\n";
-  }
-
-  if (any_of(M, [](const Function &F) {
-        if (F.isDeclaration())
-          return false;
-        Attribute A = F.getFnAttribute("sign-return-address");
-        return !A.isStringAttribute() || A.getValueAsString() == "none";
-      })) {
-    Flags &= ~ELF::GNU_PROPERTY_AARCH64_FEATURE_1_PAC;
-  }
+  if (const auto *Sign = mdconst::extract_or_null<ConstantInt>(
+          M.getModuleFlag("sign-return-address")))
+    if (Sign->getZExtValue())
+      Flags |= ELF::GNU_PROPERTY_AARCH64_FEATURE_1_PAC;
 
   if (Flags == 0)
     return;
@@ -804,6 +789,19 @@ void AArch64AsmPrinter::emitJumpTableInfo() {
   }
 }
 
+void AArch64AsmPrinter::emitFunctionEntryLabel() {
+  if (MF->getFunction().getCallingConv() == CallingConv::AArch64_VectorCall ||
+      MF->getFunction().getCallingConv() ==
+          CallingConv::AArch64_SVE_VectorCall ||
+      STI->getRegisterInfo()->hasSVEArgsOrReturn(MF)) {
+    auto *TS =
+        static_cast<AArch64TargetStreamer *>(OutStreamer->getTargetStreamer());
+    TS->emitDirectiveVariantPCS(CurrentFnSym);
+  }
+
+  return AsmPrinter::emitFunctionEntryLabel();
+}
+
 /// Small jump tables contain an unsigned byte or half, representing the offset
 /// from the lowest-addressed possible destination to the desired basic
 /// block. Since all instructions are 4-byte aligned, this is further compressed
@@ -1331,6 +1329,14 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
 
   case AArch64::SEH_SaveRegP:
+    if (MI->getOperand(1).getImm() == 30 && MI->getOperand(0).getImm() >= 19 &&
+        MI->getOperand(0).getImm() <= 28) {
+      assert((MI->getOperand(0).getImm() - 19) % 2 == 0 &&
+             "Register paired with LR must be odd");
+      TS->EmitARM64WinCFISaveLRPair(MI->getOperand(0).getImm(),
+                                    MI->getOperand(2).getImm());
+      return;
+    }
     assert((MI->getOperand(1).getImm() - MI->getOperand(0).getImm() == 1) &&
             "Non-consecutive registers not allowed for save_regp");
     TS->EmitARM64WinCFISaveRegP(MI->getOperand(0).getImm(),

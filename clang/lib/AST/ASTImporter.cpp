@@ -2014,10 +2014,11 @@ Error ASTNodeImporter::ImportInitializer(VarDecl *From, VarDecl *To) {
     return ToInitOrErr.takeError();
 
   To->setInit(*ToInitOrErr);
-  if (From->isInitKnownICE()) {
-    EvaluatedStmt *Eval = To->ensureEvaluatedStmt();
-    Eval->CheckedICE = true;
-    Eval->IsICE = From->isInitICE();
+  if (EvaluatedStmt *FromEval = From->getEvaluatedStmt()) {
+    EvaluatedStmt *ToEval = To->ensureEvaluatedStmt();
+    ToEval->HasConstantInitialization = FromEval->HasConstantInitialization;
+    ToEval->HasConstantDestruction = FromEval->HasConstantDestruction;
+    // FIXME: Also import the initializer value.
   }
 
   // FIXME: Other bits to merge?
@@ -7535,6 +7536,7 @@ ExpectedStmt ASTNodeImporter::VisitCXXUnresolvedConstructExpr(
   Error Err = Error::success();
   auto ToLParenLoc = importChecked(Err, E->getLParenLoc());
   auto ToRParenLoc = importChecked(Err, E->getRParenLoc());
+  auto ToType = importChecked(Err, E->getType());
   auto ToTypeSourceInfo = importChecked(Err, E->getTypeSourceInfo());
   if (Err)
     return std::move(Err);
@@ -7545,7 +7547,7 @@ ExpectedStmt ASTNodeImporter::VisitCXXUnresolvedConstructExpr(
     return std::move(Err);
 
   return CXXUnresolvedConstructExpr::Create(
-      Importer.getToContext(), ToTypeSourceInfo, ToLParenLoc,
+      Importer.getToContext(), ToType, ToTypeSourceInfo, ToLParenLoc,
       llvm::makeArrayRef(ToArgs), ToRParenLoc);
 }
 
@@ -8096,6 +8098,16 @@ Expected<Attr *> ASTImporter::Import(const Attr *FromAttr) {
     To->setInherited(From->isInherited());
     To->setPackExpansion(From->isPackExpansion());
     To->setImplicit(From->isImplicit());
+    ToAttr = To;
+    break;
+  }
+  case attr::Format: {
+    const auto *From = cast<FormatAttr>(FromAttr);
+    FormatAttr *To;
+    IdentifierInfo *ToAttrType = Import(From->getType());
+    To = FormatAttr::Create(ToContext, ToAttrType, From->getFormatIdx(),
+                            From->getFirstArg(), ToRange, From->getSyntax());
+    To->setInherited(From->isInherited());
     ToAttr = To;
     break;
   }
@@ -8682,12 +8694,10 @@ Expected<FileID> ASTImporter::Import(FileID FromID, bool IsBuiltin) {
 
     if (ToID.isInvalid() || IsBuiltin) {
       // FIXME: We want to re-use the existing MemoryBuffer!
-      bool Invalid = true;
-      const llvm::MemoryBuffer *FromBuf =
-          Cache->getBuffer(FromContext.getDiagnostics(),
-                           FromSM.getFileManager(), SourceLocation{}, &Invalid);
-      if (!FromBuf || Invalid)
-        // FIXME: Use a new error kind?
+      llvm::Optional<llvm::MemoryBufferRef> FromBuf =
+          Cache->getBufferOrNone(FromContext.getDiagnostics(),
+                                 FromSM.getFileManager(), SourceLocation{});
+      if (!FromBuf)
         return llvm::make_error<ImportError>(ImportError::Unknown);
 
       std::unique_ptr<llvm::MemoryBuffer> ToBuf =

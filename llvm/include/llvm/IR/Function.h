@@ -472,6 +472,12 @@ public:
     return Ty ? Ty : (arg_begin() + ArgNo)->getType()->getPointerElementType();
   }
 
+  /// Extract the sret type for a parameter.
+  Type *getParamStructRetType(unsigned ArgNo) const {
+    Type *Ty = AttributeSets.getParamStructRetType(ArgNo);
+    return Ty ? Ty : (arg_begin() + ArgNo)->getType()->getPointerElementType();
+  }
+
   /// Extract the byref type for a parameter.
   Type *getParamByRefType(unsigned ArgNo) const {
     return AttributeSets.getParamByRefType(ArgNo);
@@ -615,6 +621,13 @@ public:
   void setDoesNotRecurse() {
     addFnAttr(Attribute::NoRecurse);
   }
+
+  /// Determine if the function is required to make forward progress.
+  bool mustProgress() const {
+    return hasFnAttribute(Attribute::MustProgress) ||
+           hasFnAttribute(Attribute::WillReturn);
+  }
+  void setMustProgress() { addFnAttr(Attribute::MustProgress); }
 
   /// True if the ABI mandates (or the user requested) that this
   /// function be in a unwind table.

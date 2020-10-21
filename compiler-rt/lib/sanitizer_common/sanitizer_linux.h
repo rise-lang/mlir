@@ -14,12 +14,11 @@
 
 #include "sanitizer_platform.h"
 #if SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_NETBSD ||                \
-    SANITIZER_OPENBSD || SANITIZER_SOLARIS
+    SANITIZER_SOLARIS
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_platform_limits_freebsd.h"
 #include "sanitizer_platform_limits_netbsd.h"
-#include "sanitizer_platform_limits_openbsd.h"
 #include "sanitizer_platform_limits_posix.h"
 #include "sanitizer_platform_limits_solaris.h"
 #include "sanitizer_posix.h"
@@ -60,9 +59,9 @@ uptr internal_prctl(int option, uptr arg2, uptr arg3, uptr arg4, uptr arg5);
 // internal_sigaction instead.
 int internal_sigaction_norestorer(int signum, const void *act, void *oldact);
 void internal_sigdelset(__sanitizer_sigset_t *set, int signum);
-#if defined(__x86_64__) || defined(__mips__) || defined(__aarch64__) \
-  || defined(__powerpc64__) || defined(__s390__) || defined(__i386__) \
-  || defined(__arm__)
+#if defined(__x86_64__) || defined(__mips__) || defined(__aarch64__) || \
+    defined(__powerpc64__) || defined(__s390__) || defined(__i386__) || \
+    defined(__arm__) || SANITIZER_RISCV64
 uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
                     int *parent_tidptr, void *newtls, int *child_tidptr);
 #endif

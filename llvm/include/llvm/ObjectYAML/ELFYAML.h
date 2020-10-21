@@ -153,6 +153,7 @@ struct Chunk {
     StackSizes,
     SymtabShndxSection,
     Symver,
+    ARMIndexTable,
     MipsABIFlags,
     Addrsig,
     Fill,
@@ -177,6 +178,9 @@ struct Section : public Chunk {
   llvm::yaml::Hex64 AddressAlign;
   Optional<llvm::yaml::Hex64> EntSize;
 
+  Optional<yaml::BinaryRef> Content;
+  Optional<llvm::yaml::Hex64> Size;
+
   // Usually sections are not created implicitly, but loaded from YAML.
   // When they are, this flag is used to signal about that.
   bool IsImplicit;
@@ -188,6 +192,13 @@ struct Section : public Chunk {
       : Chunk(Kind), IsImplicit(IsImplicit) {}
 
   static bool classof(const Chunk *S) { return S->Kind != ChunkKind::Fill; }
+
+  // Some derived sections might have their own special entries. This method
+  // returns a vector of <entry name, is used> pairs. It is used for section
+  // validation.
+  virtual std::vector<std::pair<StringRef, bool>> getEntries() const {
+    return {};
+  };
 
   // The following members are used to override section fields which is
   // useful for creating invalid objects.
@@ -227,11 +238,13 @@ struct Fill : Chunk {
 };
 
 struct StackSizesSection : Section {
-  Optional<yaml::BinaryRef> Content;
-  Optional<llvm::yaml::Hex64> Size;
   Optional<std::vector<StackSizeEntry>> Entries;
 
   StackSizesSection() : Section(ChunkKind::StackSizes) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::StackSizes;
@@ -243,17 +256,18 @@ struct StackSizesSection : Section {
 };
 
 struct DynamicSection : Section {
-  std::vector<DynamicEntry> Entries;
-  Optional<yaml::BinaryRef> Content;
+  Optional<std::vector<DynamicEntry>> Entries;
 
   DynamicSection() : Section(ChunkKind::Dynamic) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Dynamic; }
 };
 
 struct RawContentSection : Section {
-  Optional<yaml::BinaryRef> Content;
-  Optional<llvm::yaml::Hex64> Size;
   Optional<llvm::yaml::Hex64> Info;
 
   RawContentSection() : Section(ChunkKind::RawContent) {}
@@ -267,28 +281,30 @@ struct RawContentSection : Section {
 };
 
 struct NoBitsSection : Section {
-  llvm::yaml::Hex64 Size;
-
   NoBitsSection() : Section(ChunkKind::NoBits) {}
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::NoBits; }
 };
 
 struct NoteSection : Section {
-  Optional<yaml::BinaryRef> Content;
-  Optional<llvm::yaml::Hex64> Size;
   Optional<std::vector<ELFYAML::NoteEntry>> Notes;
 
   NoteSection() : Section(ChunkKind::Note) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Notes", Notes.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Note; }
 };
 
 struct HashSection : Section {
-  Optional<yaml::BinaryRef> Content;
-  Optional<llvm::yaml::Hex64> Size;
   Optional<std::vector<uint32_t>> Bucket;
   Optional<std::vector<uint32_t>> Chain;
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Bucket", Bucket.hasValue()}, {"Chain", Chain.hasValue()}};
+  };
 
   // The following members are used to override section fields.
   // This is useful for creating invalid objects.
@@ -321,14 +337,19 @@ struct GnuHashHeader {
 };
 
 struct GnuHashSection : Section {
-  Optional<yaml::BinaryRef> Content;
-
   Optional<GnuHashHeader> Header;
   Optional<std::vector<llvm::yaml::Hex64>> BloomFilter;
   Optional<std::vector<llvm::yaml::Hex32>> HashBuckets;
   Optional<std::vector<llvm::yaml::Hex32>> HashValues;
 
   GnuHashSection() : Section(ChunkKind::GnuHash) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Header", Header.hasValue()},
+            {"BloomFilter", BloomFilter.hasValue()},
+            {"HashBuckets", HashBuckets.hasValue()},
+            {"HashValues", HashValues.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::GnuHash; }
 };
@@ -347,11 +368,14 @@ struct VerneedEntry {
 };
 
 struct VerneedSection : Section {
-  Optional<yaml::BinaryRef> Content;
   Optional<std::vector<VerneedEntry>> VerneedV;
   llvm::yaml::Hex64 Info;
 
   VerneedSection() : Section(ChunkKind::Verneed) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Dependencies", VerneedV.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::Verneed;
@@ -359,11 +383,13 @@ struct VerneedSection : Section {
 };
 
 struct AddrsigSection : Section {
-  Optional<yaml::BinaryRef> Content;
-  Optional<llvm::yaml::Hex64> Size;
   Optional<std::vector<YAMLFlowString>> Symbols;
 
   AddrsigSection() : Section(ChunkKind::Addrsig) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Symbols", Symbols.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Addrsig; }
 };
@@ -375,9 +401,12 @@ struct LinkerOption {
 
 struct LinkerOptionsSection : Section {
   Optional<std::vector<LinkerOption>> Options;
-  Optional<yaml::BinaryRef> Content;
 
   LinkerOptionsSection() : Section(ChunkKind::LinkerOptions) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Options", Options.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::LinkerOptions;
@@ -386,9 +415,12 @@ struct LinkerOptionsSection : Section {
 
 struct DependentLibrariesSection : Section {
   Optional<std::vector<YAMLFlowString>> Libs;
-  Optional<yaml::BinaryRef> Content;
 
   DependentLibrariesSection() : Section(ChunkKind::DependentLibraries) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Libraries", Libs.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::DependentLibraries;
@@ -407,9 +439,12 @@ struct CallGraphEntry {
 
 struct CallGraphProfileSection : Section {
   Optional<std::vector<CallGraphEntry>> Entries;
-  Optional<yaml::BinaryRef> Content;
 
   CallGraphProfileSection() : Section(ChunkKind::CallGraphProfile) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::CallGraphProfile;
@@ -417,9 +452,13 @@ struct CallGraphProfileSection : Section {
 };
 
 struct SymverSection : Section {
-  std::vector<uint16_t> Entries;
+  Optional<std::vector<uint16_t>> Entries;
 
   SymverSection() : Section(ChunkKind::Symver) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Symver; }
 };
@@ -434,22 +473,29 @@ struct VerdefEntry {
 
 struct VerdefSection : Section {
   Optional<std::vector<VerdefEntry>> Entries;
-  Optional<yaml::BinaryRef> Content;
 
   llvm::yaml::Hex64 Info;
 
   VerdefSection() : Section(ChunkKind::Verdef) {}
 
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
+
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Verdef; }
 };
 
-struct Group : Section {
+struct GroupSection : Section {
   // Members of a group contain a flag and a list of section indices
   // that are part of the group.
-  std::vector<SectionOrType> Members;
+  Optional<std::vector<SectionOrType>> Members;
   Optional<StringRef> Signature; /* Info */
 
-  Group() : Section(ChunkKind::Group) {}
+  GroupSection() : Section(ChunkKind::Group) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Members", Members.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) { return S->Kind == ChunkKind::Group; }
 };
@@ -462,10 +508,14 @@ struct Relocation {
 };
 
 struct RelocationSection : Section {
-  std::vector<Relocation> Relocations;
+  Optional<std::vector<Relocation>> Relocations;
   StringRef RelocatableSec; /* Info */
 
   RelocationSection() : Section(ChunkKind::Relocation) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Relocations", Relocations.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::Relocation;
@@ -474,9 +524,12 @@ struct RelocationSection : Section {
 
 struct RelrSection : Section {
   Optional<std::vector<llvm::yaml::Hex64>> Entries;
-  Optional<yaml::BinaryRef> Content;
 
   RelrSection() : Section(ChunkKind::Relr) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
 
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::Relr;
@@ -484,12 +537,35 @@ struct RelrSection : Section {
 };
 
 struct SymtabShndxSection : Section {
-  std::vector<uint32_t> Entries;
+  Optional<std::vector<uint32_t>> Entries;
 
   SymtabShndxSection() : Section(ChunkKind::SymtabShndxSection) {}
 
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
+
   static bool classof(const Chunk *S) {
     return S->Kind == ChunkKind::SymtabShndxSection;
+  }
+};
+
+struct ARMIndexTableEntry {
+  llvm::yaml::Hex32 Offset;
+  llvm::yaml::Hex32 Value;
+};
+
+struct ARMIndexTableSection : Section {
+  Optional<std::vector<ARMIndexTableEntry>> Entries;
+
+  ARMIndexTableSection() : Section(ChunkKind::ARMIndexTable) {}
+
+  std::vector<std::pair<StringRef, bool>> getEntries() const override {
+    return {{"Entries", Entries.hasValue()}};
+  };
+
+  static bool classof(const Chunk *S) {
+    return S->Kind == ChunkKind::ARMIndexTable;
   }
 };
 
@@ -575,6 +651,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::VerneedEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::Relocation)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::SectionOrType)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::SectionName)
+LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::ARMIndexTableEntry)
 
 namespace llvm {
 namespace yaml {
@@ -700,7 +777,7 @@ struct MappingTraits<ELFYAML::FileHeader> {
 
 template <> struct MappingTraits<ELFYAML::SectionHeaderTable> {
   static void mapping(IO &IO, ELFYAML::SectionHeaderTable &SecHdrTable);
-  static StringRef validate(IO &IO, ELFYAML::SectionHeaderTable &SecHdrTable);
+  static std::string validate(IO &IO, ELFYAML::SectionHeaderTable &SecHdrTable);
 };
 
 template <> struct MappingTraits<ELFYAML::SectionHeader> {
@@ -714,7 +791,7 @@ template <> struct MappingTraits<ELFYAML::ProgramHeader> {
 template <>
 struct MappingTraits<ELFYAML::Symbol> {
   static void mapping(IO &IO, ELFYAML::Symbol &Symbol);
-  static StringRef validate(IO &IO, ELFYAML::Symbol &Symbol);
+  static std::string validate(IO &IO, ELFYAML::Symbol &Symbol);
 };
 
 template <> struct MappingTraits<ELFYAML::StackSizeEntry> {
@@ -757,9 +834,13 @@ template <> struct MappingTraits<ELFYAML::Relocation> {
   static void mapping(IO &IO, ELFYAML::Relocation &Rel);
 };
 
+template <> struct MappingTraits<ELFYAML::ARMIndexTableEntry> {
+  static void mapping(IO &IO, ELFYAML::ARMIndexTableEntry &E);
+};
+
 template <> struct MappingTraits<std::unique_ptr<ELFYAML::Chunk>> {
   static void mapping(IO &IO, std::unique_ptr<ELFYAML::Chunk> &C);
-  static StringRef validate(IO &io, std::unique_ptr<ELFYAML::Chunk> &C);
+  static std::string validate(IO &io, std::unique_ptr<ELFYAML::Chunk> &C);
 };
 
 template <>

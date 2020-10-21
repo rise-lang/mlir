@@ -5,8 +5,8 @@
 // CHECK: %[[MEMREF:.*]] =
 %memref = "foo.op"() : () -> (memref<1xf64>)
 
-// CHECK: test.format_literal_op keyword_$. -> :, = <> () [] {foo.some_attr}
-test.format_literal_op keyword_$. -> :, = <> () [] {foo.some_attr}
+// CHECK: test.format_literal_op keyword_$. -> :, = <> () [] ( ) {foo.some_attr}
+test.format_literal_op keyword_$. -> :, = <> () [] ( ) {foo.some_attr}
 
 // CHECK: test.format_attr_op 10
 // CHECK-NOT: {attr
@@ -212,6 +212,12 @@ test.format_custom_directive_operands_and_types %i64, %i64 -> (%i64) : i64, i64 
 
 // CHECK: test.format_custom_directive_operands_and_types %[[I64]] -> (%[[I64]]) : i64 -> (i64)
 test.format_custom_directive_operands_and_types %i64 -> (%i64) : i64 -> (i64)
+
+// CHECK: test.format_custom_directive_attributes 54 : i64
+test.format_custom_directive_attributes 54 : i64
+
+// CHECK: test.format_custom_directive_attributes 54 : i64, 46 : i64
+test.format_custom_directive_attributes 54 : i64, 46 : i64
 
 // CHECK: test.format_custom_directive_regions {
 // CHECK-NEXT: test.return

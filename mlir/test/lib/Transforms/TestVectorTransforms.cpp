@@ -125,6 +125,55 @@ struct TestVectorUnrollingPatterns
   }
 };
 
+struct TestVectorDistributePatterns
+    : public PassWrapper<TestVectorDistributePatterns, FunctionPass> {
+  TestVectorDistributePatterns() = default;
+  TestVectorDistributePatterns(const TestVectorDistributePatterns &pass) {}
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<VectorDialect>();
+    registry.insert<AffineDialect>();
+  }
+  Option<int32_t> multiplicity{
+      *this, "distribution-multiplicity",
+      llvm::cl::desc("Set the multiplicity used for distributing vector"),
+      llvm::cl::init(32)};
+  void runOnFunction() override {
+    MLIRContext *ctx = &getContext();
+    OwningRewritePatternList patterns;
+    FuncOp func = getFunction();
+    func.walk([&](AddFOp op) {
+      OpBuilder builder(op);
+      Optional<mlir::vector::DistributeOps> ops = distributPointwiseVectorOp(
+          builder, op.getOperation(), func.getArgument(0), multiplicity);
+      if (ops.hasValue()) {
+        SmallPtrSet<Operation *, 1> extractOp({ops->extract});
+        op.getResult().replaceAllUsesExcept(ops->insert.getResult(), extractOp);
+      }
+    });
+    patterns.insert<PointwiseExtractPattern>(ctx);
+    populateVectorToVectorTransformationPatterns(patterns, ctx);
+    applyPatternsAndFoldGreedily(getFunction(), patterns);
+  }
+};
+
+struct TestVectorTransferUnrollingPatterns
+    : public PassWrapper<TestVectorTransferUnrollingPatterns, FunctionPass> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<AffineDialect>();
+  }
+  void runOnFunction() override {
+    MLIRContext *ctx = &getContext();
+    OwningRewritePatternList patterns;
+    patterns.insert<UnrollVectorPattern<vector::TransferReadOp>>(
+        ArrayRef<int64_t>{2, 2}, ctx);
+    patterns.insert<UnrollVectorPattern<vector::TransferWriteOp>>(
+        ArrayRef<int64_t>{2, 2}, ctx);
+    populateVectorToVectorCanonicalizationPatterns(patterns, ctx);
+    populateVectorToVectorTransformationPatterns(patterns, ctx);
+    applyPatternsAndFoldGreedily(getFunction(), patterns);
+  }
+};
+
 struct TestVectorTransferFullPartialSplitPatterns
     : public PassWrapper<TestVectorTransferFullPartialSplitPatterns,
                          FunctionPass> {
@@ -174,9 +223,17 @@ void registerTestVectorConversions() {
       "test-vector-unrolling-patterns",
       "Test conversion patterns to unroll contract ops in the vector dialect");
 
+  PassRegistration<TestVectorTransferUnrollingPatterns> transferOpUnrollingPass(
+      "test-vector-transfer-unrolling-patterns",
+      "Test conversion patterns to unroll transfer ops in the vector dialect");
+
   PassRegistration<TestVectorTransferFullPartialSplitPatterns>
       vectorTransformFullPartialPass("test-vector-transfer-full-partial-split",
                                      "Test conversion patterns to split "
                                      "transfer ops via scf.if + linalg ops");
+  PassRegistration<TestVectorDistributePatterns> distributePass(
+      "test-vector-distribute-patterns",
+      "Test conversion patterns to distribute vector ops in the vector "
+      "dialect");
 }
 } // namespace mlir

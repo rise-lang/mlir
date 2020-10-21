@@ -97,6 +97,7 @@ add_llvm_component_library(LLVMSupport
   BranchProbability.cpp
   BuryPointer.cpp
   CachePruning.cpp
+  CfgTraits.cpp
   circular_raw_ostream.cpp
   Chrono.cpp
   COM.cpp
@@ -124,6 +125,7 @@ add_llvm_component_library(LLVMSupport
   FoldingSet.cpp
   FormattedStream.cpp
   FormatVariadic.cpp
+  GenericDomTree.cpp
   GlobPattern.cpp
   GraphWriter.cpp
   Hashing.cpp
@@ -142,6 +144,7 @@ add_llvm_component_library(LLVMSupport
   MathExtras.cpp
   MemAlloc.cpp
   MemoryBuffer.cpp
+  MemoryBufferRef.cpp
   MD5.cpp
   NativeFormatting.cpp
   OptimizedStructLayout.cpp

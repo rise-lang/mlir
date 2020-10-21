@@ -69,6 +69,22 @@ SmallVector<Value, 1> unrollSingleResultVectorOp(OpBuilder &builder,
                                                  Operation *op,
                                                  ArrayRef<int64_t> targetShape);
 
+/// Unroll a transfer_write op. Break up the vector source into a tuple of
+/// vectors matching the given shape. Then store each element with its own
+/// transfer_write.
+///
+/// Example:
+/// vector.transfer_write %A, %M[%c0, %c0] : vector<4x4xf32>, memref<4x4xf32>
+/// ->
+/// %0 = vector.extract_slices %A, [2, 4], [1, 1] :
+///                vector<4x4xf32> into tuple<vector<2x4xf32>, vector<2x4xf32>>
+/// %1 = vector.tuple_get %0, 0 : tuple<vector<2x4xf32>, vector<2x4xf32>>
+/// vector.transfer_write %1, %M[%c0, %c0] : vector<2x4xf32>, memref<4x4xf32>
+/// %2 = vector.tuple_get %0, 1 : tuple<vector<2x4xf32>, vector<2x4xf32>>
+/// vector.transfer_write %2, %M[%c2, %c0] : vector<2x4xf32>, memref<4x4xf32>
+LogicalResult unrollTransferWriteOp(OpBuilder &builder, Operation *op,
+                                    ArrayRef<int64_t> targetShape);
+
 /// Pattern to apply `unrollSingleResultVectorOp` to a `targetShape`
 /// declaratively.
 template <typename OpTy>
@@ -95,6 +111,12 @@ struct UnrollVectorPattern : public OpRewritePattern<OpTy> {
     if (!maybeShapeRatio ||
         llvm::all_of(*maybeShapeRatio, [](int64_t v) { return v == 1; }))
       return failure();
+    if (std::is_same<OpTy, TransferWriteOp>::value) {
+      if (failed(unrollTransferWriteOp(rewriter, op, targetShape)))
+        return failure();
+      rewriter.eraseOp(op);
+      return success();
+    }
     if (op.getOperation()->getNumResults() != 1)
       return failure();
     auto resultVector = unrollSingleResultVectorOp(rewriter, op, targetShape);
@@ -169,6 +191,47 @@ struct VectorTransferFullPartialRewriter : public RewritePattern {
 
 private:
   VectorTransformsOptions options;
+  FilterConstraintType filter;
+};
+
+struct DistributeOps {
+  ExtractMapOp extract;
+  InsertMapOp insert;
+};
+
+/// Distribute a 1D vector pointwise operation over a range of given IDs taking
+/// *all* values in [0 .. multiplicity - 1] (e.g. loop induction variable or
+/// SPMD id). This transformation only inserts
+/// vector.extract_map/vector.insert_map. It is meant to be used with
+/// canonicalizations pattern to propagate and fold the vector
+/// insert_map/extract_map operations.
+/// Transforms:
+//  %v = addf %a, %b : vector<32xf32>
+/// to:
+/// %v = addf %a, %b : vector<32xf32> %ev =
+/// vector.extract_map %v, %id, 32 : vector<32xf32> into vector<1xf32> %nv =
+/// vector.insert_map %ev, %id, 32 : vector<1xf32> into vector<32xf32>
+Optional<DistributeOps> distributPointwiseVectorOp(OpBuilder &builder,
+                                                   Operation *op, Value id,
+                                                   int64_t multiplicity);
+/// Canonicalize an extra element using the result of a pointwise operation.
+/// Transforms:
+/// %v = addf %a, %b : vector32xf32>
+/// %dv = vector.extract_map %v, %id, 32 : vector<32xf32> into vector<1xf32>
+/// to:
+/// %da = vector.extract_map %a, %id, 32 : vector<32xf32> into vector<1xf32>
+/// %db = vector.extract_map %a, %id, 32 : vector<32xf32> into vector<1xf32>
+/// %dv = addf %da, %db : vector<1xf32>
+struct PointwiseExtractPattern : public OpRewritePattern<ExtractMapOp> {
+  using FilterConstraintType = std::function<LogicalResult(ExtractMapOp op)>;
+  PointwiseExtractPattern(
+      MLIRContext *context, FilterConstraintType constraint =
+                                [](ExtractMapOp op) { return success(); })
+      : OpRewritePattern<ExtractMapOp>(context), filter(constraint) {}
+  LogicalResult matchAndRewrite(ExtractMapOp extract,
+                                PatternRewriter &rewriter) const override;
+
+private:
   FilterConstraintType filter;
 };
 

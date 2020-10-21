@@ -479,14 +479,6 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
       if (EnableOpt)
         PM.add(createAMDGPUPromoteAllocaToVector());
   });
-
-  Builder.addExtension(
-      PassManagerBuilder::EP_LoopOptimizerEnd,
-      [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
-        // Add SROA after loop unrolling as more promotable patterns are
-        // exposed after small loops are fully unrolled.
-        PM.add(createSROAPass());
-      });
 }
 
 //===----------------------------------------------------------------------===//
@@ -1041,6 +1033,12 @@ void GCNPassConfig::addPreEmitPass() {
   addPass(createSIShrinkInstructionsPass());
   addPass(createSIModeRegisterPass());
 
+  if (getOptLevel() > CodeGenOpt::None)
+    addPass(&SIInsertHardClausesID);
+
+  addPass(&SIRemoveShortExecBranchesID);
+  addPass(&SIInsertSkipsPassID);
+  addPass(&SIPreEmitPeepholeID);
   // The hazard recognizer that runs as part of the post-ra scheduler does not
   // guarantee to be able handle all hazards correctly. This is because if there
   // are multiple scheduling regions in a basic block, the regions are scheduled
@@ -1049,16 +1047,7 @@ void GCNPassConfig::addPreEmitPass() {
   //
   // Here we add a stand-alone hazard recognizer pass which can handle all
   // cases.
-  //
-  // FIXME: This stand-alone pass will emit indiv. S_NOP 0, as needed. It would
-  // be better for it to emit S_NOP <N> when possible.
   addPass(&PostRAHazardRecognizerID);
-  if (getOptLevel() > CodeGenOpt::None)
-    addPass(&SIInsertHardClausesID);
-
-  addPass(&SIRemoveShortExecBranchesID);
-  addPass(&SIInsertSkipsPassID);
-  addPass(&SIPreEmitPeepholeID);
   addPass(&BranchRelaxationPassID);
 }
 
