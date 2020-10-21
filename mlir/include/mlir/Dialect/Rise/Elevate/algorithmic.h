@@ -22,8 +22,9 @@ using namespace mlir::elevate;
 
 struct FuseReduceMapStrategy : Strategy {
   FuseReduceMapStrategy() {};
+  bool traversal() const override {return false;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
 
     if (!isa<ApplyOp>(expr)) return Failure();
@@ -52,11 +53,11 @@ struct FuseReduceMapStrategy : Strategy {
     },initializer->getResult(0), mapInput);
 
     // cleanup
-    expr.replaceAllUsesWith(newReduceApplication.getDefiningOp()); // TODO: factor out
-    rewriter->eraseOp(&expr);
-    rewriter->eraseOp(reduction);
-    rewriter->eraseOp(reductionInput);
-    rewriter->eraseOp(mapSeq);
+//    expr.replaceAllUsesWith(newReduceApplication.getDefiningOp()); // TODO: factor out
+//    rewriter->eraseOp(&expr);
+//    rewriter->eraseOp(reduction);
+//    rewriter->eraseOp(reductionInput);
+//    rewriter->eraseOp(mapSeq);
 
     Operation *result = newReduceApplication.getDefiningOp();
     return success(*result);
@@ -69,8 +70,9 @@ auto fuseReduceMap = FuseReduceMapStrategy();
 struct SplitJoinStrategy : Strategy {
   int n;
   SplitJoinStrategy(const int n) : n{n} {};
+  bool traversal() const override {return false;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
 
     if (!isa<ApplyOp>(expr)) return Failure();
@@ -90,9 +92,9 @@ struct SplitJoinStrategy : Strategy {
     Value result = join(mapSeq2D(mapSeqOp.t(), mapLambda->getResult(0), split(natType(n), mapInput)));
 
     // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-    rewriter->eraseOp(&expr);
-    rewriter->eraseOp(mapSeqOp);
+//    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
+//    rewriter->eraseOp(&expr);
+//    rewriter->eraseOp(mapSeqOp);
     return success(*result.getDefiningOp());
   };
 };
@@ -102,9 +104,11 @@ auto splitJoin = [](const auto n) {
 };
 
 struct AddIdAfterStrategy : Strategy {
+  bool traversal() const override {return false;};
+
   AddIdAfterStrategy() {};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
 
     if (!isa<ApplyOp>(expr)) return Failure();
@@ -118,8 +122,8 @@ struct AddIdAfterStrategy : Strategy {
     Value result = mlir::edsc::op::id(newApply->getResult(0));
 
     // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-    rewriter->eraseOp(&expr);
+//    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
+//    rewriter->eraseOp(&expr);
     return success(*result.getDefiningOp());
   };
 };
@@ -128,8 +132,9 @@ auto addIdAfter = AddIdAfterStrategy();
 
 struct CreateTransposePairStrategy : Strategy {
   CreateTransposePairStrategy() {};
+  bool traversal() const override {return false;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
 
     if (!isa<ApplyOp>(expr)) return Failure();
@@ -145,9 +150,9 @@ struct CreateTransposePairStrategy : Strategy {
     Value result = transpose(transpose(apply.getOperand(1)));
 
     // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-    rewriter->eraseOp(&expr);
-    rewriter->eraseOp(id);
+//    expr.replaceAllUsesWith(result.getDefiningOp());
+//    rewriter->eraseOp(&expr);
+//    rewriter->eraseOp(id);
     return success(*result.getDefiningOp());
   };
 };
@@ -156,8 +161,9 @@ auto createTransposePair = CreateTransposePairStrategy();
 
 struct RemoveTransposePairStrategy : Strategy {
   RemoveTransposePairStrategy() {};
+  bool traversal() const override {return false;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply1 = cast<ApplyOp>(expr);
@@ -174,11 +180,11 @@ struct RemoveTransposePairStrategy : Strategy {
     Value result = apply2.getOperand(1);
 
     // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-    rewriter->eraseOp(&expr);
-    rewriter->eraseOp(transpose1);
-    rewriter->eraseOp(apply2);
-    rewriter->eraseOp(transpose2);
+//    expr.replaceAllUsesWith(result.getDefiningOp());
+//    rewriter->eraseOp(&expr);
+//    rewriter->eraseOp(transpose1);
+//    rewriter->eraseOp(apply2);
+//    rewriter->eraseOp(transpose2);
 
     return success(*result.getDefiningOp());
   };
@@ -189,9 +195,13 @@ auto removeTransposePair = RemoveTransposePairStrategy();
 // movement
 struct TransposeBeforeMapMapFStrategy : Strategy {
   TransposeBeforeMapMapFStrategy() {};
+  bool traversal() const override {return true;};
 
-  RewriteResult operator()(Expr &expr) const override {
+  RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
+    // match for
+    // App(transpose(), App(App(map(), App(map(), f)), y))
+
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply1 = cast<ApplyOp>(expr);
     if (!isa<TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
@@ -203,34 +213,41 @@ struct TransposeBeforeMapMapFStrategy : Strategy {
     auto mapSeqOp1 = cast<MapSeqOp>(apply2.getOperand(0).getDefiningOp());
     if (!apply2.getOperand(1).isa<OpResult>()) return Failure();
     if (!isa<LambdaOp>(apply2.getOperand(1).getDefiningOp())) return Failure();
-    auto mapLambda = cast<LambdaOp>(apply2.getOperand(1).getDefiningOp());
-    if (!isa<ApplyOp>(mapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
-    auto apply3 = cast<ApplyOp>(mapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp());
+    auto outerMapLambda = cast<LambdaOp>(apply2.getOperand(1).getDefiningOp()); // %2
+    if (!isa<ApplyOp>(outerMapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
+    auto apply3 = cast<ApplyOp>(outerMapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp());
     if (!isa<MapSeqOp>(apply3.getOperand(0).getDefiningOp())) return Failure();
     auto mapSeqOp2 = cast<MapSeqOp>(apply3.getOperand(0).getDefiningOp());
     if (!isa<LambdaOp>(apply3.getOperand(1).getDefiningOp())) return Failure();
-    auto innerLambda = cast<LambdaOp>(apply3.getOperand(1).getDefiningOp());
+    auto f = cast<LambdaOp>(apply3.getOperand(1).getDefiningOp()); // %9
     // successful match
 
     ScopedContext scope(*rewriter, expr.getLoc());
     rewriter->setInsertionPointAfter(apply1);
 
-    auto lambdaCopy = rewriter->clone(*innerLambda);
-    Value result = mapSeq2D(mapSeqOp2.t(), lambdaCopy->getResult(0), transpose(apply2.getOperand(2)));
+//    apply1.getParentOfType<FuncOp>().dump();
+
+    Operation *lambdaCopy = rewriter->clone(*f);
+
+//    apply1.getParentOfType<FuncOp>().dump();
+
+    Value result = mapSeq("affine", mapSeqOp1.t(), [&](Value elem){
+          return mapSeq("affine", mapSeqOp2.t(), lambdaCopy->getResult(0), apply3.getOperand(2));
+                   }, transpose(apply2.getOperand(2)));
 
     // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
+    expr.replaceAllUsesWith(result.getDefiningOp());
     rewriter->eraseOp(apply1);
     rewriter->eraseOp(transpose1);
     rewriter->eraseOp(apply2);
     rewriter->eraseOp(mapSeqOp1);
 
-    // TODO: erasing mapLambda for some reason fails because of existing uses (only one was apply2!)
-    mapLambda.dump();
-    lambdaCopy->getParentOfType<FuncOp>().dump();
-    rewriter->eraseOp(mapLambda);
+    // TODO: for some reason outerMapLambda still has uses (the only use was by
+    //  apply2, which should be erased now)
+    //  I am leaving it out for now, which triggers an error later in the verifier
 
-    // everything else is nested inside and thus erased
+//    rewriter->eraseOp(outerMapLambda);
+//    result.getDefiningOp()->getParentOfType<ModuleOp>().dump();
     return success(*result.getDefiningOp());
   };
 };

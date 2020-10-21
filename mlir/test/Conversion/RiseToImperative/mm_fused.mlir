@@ -4,10 +4,6 @@
 
 func @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
-    %outputArray1 = alloc() : memref<2048x2048xf32>
-    %outputArray = alloc() : memref<2048x2048xf32>
-    %outputArray2 = alloc() : memref<2048x2048xf32>
-
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<2048, array<2048, scalar<f32>>>
         %B = rise.in %inB : !rise.array<2048, array<2048, scalar<f32>>>
@@ -32,7 +28,7 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
                     %snd = rise.apply %sndFun, %tuple
 
                     %result = rise.embed(%fst, %snd, %acc) {
-                           %product = mulf %fst, %snd :f32
+                           %product = mulf %fst, %snd : f32
                            %result = addf %product, %acc : f32
                            rise.return %result : f32
                     } : !rise.scalar<f32>

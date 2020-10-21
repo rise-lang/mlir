@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Elevate/ElevateRewriter.h"
+#include "llvm/Support/Debug.h"
 
 namespace mlir {
 namespace elevate {
@@ -80,41 +81,52 @@ struct Strategy {
 
     Expr &newExpr = getExpr(rr);
     auto rewriter = ElevateRewriter::getInstance().rewriter;
-    // clean up here:
-    expr.replaceAllUsesWith(&newExpr);
+    std::vector<Operation *> garbageCandidates;
+    auto addOperandsToGarbageCandidates = [&](Operation *op) {
 
-    // collect garbage and dispose
-    std::vector<Operation *> worklist;
-    auto addOperandsToWorklist = [&](Operation *op) {
       llvm::for_each(op->getOperands(), [&](Value operand) {
         if (auto opResult = operand.dyn_cast<OpResult>()) {
 //          std::cout << "pushing back:" << operand.getDefiningOp()->getName().getStringRef().str() << "\n" << std::flush;
-          worklist.push_back(opResult.getDefiningOp());
+          garbageCandidates.push_back(opResult.getDefiningOp());
         }});
     };
-    addOperandsToWorklist(&expr);
 
-    rewriter->eraseOp(&expr);
+
+    // clean up here:
+//    expr.replaceAllUsesWith(&newExpr);
+    addOperandsToGarbageCandidates(&expr);
+    rewriter->replaceOp(&expr, newExpr.getResult(0));
+//    rewriter->eraseOp(&expr);
     do {
-      auto currentOp = worklist.back();
-      worklist.pop_back();
+      auto currentOp = garbageCandidates.back();
+      garbageCandidates.pop_back();
 
-      addOperandsToWorklist(currentOp);
+      addOperandsToGarbageCandidates(currentOp);
       if (currentOp->use_empty()) {
+//        if (currentOp->getNumRegions() == 1) {
+//          auto &block = currentOp->getRegion(0).front();
+////          block.walk(block.getReverseIterator()->begin(), block.getReverseIterator()->end(), [&](Operation* op){
+//          for (auto op = block.getOperations().rbegin(); op != block.getOperations().rend(); ++op) {
+//
+//            std::cout << "erasing op: " << op->getName().getStringRef().str() << "\n" << std::flush;
+//            std::cout << "use empty?" << op->use_empty() << "\n" << std::flush;
+////            op->dump();
+////            llvm::for_each(op->getUsers(), [&](Operation *user){user->dump();});
+//            rewriter->eraseOp((&*op));
+//          }
+//          rewriter->eraseBlock(&currentOp->getRegion(0).front());
+//        }
+//        currentOp->dump();
+        currentOp->dropAllUses();
+        currentOp->dropAllReferences();
 //        std::cout << "erasing op: " << currentOp->getName().getStringRef().str() << "\n" << std::flush;
         rewriter->eraseOp(currentOp);
       }
-    } while (!worklist.empty());
+    } while (!garbageCandidates.empty());
 
     return success(newExpr);
   }
 };
-
-// TODO:
-// automatic cleanup will be possible. We will always replace the matched operation with what ever the strategy returns.
-// We then check for all previous operands, if they have still uses and remove them accordingly
-
-
 
 auto flatMapSuccess(RewriteResult rr, const Strategy &s) -> RewriteResult {
   return match(
@@ -149,9 +161,9 @@ struct DebugStrategy : Strategy {
 
   RewriteResult rewrite(Expr &expr) const override {
     if (FileLineColLoc loc = expr.getLoc().dyn_cast<FileLineColLoc>()) {
-      std::cout << loc.getFilename().str() << ":" << loc.getLine() << ":" << loc.getColumn() << " ";
+      llvm::dbgs() << loc.getFilename().str() << ":" << loc.getLine() << ":" << loc.getColumn() << " ";
     }
-    std::cout << expr.getName().getStringRef().str() << ": " << msg.c_str() << "\n";
+    llvm::dbgs() << expr.getName().getStringRef().str() << ": " << msg.c_str() << "\n";
     return success(expr);
   };
 };

@@ -110,7 +110,6 @@ struct OneStrategy : Strategy {
         auto op = apply.getOperand(i).getDefiningOp();
         RewriteResult rr = s(*op);
         if (auto success = std::get_if<Success>(&rr)) {
-          // Does this have to happen here or in the strategy
 //          apply.setOperand(i, getExpr(*success).getResult(0));
           return rr;
         }
