@@ -20,7 +20,6 @@ using namespace mlir::elevate;
 
 struct BodyStrategy : Strategy {
   const Strategy &s;
-  bool traversal() const override {return true;};
   BodyStrategy(const Strategy &s) : s{s} {};
 
   RewriteResult rewrite(Expr &expr) const override {
@@ -29,7 +28,9 @@ struct BodyStrategy : Strategy {
 
     mlir::rise::ReturnOp terminator = dyn_cast<mlir::rise::ReturnOp>(
         expr.getRegion(0).front().getTerminator());
-    return s(*terminator.getOperand(0).getDefiningOp());
+    auto rr = s(*terminator.getOperand(0).getDefiningOp());
+    if (std::get_if<Failure>(&rr)) return rr;
+    return success(expr);
   };
 };
 
@@ -37,7 +38,6 @@ auto body = [](const auto &s) { return BodyStrategy(s); };
 
 struct FunctionStrategy : Strategy {
   const Strategy &s;
-  bool traversal() const override {return true;};
   FunctionStrategy(const Strategy &s) : s{s} {};
 
   RewriteResult rewrite(Expr &expr) const override {
@@ -46,7 +46,9 @@ struct FunctionStrategy : Strategy {
 
     auto apply = cast<ApplyOp>(expr);
     auto fun = apply.getOperand(0).getDefiningOp();
-    return s(*fun);
+    auto rr = s(*fun);
+    if (std::get_if<Failure>(&rr)) return rr;
+    return success(expr);
   };
 };
 
@@ -55,7 +57,6 @@ auto function = [](const auto &s) { return FunctionStrategy(s); };
 struct ArgumentStrategy : Strategy {
   int n;
   const Strategy &s;
-  bool traversal() const override {return true;};
   ArgumentStrategy(const int n, const Strategy &s) : n{n}, s{s} {};
 
   RewriteResult rewrite(Expr &expr) const override {
@@ -65,7 +66,9 @@ struct ArgumentStrategy : Strategy {
     auto apply = cast<ApplyOp>(expr);
     if (!apply.getOperand(n).isa<OpResult>()) return Failure();
     auto arg = apply.getOperand(n).getDefiningOp();
-    return s(*arg);
+    auto rr = s(*arg);
+    if (std::get_if<Failure>(&rr)) return rr;
+    return success(expr);
   };
 };
 
@@ -74,18 +77,21 @@ auto argument = [](const auto n, const auto &s) {
 };
 
 struct FMapStrategy : Strategy {
-  bool traversal() const override {return true;};
   const Strategy &s;
   FMapStrategy(const Strategy &s) : s{s} {};
 
   RewriteResult rewrite(Expr &expr) const override {
+    llvm::dbgs() << "fmapp!\n";
     if (!isa<ApplyOp>(expr))
       return elevate::failure();
 
     auto apply = cast<ApplyOp>(expr);
     if (!isa<MapSeqOp>(apply.getOperand(0).getDefiningOp())) return elevate::failure();
+    llvm::dbgs() << "fmapp!\n";
 
-    return argument(1, body(s))(expr);
+    auto rr = argument(1, body(s))(expr);
+    if (std::get_if<Failure>(&rr)) return rr;
+    return success(expr);
   };
 };
 
@@ -94,7 +100,6 @@ auto fmap = [](const auto &s) {
 };
 
 struct OneStrategy : Strategy {
-  bool traversal() const override {return true;};
   const Strategy &s;
   OneStrategy(const Strategy &s) : s{s} {};
 
@@ -108,29 +113,29 @@ struct OneStrategy : Strategy {
         if (!apply.getOperand(i).isa<OpResult>())
           continue;
         auto op = apply.getOperand(i).getDefiningOp();
-        RewriteResult rr = s(*op);
-        if (auto success = std::get_if<Success>(&rr)) {
-//          apply.setOperand(i, getExpr(*success).getResult(0));
-          return rr;
-        }
+        auto rr = s(*op);
+        if (std::get_if<Failure>(&rr))
+          continue;
+        return success(expr);
       }
     }
     if (LambdaOp lambda = dyn_cast<LambdaOp>(expr)) {
-      return body(s)(*lambda);
+      auto rr = body(s)(*lambda);
+      if (std::get_if<Failure>(&rr)) return rr;
+      return success(expr);
     }
     if (EmbedOp embed = dyn_cast<EmbedOp>(expr)) {
       RewriteResult rr = body(s)(*embed);
       if (std::get_if<Success>(&rr))
-        return rr;
+        return success(expr);
       for (int i = embed.getNumOperands() - 1; i >= 0; i--) {
         if (!embed.getOperand(i).isa<OpResult>())
           continue;
         auto op = embed.getOperand(i).getDefiningOp();
-        RewriteResult rr = s(*op);
-        if (auto success = std::get_if<Success>(&rr)) {
-//          embed.setOperand(i, getExpr(*success).getResult(0));
-          return rr;
-        }
+        auto rr = s(*op);
+        if (std::get_if<Failure>(&rr))
+          continue;
+        return success(expr);
       }
     }
     return Failure();
@@ -141,7 +146,6 @@ auto one = [](const auto &s) { return OneStrategy(s); };
 
 // not rise specific
 struct TopDownStrategy : Strategy {
-  bool traversal() const override {return true;};
   const Strategy &s;
   TopDownStrategy(const Strategy &s) : s{s} {};
 
@@ -153,7 +157,6 @@ struct TopDownStrategy : Strategy {
 auto topdown = [](const Strategy &s) { return TopDownStrategy(s); };
 
 struct BottomUpStrategy : Strategy {
-  bool traversal() const override {return true;};
   const Strategy &s;
   BottomUpStrategy(const Strategy &s) : s{s} {};
 
@@ -166,7 +169,6 @@ auto bottomUp = [](const Strategy &s) { return BottomUpStrategy(s); };
 
 // package
 struct NormalizeStrategy : Strategy {
-  bool traversal() const override {return true;};
   const Strategy &s;
 
   NormalizeStrategy(const Strategy &s) : s{s} {};
@@ -177,6 +179,34 @@ struct NormalizeStrategy : Strategy {
 };
 
 auto normalize = [](const auto &s) { return NormalizeStrategy(s); };
+
+// in place of isEqualTo strategy
+struct usesValueStrategy : Strategy {
+  const Value &val;
+
+  usesValueStrategy(const Value &val) : val{val} {};
+
+  RewriteResult rewrite(Expr &expr) const override {
+      auto sameVal = llvm::find(expr.getOperands(), val);
+      if (sameVal == expr.getOperands().end()) return Failure();
+      return success(expr);
+  };
+};
+
+auto usesValue = [](const auto &val) { return usesValueStrategy(val); };
+
+struct ContainsStrategy : Strategy {
+  const Value &val;
+
+  ContainsStrategy(const Value &val) : val{val} {};
+
+  RewriteResult rewrite(Expr &expr) const override {
+    return topdown(usesValue(val))(expr);
+  };
+};
+
+auto contains = [](const auto &val) { return ContainsStrategy(val); };
+
 
 // utils
 void substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
@@ -202,7 +232,6 @@ Value inlineLambda(LambdaOp lambda, Block *insertionBlock, Operation *op) {
 
 struct BetaReductionStrategy : Strategy {
   BetaReductionStrategy(){};
-  bool traversal() const override {return true;};
 
   RewriteResult rewrite(Expr &expr) const override {
     if (!isa<ApplyOp>(expr)) return Failure();
@@ -220,15 +249,30 @@ struct BetaReductionStrategy : Strategy {
     Value inlinedLambdaResult = inlineLambda(lambda, expr.getBlock(), apply);
     Expr *newExpr = inlinedLambdaResult.getDefiningOp();
 
-    expr.replaceAllUsesWith(newExpr); // TODO: factor out
-    // problem: we want to delete expr afterwards in this case!
-
-    rewriter.eraseOp(&expr);
-    rewriter.eraseOp(lambda);
     return success(*newExpr);
   };
 };
 
 auto betaReduction = BetaReductionStrategy();
+
+struct EtaReducibleStrategy : Strategy {
+  EtaReducibleStrategy(){};
+
+  RewriteResult rewrite(Expr &expr) const override {
+    if (!isa<LambdaOp>(expr)) return Failure();
+    auto outerLambda = cast<LambdaOp>(expr);
+    if (!isa<ApplyOp>(outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp()));
+    auto apply = outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp();
+
+    // check that region of lambda does not contain the arg of the lambda
+    auto rrContainsArg = contains(outerLambda.region().front().getArgument(0))(expr);
+    if (auto _ =  std::get_if<Success>(&rrContainsArg)) {
+      return Failure();
+    }
+    return success(expr);
+  };
+};
+
+auto etaReducible = EtaReducibleStrategy();
 
 #endif // LLVM_ELEVATE_TRAVERSAL_H

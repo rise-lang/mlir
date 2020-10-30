@@ -30,6 +30,7 @@ set(LIBS
   MLIRAnalysis
   MLIRDialect
   MLIREDSC
+  MLIRElevate
   MLIROptLib
   MLIRParser
   MLIRPass

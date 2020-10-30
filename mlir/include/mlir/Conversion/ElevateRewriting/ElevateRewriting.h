@@ -5,6 +5,7 @@
 #ifndef MLIR_ELEVATEREWRITING_H
 #define MLIR_ELEVATEREWRITING_H
 
+//#include "mlir/Elevate/ElevateRewriter.h"
 #include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
@@ -21,10 +22,8 @@
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
 
-#include "mlir/Elevate/core.h"
-#include "mlir/Dialect/Rise/Elevate/traversal.h"
-#include "mlir/Dialect/Rise/Elevate/algorithmic.h"
-#include "mlir/Elevate/ElevateRewriter.h"
+//#include "mlir/Dialect/Rise/Elevate/traversal.h"
+//#include "mlir/Dialect/Rise/Elevate/algorithmic.h"
 
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"

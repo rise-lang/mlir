@@ -23,9 +23,6 @@ private:
   ElevateRewriter() {}
 };
 
-ElevateRewriter& ElevateRewriter::getInstance() {
-  static ElevateRewriter instance;
-  return instance;
-}
+
 
 #endif // LLVM_ELEVATEREWRITER_H

@@ -9,6 +9,7 @@
 #include <memory>
 #include <variant>
 #include <stdexcept>
+#include "mlir/IR/Function.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Elevate/ElevateRewriter.h"
 #include "llvm/Support/Debug.h"
@@ -72,54 +73,37 @@ auto getExpr(RewriteResult rr) -> Expr & {
 
 struct Strategy {
   virtual RewriteResult rewrite(Expr &expr) const = 0;
-  virtual bool traversal() const = 0;
 
   RewriteResult operator()(Expr &expr) const {
     RewriteResult rr = rewrite(expr);
-    if (traversal()) return rr;
-    if (auto _ = std::get_if<Failure>(&rr)) return rr;
 
+    if (auto _ = std::get_if<Failure>(&rr)) return rr;
     Expr &newExpr = getExpr(rr);
+
+    // Check if expr has been deleted or replaced already
+    if (&expr == nullptr) return rr;
+    if (expr.use_empty()) return rr;
+    // Did the strategy modify the IR at all
+    if (&expr == &newExpr) return rr;
+
     auto rewriter = ElevateRewriter::getInstance().rewriter;
     std::vector<Operation *> garbageCandidates;
     auto addOperandsToGarbageCandidates = [&](Operation *op) {
-
       llvm::for_each(op->getOperands(), [&](Value operand) {
         if (auto opResult = operand.dyn_cast<OpResult>()) {
-//          std::cout << "pushing back:" << operand.getDefiningOp()->getName().getStringRef().str() << "\n" << std::flush;
           garbageCandidates.push_back(opResult.getDefiningOp());
         }});
     };
 
-
-    // clean up here:
-//    expr.replaceAllUsesWith(&newExpr);
     addOperandsToGarbageCandidates(&expr);
-    rewriter->replaceOp(&expr, newExpr.getResult(0));
-//    rewriter->eraseOp(&expr);
+    expr.replaceAllUsesWith(&newExpr);
+    rewriter->eraseOp(&expr);
     do {
       auto currentOp = garbageCandidates.back();
       garbageCandidates.pop_back();
 
       addOperandsToGarbageCandidates(currentOp);
       if (currentOp->use_empty()) {
-//        if (currentOp->getNumRegions() == 1) {
-//          auto &block = currentOp->getRegion(0).front();
-////          block.walk(block.getReverseIterator()->begin(), block.getReverseIterator()->end(), [&](Operation* op){
-//          for (auto op = block.getOperations().rbegin(); op != block.getOperations().rend(); ++op) {
-//
-//            std::cout << "erasing op: " << op->getName().getStringRef().str() << "\n" << std::flush;
-//            std::cout << "use empty?" << op->use_empty() << "\n" << std::flush;
-////            op->dump();
-////            llvm::for_each(op->getUsers(), [&](Operation *user){user->dump();});
-//            rewriter->eraseOp((&*op));
-//          }
-//          rewriter->eraseBlock(&currentOp->getRegion(0).front());
-//        }
-//        currentOp->dump();
-        currentOp->dropAllUses();
-        currentOp->dropAllReferences();
-//        std::cout << "erasing op: " << currentOp->getName().getStringRef().str() << "\n" << std::flush;
         rewriter->eraseOp(currentOp);
       }
     } while (!garbageCandidates.empty());
@@ -147,7 +131,6 @@ auto flatMapFailure(RewriteResult rr, const F &f) -> RewriteResult {
 }
 
 struct IdStrategy : Strategy {
-  bool traversal() const override {return true;};
   RewriteResult rewrite(Expr &expr) const override { return success(expr); };
 };
 
@@ -155,8 +138,6 @@ auto id = IdStrategy();
 
 struct DebugStrategy : Strategy {
   const std::string msg;
-  bool traversal() const override {return true;};
-
   DebugStrategy(const std::string msg) : msg{msg} {};
 
   RewriteResult rewrite(Expr &expr) const override {
@@ -172,7 +153,6 @@ auto debug = [](const auto &msg) { return DebugStrategy(msg); };
 auto debug2 = DebugStrategy("");
 
 struct FailStrategy : Strategy {
-  bool traversal() const override {return true;};
   RewriteResult rewrite(Expr &expr) const override { return failure(); };
 };
 
@@ -181,7 +161,6 @@ auto fail = FailStrategy();
 struct SeqStrategy : Strategy {
   const Strategy &fs;
   const Strategy &ss;
-  bool traversal() const override {return true;};
 
   SeqStrategy(const Strategy &fs, const Strategy &ss) : fs{fs}, ss{ss} {};
 
@@ -197,7 +176,6 @@ auto seq = [](const auto &fs) {
 struct LeftChoiceStrategy : Strategy {
   const Strategy &fs;
   const Strategy &ss;
-  bool traversal() const override {return true;};
 
   LeftChoiceStrategy(const Strategy &fs, const Strategy &ss)
       : fs{fs}, ss{ss} {};
@@ -213,7 +191,6 @@ auto leftChoice = [](const auto &fs) {
 
 struct TryStrategy : Strategy {
   const Strategy &s;
-  bool traversal() const override {return true;};
 
   TryStrategy(const Strategy &s) : s{s} {};
 
@@ -226,8 +203,6 @@ auto try_ = [](const auto &s) { return TryStrategy(s); };
 
 struct RepeatStrategy : Strategy {
   const Strategy &s;
-  bool traversal() const override {return true;};
-
 
   RepeatStrategy(const Strategy &s) : s{s} {};
 

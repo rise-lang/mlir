@@ -56,6 +56,7 @@ public:
   /// Hook for custom printing of Attributes
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
 
+  static void dumpRiseExpression(Operation *op);
   void initialize();
   friend class ::mlir::MLIRContext;
 };

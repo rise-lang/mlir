@@ -22,7 +22,6 @@ using namespace mlir::elevate;
 
 struct FuseReduceMapStrategy : Strategy {
   FuseReduceMapStrategy() {};
-  bool traversal() const override {return false;};
 
   RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
@@ -52,13 +51,6 @@ struct FuseReduceMapStrategy : Strategy {
           return apply(scalarF32Type(), reductionLambda->getResult(0), {mapped, acc});
     },initializer->getResult(0), mapInput);
 
-    // cleanup
-//    expr.replaceAllUsesWith(newReduceApplication.getDefiningOp()); // TODO: factor out
-//    rewriter->eraseOp(&expr);
-//    rewriter->eraseOp(reduction);
-//    rewriter->eraseOp(reductionInput);
-//    rewriter->eraseOp(mapSeq);
-
     Operation *result = newReduceApplication.getDefiningOp();
     return success(*result);
   };
@@ -70,7 +62,6 @@ auto fuseReduceMap = FuseReduceMapStrategy();
 struct SplitJoinStrategy : Strategy {
   int n;
   SplitJoinStrategy(const int n) : n{n} {};
-  bool traversal() const override {return false;};
 
   RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
@@ -91,10 +82,6 @@ struct SplitJoinStrategy : Strategy {
 
     Value result = join(mapSeq2D(mapSeqOp.t(), mapLambda->getResult(0), split(natType(n), mapInput)));
 
-    // cleanup
-//    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-//    rewriter->eraseOp(&expr);
-//    rewriter->eraseOp(mapSeqOp);
     return success(*result.getDefiningOp());
   };
 };
@@ -104,7 +91,6 @@ auto splitJoin = [](const auto n) {
 };
 
 struct AddIdAfterStrategy : Strategy {
-  bool traversal() const override {return false;};
 
   AddIdAfterStrategy() {};
 
@@ -121,9 +107,6 @@ struct AddIdAfterStrategy : Strategy {
     auto newApply = rewriter->clone(*apply);
     Value result = mlir::edsc::op::id(newApply->getResult(0));
 
-    // cleanup
-//    expr.replaceAllUsesWith(result.getDefiningOp()); // TODO: factor out
-//    rewriter->eraseOp(&expr);
     return success(*result.getDefiningOp());
   };
 };
@@ -132,7 +115,6 @@ auto addIdAfter = AddIdAfterStrategy();
 
 struct CreateTransposePairStrategy : Strategy {
   CreateTransposePairStrategy() {};
-  bool traversal() const override {return false;};
 
   RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
@@ -149,10 +131,6 @@ struct CreateTransposePairStrategy : Strategy {
     rewriter->setInsertionPointAfter(apply);
     Value result = transpose(transpose(apply.getOperand(1)));
 
-    // cleanup
-//    expr.replaceAllUsesWith(result.getDefiningOp());
-//    rewriter->eraseOp(&expr);
-//    rewriter->eraseOp(id);
     return success(*result.getDefiningOp());
   };
 };
@@ -161,7 +139,6 @@ auto createTransposePair = CreateTransposePairStrategy();
 
 struct RemoveTransposePairStrategy : Strategy {
   RemoveTransposePairStrategy() {};
-  bool traversal() const override {return false;};
 
   RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
@@ -179,13 +156,6 @@ struct RemoveTransposePairStrategy : Strategy {
 
     Value result = apply2.getOperand(1);
 
-    // cleanup
-//    expr.replaceAllUsesWith(result.getDefiningOp());
-//    rewriter->eraseOp(&expr);
-//    rewriter->eraseOp(transpose1);
-//    rewriter->eraseOp(apply2);
-//    rewriter->eraseOp(transpose2);
-
     return success(*result.getDefiningOp());
   };
 };
@@ -193,14 +163,16 @@ struct RemoveTransposePairStrategy : Strategy {
 auto removeTransposePair = RemoveTransposePairStrategy();
 
 // movement
-struct TransposeBeforeMapMapFStrategy : Strategy {
-  TransposeBeforeMapMapFStrategy() {};
-  bool traversal() const override {return true;};
+struct MapMapFBeforeTransposeStrategy : Strategy {
+  MapMapFBeforeTransposeStrategy() {};
 
   RewriteResult rewrite(Expr &expr) const override {
     PatternRewriter *rewriter = ElevateRewriter::getInstance().rewriter;
     // match for
-    // App(transpose(), App(App(map(), App(map(), f)), y))
+    //    App(
+    //        App(map(), lamA @ Lambda(_, App(
+    //        App(map(), lamB @ Lambda(_, App(f, _))), _))),
+    //    arg)
 
     if (!isa<ApplyOp>(expr)) return Failure();
     auto apply1 = cast<ApplyOp>(expr);
@@ -213,21 +185,29 @@ struct TransposeBeforeMapMapFStrategy : Strategy {
     auto mapSeqOp1 = cast<MapSeqOp>(apply2.getOperand(0).getDefiningOp());
     if (!apply2.getOperand(1).isa<OpResult>()) return Failure();
     if (!isa<LambdaOp>(apply2.getOperand(1).getDefiningOp())) return Failure();
-    auto outerMapLambda = cast<LambdaOp>(apply2.getOperand(1).getDefiningOp()); // %2
-    if (!isa<ApplyOp>(outerMapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
-    auto apply3 = cast<ApplyOp>(outerMapLambda.region().front().getTerminator()->getOperand(0).getDefiningOp());
+    auto lamA = cast<LambdaOp>(apply2.getOperand(1).getDefiningOp()); // %2
+    if (!isa<ApplyOp>(lamA.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
+    auto apply3 = cast<ApplyOp>(lamA.region().front().getTerminator()->getOperand(0).getDefiningOp());
     if (!isa<MapSeqOp>(apply3.getOperand(0).getDefiningOp())) return Failure();
     auto mapSeqOp2 = cast<MapSeqOp>(apply3.getOperand(0).getDefiningOp());
     if (!isa<LambdaOp>(apply3.getOperand(1).getDefiningOp())) return Failure();
-    auto f = cast<LambdaOp>(apply3.getOperand(1).getDefiningOp()); // %9
+    auto lamB = cast<LambdaOp>(apply3.getOperand(1).getDefiningOp()); // %9
     // successful match
+
+    auto rrLamAEtaReducible = etaReducible(*lamA.getOperation());
+    if (std::get_if<Failure>(&rrLamAEtaReducible)) return rrLamAEtaReducible;
+
+    auto rrLamBEtaReducible = etaReducible(*lamB.getOperation());
+    if (std::get_if<Failure>(&rrLamBEtaReducible)) return rrLamBEtaReducible;
+
+    llvm::dbgs() << "Both lambdas are eta reducible\n";
 
     ScopedContext scope(*rewriter, expr.getLoc());
     rewriter->setInsertionPointAfter(apply1);
 
-//    apply1.getParentOfType<FuncOp>().dump();
+    apply1.getParentOfType<FuncOp>().dump();
 
-    Operation *lambdaCopy = rewriter->clone(*f);
+    Operation *lambdaCopy = rewriter->clone(*lamB);
 
 //    apply1.getParentOfType<FuncOp>().dump();
 
@@ -235,23 +215,10 @@ struct TransposeBeforeMapMapFStrategy : Strategy {
           return mapSeq("affine", mapSeqOp2.t(), lambdaCopy->getResult(0), apply3.getOperand(2));
                    }, transpose(apply2.getOperand(2)));
 
-    // cleanup
-    expr.replaceAllUsesWith(result.getDefiningOp());
-    rewriter->eraseOp(apply1);
-    rewriter->eraseOp(transpose1);
-    rewriter->eraseOp(apply2);
-    rewriter->eraseOp(mapSeqOp1);
-
-    // TODO: for some reason outerMapLambda still has uses (the only use was by
-    //  apply2, which should be erased now)
-    //  I am leaving it out for now, which triggers an error later in the verifier
-
-//    rewriter->eraseOp(outerMapLambda);
-//    result.getDefiningOp()->getParentOfType<ModuleOp>().dump();
     return success(*result.getDefiningOp());
   };
 };
 
-auto transposeBeforeMapMap = TransposeBeforeMapMapFStrategy();
+auto mapMapFBeforeTranspose = MapMapFBeforeTransposeStrategy();
 
 #endif // LLVM_ELEVATE_ALGORITHMIC_H

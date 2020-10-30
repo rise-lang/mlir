@@ -28,6 +28,7 @@
 #include "mlir/IR/StandardTypes.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Debug.h"
 
 using llvm::ArrayRef;
 using llvm::raw_ostream;
@@ -225,6 +226,99 @@ void RiseDialect::printAttribute(Attribute attribute,
   }
   return;
 }
+
+void RiseDialect::dumpRiseExpression(Operation *op) {
+  auto getDefiningOpOrNullptr = [&](Value val) -> Operation* {
+    if (val.isa<OpResult>()) {
+      return val.getDefiningOp();
+    } else {
+      return nullptr;
+    }
+  };
+  auto getNestingLevelForLambda = [&](LambdaOp &lambda) -> int {
+    int i = 0;
+    LambdaOp parentLambda = lambda;
+    while (parentLambda = parentLambda.getParentOfType<LambdaOp>()) {
+      i++;
+    }
+    return i;
+  };
+  auto getNestingLevelForEmbed = [&](EmbedOp &embed) -> int {
+    int i = 0;
+    EmbedOp parentEmbed = embed;
+    while (parentEmbed = parentEmbed.getParentOfType<EmbedOp>()) {
+      i++;
+    }
+    return i;
+  };
+  if (op == nullptr) return;
+  if (auto out = dyn_cast<OutOp>(op)) {
+    llvm::dbgs() << "out(";
+    dumpRiseExpression(getDefiningOpOrNullptr(out.getOperand(1)));
+    llvm::dbgs() << ")\n";
+    return;
+  }
+  if (auto apply = dyn_cast<ApplyOp>(op)) {
+    llvm::dbgs() << "App(";
+    dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(0)));
+    for (int i = 1; i < op->getNumOperands(); i++) {
+      llvm::dbgs() << ",";
+      if (!op->getOperand(i).isa<OpResult>()) {
+        if (auto lambda = dyn_cast<LambdaOp>(op->getOperand(i).getParentRegion()->getParentOp())) {
+          llvm::dbgs() << "x" << getNestingLevelForLambda(lambda);
+          continue;
+        }
+        if (auto embed = dyn_cast<EmbedOp>(op->getOperand(i).getParentRegion()->getParentOp())) {
+          llvm::dbgs() << "y" << getNestingLevelForEmbed(embed);
+          continue;
+        }
+      }
+      dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(i)));
+    }
+    llvm::dbgs() << ")";
+    return;
+  }
+  if (auto lambda = dyn_cast<LambdaOp>(op)) {
+    int nestingLevel = getNestingLevelForLambda(lambda);
+    llvm::dbgs() << "λ(x" << nestingLevel;
+    llvm::dbgs() << "=>\n";
+    for (int i = 0; i < nestingLevel; i++) {
+      llvm::dbgs() << "  ";
+    }
+    dumpRiseExpression(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)));
+    llvm::dbgs() << "\n";
+    for (int i = 0; i < nestingLevel-1; i++) {
+      llvm::dbgs() << "  ";
+    }
+    llvm::dbgs() << ")";
+    return;
+  }
+  if (auto embed = dyn_cast<EmbedOp>(op)) {
+    llvm::dbgs() << "embed(";
+    dumpRiseExpression(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)));
+    llvm::dbgs() << ")";
+    return;
+  }
+  if (auto mapSeq = dyn_cast<MapSeqOp>(op)) {
+    llvm::dbgs() << "mapSeq()";
+    return;
+  }
+
+  // not first class printable op from RISE
+  if (isa<RiseDialect>(op->getDialect())) {
+    llvm::dbgs() << op->getName().getStringRef().drop_front(5);
+    for (int i = 0; i < op->getNumOperands(); i++) {
+      llvm::dbgs() << ",";
+      dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(i)));
+    }
+    return;
+  }
+
+  // not first class printable op from another Dialect
+  llvm::dbgs() << op->getName();
+
+}
+
 
 } // end namespace rise
 } // end namespace mlir
