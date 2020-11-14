@@ -86,6 +86,17 @@ public:
 };
 auto try_(const StrategyRewritePattern &s) -> TryRewritePattern;
 
+class RepeatRewritePattern : public StrategyRewritePattern {
+  const StrategyRewritePattern &s;
+
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+public:
+  RepeatRewritePattern(const StrategyRewritePattern &s) : s(s) {}
+};
+auto repeat(const StrategyRewritePattern &s) -> RepeatRewritePattern;
+
+
+
 }
 }
 

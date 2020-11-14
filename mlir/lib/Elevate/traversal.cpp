@@ -24,6 +24,9 @@ auto mlir::elevate::one(const StrategyRewritePattern &s) -> OneRewritePattern {
 auto mlir::elevate::topdown(const StrategyRewritePattern &s) -> TopDownRewritePattern {
   return TopDownRewritePattern(s);
 }
+auto mlir::elevate::normalize(const StrategyRewritePattern &s) -> NormalizeRewritePattern {
+  return NormalizeRewritePattern(s);
+}
 
 RewriteResult ArgumentRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<ApplyOp>(op))
@@ -111,3 +114,8 @@ RewriteResult OneRewritePattern::impl(Operation *op, PatternRewriter &rewriter) 
 RewriteResult TopDownRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return LeftChoiceRewritePattern(s, OneRewritePattern(TopDownRewritePattern(s)))(op, rewriter);
 }
+
+RewriteResult NormalizeRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  return repeat(topdown(s))(op, rewriter);
+}
+

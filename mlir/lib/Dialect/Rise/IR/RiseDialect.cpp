@@ -226,6 +226,36 @@ void RiseDialect::printAttribute(Attribute attribute,
   }
   return;
 }
+void RiseDialect::dumpRiseExpression2(LoweringUnitOp* op) {
+  SmallVector<BlockArgument, 4> args;
+  op->walk([&](Operation *op){
+    if (isa<LambdaOp>(op)) {
+      for (auto arg : op->getRegion(0).front().getArguments())
+        args.push_back(arg);
+      return;
+    } else if (isa<ApplyOp>(op)) {
+      ApplyOp apply = cast<ApplyOp>(op);
+      llvm::dbgs() << "App(";
+      for (auto operand : apply.getOperands()) {
+        if (operand.isa<OpResult>()) {
+          llvm::dbgs() << operand.getDefiningOp()->getName().stripDialect() << ", ";
+        } else {
+          for (int i = 0; i < args.size(); i++) {
+            if (args[i] == operand) llvm::dbgs() << "x" << i;
+          }
+        }
+
+
+      }
+
+      llvm::dbgs() << ")";
+      return;
+    }
+
+    llvm::dbgs() << op->getName().stripDialect();
+  });
+  llvm::dbgs() << "\n";
+}
 
 void RiseDialect::dumpRiseExpression(Operation *op) {
   auto getDefiningOpOrNullptr = [&](Value val) -> Operation* {
@@ -303,6 +333,10 @@ void RiseDialect::dumpRiseExpression(Operation *op) {
     llvm::dbgs() << "mapSeq()";
     return;
   }
+  if (auto split = dyn_cast<SplitOp>(op)) {
+    llvm::dbgs() << "split(" << split.n().getIntValue() << ")";
+    return;
+  }
 
   // not first class printable op from RISE
   if (isa<RiseDialect>(op->getDialect())) {
@@ -319,6 +353,23 @@ void RiseDialect::dumpRiseExpression(Operation *op) {
 
 }
 
+
+DataType RiseDialect::getAsDataType(Type type) {
+  if (auto dataType = type.dyn_cast<DataType>()) return dataType;
+  if (auto scalarType = type.dyn_cast<ScalarType>()) return scalarType;
+  if (auto arrayType = type.dyn_cast<ArrayType>()) return arrayType;
+  if (auto tupleType = type.dyn_cast<Tuple>()) return tupleType;
+  llvm::llvm_unreachable_internal("type is not a subclass of Rise Datatype");
+  return nullptr;
+}
+
+DataType RiseDialect::getFunTypeOutput(FunType funType) {
+  auto output = funType.getOutput();
+  while (auto type = output.dyn_cast<FunType>()) {
+    output = output.cast<FunType>().getOutput();
+  }
+  return RiseDialect::getAsDataType(output);
+}
 
 } // end namespace rise
 } // end namespace mlir

@@ -72,6 +72,14 @@ public:
 };
 auto topdown(const StrategyRewritePattern &s) -> TopDownRewritePattern;
 
+class NormalizeRewritePattern : public StrategyRewritePattern {
+  const StrategyRewritePattern &s;
+
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+public:
+  NormalizeRewritePattern(const StrategyRewritePattern &s) : s(s) {}
+};
+auto normalize(const StrategyRewritePattern &s) -> NormalizeRewritePattern;
 } // namespace elevate2
 } // namespace mlir
 

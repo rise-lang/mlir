@@ -12,6 +12,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
+#include "llvm/Support/Debug.h"
 
 namespace mlir {
 namespace elevate {
@@ -60,13 +61,28 @@ public:
 };
 auto removeTransposePair() -> RemoveTransposePairRewritePattern;
 
+class MapMapFBeforeTransposeRewritePattern : public StrategyRewritePattern {
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+public:
+  MapMapFBeforeTransposeRewritePattern() {};
+};
+auto mapMapFBeforeTranspose() -> MapMapFBeforeTransposeRewritePattern;
+
+// fission of the last function to be applied inside a map
+// *(g >> .. >> f) -> *(g >> ..) >> *f
+class MapLastFissionRewritePattern : public StrategyRewritePattern {
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+public:
+  MapLastFissionRewritePattern() {};
+};
+auto mapLastFission() -> MapLastFissionRewritePattern;
 
 
 
 // utils
 void substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args);
 Value inlineLambda(LambdaOp lambda, Block *insertionBlock, Operation *op);
-
+void adjustLambdaType(LambdaOp lambda, PatternRewriter &rewriter);
 }
 } // namespace mlir
 

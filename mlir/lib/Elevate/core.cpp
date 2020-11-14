@@ -55,6 +55,7 @@ RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter 
 
     addOperandsToGarbageCandidates(currentOp);
     if (currentOp->use_empty()) {
+      llvm::dbgs() << "erasing " << currentOp->getName().getStringRef() << "\n";
       rewriter.eraseOp(currentOp);
     }
   } while (!garbageCandidates.empty());
@@ -101,6 +102,12 @@ auto mlir::elevate::leftChoice(const StrategyRewritePattern &fs,
     -> LeftChoiceRewritePattern {
   return LeftChoiceRewritePattern(fs, ss);
 }
+auto mlir::elevate::try_(const StrategyRewritePattern &s) -> TryRewritePattern {
+  return TryRewritePattern(s);
+}
+auto mlir::elevate::repeat(const StrategyRewritePattern &s) -> RepeatRewritePattern {
+  return RepeatRewritePattern(s);
+}
 
 RewriteResult IdRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return success(op);
@@ -119,6 +126,8 @@ RewriteResult DebugRewritePattern::impl(Operation *op, PatternRewriter &rewriter
 }
 
 RewriteResult SeqRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  // has members   const StrategyRewritePattern &fs;
+  // and           const StrategyRewritePattern &ss;
   return flatMapSuccess(fs(op, rewriter), ss, rewriter);
 }
 
@@ -129,3 +138,9 @@ RewriteResult LeftChoiceRewritePattern::impl(Operation *op, PatternRewriter &rew
 RewriteResult TryRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return LeftChoiceRewritePattern(s, IdRewritePattern())(op, rewriter);
 }
+
+RewriteResult RepeatRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  return try_(seq(s, repeat(s)))(op, rewriter);
+}
+
+

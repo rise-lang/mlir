@@ -1,6 +1,7 @@
 add_mlir_library(MLIRTransformUtils
   FoldUtils.cpp
   GreedyPatternRewriteDriver.cpp
+  ElevateRewriteDriver.cpp
   InliningUtils.cpp
   LoopFusionUtils.cpp
   LoopUtils.cpp
@@ -9,6 +10,8 @@ add_mlir_library(MLIRTransformUtils
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Transforms
+  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Elevate2
+
 
   DEPENDS
   MLIRStandardOpsIncGen
@@ -17,6 +20,7 @@ add_mlir_library(MLIRTransformUtils
   MLIRAffine
   MLIRAnalysis
   MLIRLoopAnalysis
+  MLIRElevate
   MLIRSCF
   MLIRPass
   MLIRStandard

@@ -136,7 +136,9 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
   Value C = f.getArgument(2);
 
   makeRiseProgram(C, A, B)([&](Value A, Value B) {
-    return mlir::edsc::highlevel::matrix_multiplication(M, N, K, A, B);
+    auto tmp = mlir::edsc::highlevel::matrix_multiplication(M, N, K, A, B);
+    RiseDialect::dumpRiseExpression(tmp.getDefiningOp());
+    return tmp;
   });
   std_ret();
 
@@ -548,43 +550,103 @@ TEST_FUNC(test_pad2d) {
   testFun.erase();
 }
 
-TEST_FUNC(test_zip2D) {
-  int64_t width = 3;
-  int64_t height = 3;
+//TEST_FUNC(test_zip2D) {
+//  int64_t width = 3;
+//  int64_t height = 3;
+//  auto f32Type = FloatType::getF32(&globalContext());
+//
+//  auto f = makeFunction("zip2D", {},
+//                        {MemRefType::get({height, width}, f32Type, {}, 0),
+//                         MemRefType::get({height, width}, f32Type, {}, 0),
+//                         MemRefType::get({height, width}, f32Type, {}, 0)});
+//
+//  OpBuilder builder(f.getBody());
+//  ScopedContext scope(builder, f.getLoc());
+//
+//  Value inputA = f.getArgument(0);
+//  Value inputB = f.getArgument(1);
+//  Value output = f.getArgument(2);
+//
+//  makeRiseProgram(output, inputA, inputB)([&](Value inA, Value inB) {
+//    Value zipped = zip2D(inA, inB);
+//    return mapSeq2D(
+//        scalarF32Type(),
+//        [&](Value tuple) {
+//          return embed2(scalarF32Type(), ValueRange{fst(tuple), snd(tuple)},
+//                        [&](Value fst, Value snd) { return fst * snd; });
+//        },
+//        zipped);
+//  });
+//  std_ret();
+//
+//  // generate test
+//  auto testFun = makeFunction("zip2D_test", {}, {});
+//  OpBuilder test_builder(testFun.getBody());
+//  ScopedContext test_scope(test_builder, testFun.getLoc());
+//
+//  Value filledA = getFilledMemRef({height, width});
+//  Value filledB = getFilledMemRef({height, width});
+//  makeRiseTest(f, {height, width}, filledA, filledB);
+//  std_ret();
+//
+//  // clang-format off
+//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
+//  // ZIP_2D_TEST:        [3,  4,   5],
+//  // ZIP_2D_TEST:        [6,  7,   8]]
+//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
+//  // ZIP_2D_TEST:        [3,  4,   5],
+//  // ZIP_2D_TEST:        [6,  7,   8]]
+//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   4],
+//  // ZIP_2D_TEST:        [9,   16,   25],
+//  // ZIP_2D_TEST:        [36,   49,   64]]
+//  // clang-format on
+//
+//  f.print(llvm::outs());
+//  testFun.print(llvm::outs());
+//
+//  f.erase();
+//  testFun.erase();
+//}
+
+TEST_FUNC(test_expr_for_fission) {
+  int64_t width = 4;
+  int64_t height = 4;
   auto f32Type = FloatType::getF32(&globalContext());
 
-  auto f = makeFunction("zip2D", {},
+  auto f = makeFunction("fission", {},
                         {MemRefType::get({height, width}, f32Type, {}, 0),
-                         MemRefType::get({height, width}, f32Type, {}, 0),
+//                            MemRefType::get({height, width}, f32Type, {}, 0),
                          MemRefType::get({height, width}, f32Type, {}, 0)});
 
   OpBuilder builder(f.getBody());
   ScopedContext scope(builder, f.getLoc());
 
   Value inputA = f.getArgument(0);
-  Value inputB = f.getArgument(1);
-  Value output = f.getArgument(2);
+//  Value inputB = f.getArgument(1);
+  Value output = f.getArgument(1);
 
-  makeRiseProgram(output, inputA, inputB)([&](Value inA, Value inB) {
-    Value zipped = zip2D(inA, inB);
-    return mapSeq2D(
-        scalarF32Type(),
-        [&](Value tuple) {
-          return embed2(scalarF32Type(), ValueRange{fst(tuple), snd(tuple)},
-                        [&](Value fst, Value snd) { return fst * snd; });
-        },
-        zipped);
-  });
+
+  makeRiseProgram(output, inputA)([&](Value inA) {
+    return mapSeq(
+        arrayType(height, scalarF32Type()),
+        [&](Value elem) {
+          Value splizzled = split(natType(2), elem);
+          return join(splizzled);
+        }, inA);
+    });
+
   std_ret();
 
   // generate test
-  auto testFun = makeFunction("zip2D_test", {}, {});
+  auto testFun = makeFunction("fission_test", {}, {});
   OpBuilder test_builder(testFun.getBody());
   ScopedContext test_scope(test_builder, testFun.getLoc());
 
   Value filledA = getFilledMemRef({height, width});
-  Value filledB = getFilledMemRef({height, width});
-  makeRiseTest(f, {height, width}, filledA, filledB);
+  makeRiseTest(f, {height, width}, filledA);
   std_ret();
 
   // clang-format off
@@ -608,7 +670,6 @@ TEST_FUNC(test_zip2D) {
   f.erase();
   testFun.erase();
 }
-
 int main() {
   RUN_TESTS();
   return 0;

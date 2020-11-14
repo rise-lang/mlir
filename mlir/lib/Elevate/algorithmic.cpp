@@ -3,6 +3,7 @@
 //
 
 #include "mlir/Dialect/Rise/Elevate2/algorithmic.h"
+#include <mlir/Dialect/Rise/Elevate2/predicates.h>
 
 using namespace mlir::rise;
 using namespace mlir::edsc::abstraction;
@@ -69,6 +70,7 @@ RewriteResult mlir::elevate::BetaReductionRewritePattern::impl(Operation *op, Pa
   auto apply = cast<ApplyOp>(op);
   if (!isa<LambdaOp>(apply.getOperand(0).getDefiningOp())) return Failure();
   // match success
+  llvm::dbgs() << "doing betaRed now!\n";
   auto lambda = cast<LambdaOp>(apply.getOperand(0).getDefiningOp());
 
   SmallVector<Value, 10> args = SmallVector<Value, 10>();
@@ -134,6 +136,123 @@ RewriteResult mlir::elevate::RemoveTransposePairRewritePattern::impl(Operation *
 }
 auto mlir::elevate::removeTransposePair() -> RemoveTransposePairRewritePattern {return RemoveTransposePairRewritePattern(); }
 
+RewriteResult mlir::elevate::MapMapFBeforeTransposeRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  // match for
+  //    App(
+  //        App(map(), lamA @ Lambda(_, App(
+  //        App(map(), lamB @ Lambda(_, App(f, _))), _))),
+  //    arg)
+
+  if (!isa<ApplyOp>(op)) return Failure();
+  auto apply1 = cast<ApplyOp>(op);
+  if (!isa<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp())) return Failure();
+  auto transpose1 = cast<mlir::rise::TransposeOp>(apply1.getOperand(0).getDefiningOp());
+  if (!apply1.getOperand(1).isa<OpResult>()) return Failure();
+  if (!isa<ApplyOp>(apply1.getOperand(1).getDefiningOp())) return Failure();
+  auto apply2 = cast<ApplyOp>(apply1.getOperand(1).getDefiningOp());
+  llvm::dbgs() << "match 0!\n";
+
+  //in the mm I am matching a join here bcs of splitJoin before. I prob. need to implement the RNF and DFNF for this
+  if (!isa<MapSeqOp>(apply2.getOperand(0).getDefiningOp())) return Failure();
+  llvm::dbgs() << "match 1!\n";
+
+  auto mapSeqOp1 = cast<MapSeqOp>(apply2.getOperand(0).getDefiningOp());
+  if (!apply2.getOperand(1).isa<OpResult>()) return Failure();
+  if (!isa<LambdaOp>(apply2.getOperand(1).getDefiningOp())) return Failure();
+  auto lamA = cast<LambdaOp>(apply2.getOperand(1).getDefiningOp()); // %2
+  if (!isa<ApplyOp>(lamA.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
+  auto apply3 = cast<ApplyOp>(lamA.region().front().getTerminator()->getOperand(0).getDefiningOp());
+  if (!isa<MapSeqOp>(apply3.getOperand(0).getDefiningOp())) return Failure();
+  auto mapSeqOp2 = cast<MapSeqOp>(apply3.getOperand(0).getDefiningOp());
+  if (!isa<LambdaOp>(apply3.getOperand(1).getDefiningOp())) return Failure();
+  auto lamB = cast<LambdaOp>(apply3.getOperand(1).getDefiningOp()); // %9
+  // successful match
+
+  llvm::dbgs() << "match!\n";
+
+  debug("lamA:")(lamA,rewriter);
+  debug("lamB:")(lamB,rewriter);
+
+
+  auto rrLamAEtaReducible = etaReducible()(lamA.getOperation(), rewriter);
+  if (std::get_if<Failure>(&rrLamAEtaReducible)) return rrLamAEtaReducible;
+
+  auto rrLamBEtaReducible = etaReducible()(lamB.getOperation(), rewriter);
+  if (std::get_if<Failure>(&rrLamBEtaReducible)) return rrLamBEtaReducible;
+
+  llvm::dbgs() << "Both lambdas are eta reducible\n";
+
+  ScopedContext scope(rewriter, op->getLoc());
+  rewriter.setInsertionPointAfter(apply1);
+
+  apply1.getParentOfType<FuncOp>().dump();
+
+  Operation *lambdaCopy = rewriter.clone(*lamB);
+
+  Value result = mapSeq("scf", mapSeqOp1.t(), [&](Value elem){
+    return mapSeq("scf", mapSeqOp2.t(), lambdaCopy->getResult(0), apply3.getOperand(2));
+  }, transpose(apply2.getOperand(2)));
+
+  return success(result.getDefiningOp());
+}
+
+auto mlir::elevate::mapMapFBeforeTranspose() -> MapMapFBeforeTransposeRewritePattern {
+  return MapMapFBeforeTransposeRewritePattern();
+}
+
+//case e @ App(map(), Lambda(x, App(f, gx)))
+//if !contains[Rise](x).apply(f) && !isIdentifier(gx) =>
+//gx.t match {
+//    case _: DataType =>
+//    Success((app(map, lambda(eraseType(x), gx)) >> map(f)) :: e.t)
+//    case _ => Failure(mapLastFission())
+//}
+RewriteResult mlir::elevate::MapLastFissionRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  if (!isa<ApplyOp>(op)) return Failure();
+  auto applyMap = cast<ApplyOp>(op);
+  if (!isa<mlir::rise::MapSeqOp>(applyMap.getOperand(0).getDefiningOp())) return Failure();
+  auto map = cast<mlir::rise::MapSeqOp>(applyMap.getOperand(0).getDefiningOp());
+  if (!applyMap.getOperand(1).isa<OpResult>()) return Failure();
+  if (!isa<LambdaOp>(applyMap.getOperand(1).getDefiningOp())) return Failure();
+  LambdaOp lambda = cast<LambdaOp>(applyMap.getOperand(1).getDefiningOp());
+  llvm::dbgs() << "fission found applyMap\n";
+  if (!isa<ApplyOp>(lambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
+  auto applyLastFunction = cast<ApplyOp>(lambda.region().front().getTerminator()->getOperand(0).getDefiningOp());
+  auto lastFunction = applyLastFunction.getOperand(0).getDefiningOp();
+ // TODO: This does not match Map(App(Zip) |> App(Reduce)) !
+  if (!applyLastFunction.getOperand(applyLastFunction.getNumOperands()-1).isa<OpResult>()) return Failure();
+  if (!isa<ApplyOp>(applyLastFunction.getOperand(applyLastFunction.getNumOperands()-1).getDefiningOp())) return Failure();
+  auto applyF = cast<ApplyOp>(applyLastFunction.getOperand(applyLastFunction.getNumOperands()-1).getDefiningOp());
+  // match success
+  llvm::dbgs() << "fission success\n";
+  auto lastFunctionType = RiseDialect::getFunTypeOutput(lambda.getResult().getType().dyn_cast<FunType>());
+
+  ScopedContext scope(rewriter, op->getLoc());
+  rewriter.setInsertionPointAfter(op);
+
+  applyLastFunction.replaceAllUsesWith(applyF.getResult());
+  adjustLambdaType(lambda, rewriter);
+
+  // now build up new expr. with map
+  auto newApplyMap =
+      mapSeq("scf", RiseDialect::getAsDataType(applyF.getResult().getType()),
+             lambda.getResult(), applyMap.getOperand(2));
+  auto result = mapSeq("scf", RiseDialect::getAsDataType(applyLastFunction.getResult().getType()), [&](Value elem){
+        auto lastFunClone = rewriter.clone(*lastFunction);
+        return apply(lastFunctionType, lastFunClone->getResult(0), elem);
+  }, newApplyMap);
+
+  rewriter.eraseOp(applyLastFunction);
+  rewriter.eraseOp(lastFunction);
+
+//  debug("appLastFun")(applyLastFunction,rewriter);
+//  debug("lastFun")(lastFunction,rewriter);
+
+  return success(result.getDefiningOp());
+}
+auto mlir::elevate::mapLastFission() -> MapLastFissionRewritePattern {
+  return MapLastFissionRewritePattern();
+}
 
 // utils
 void mlir::elevate::substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
@@ -156,4 +275,21 @@ mlir::Value mlir::elevate::inlineLambda(LambdaOp lambda, mlir::Block *insertionB
       lambda.getRegion().front().begin(),
       mlir::Block::iterator(lambda.getRegion().front().getTerminator()));
   return lambdaResult;
+}
+
+// adjust the type of a lambda after changing its arguments or return value
+void mlir::elevate::adjustLambdaType(LambdaOp lambda, PatternRewriter &rewriter) {
+  FunType oldLambdaType = lambda.getResult().getType().dyn_cast<FunType>();
+  if (!oldLambdaType) emitError(lambda.getLoc()) << "Lambda has inconsistent type!";
+  Type outType = lambda.region().front().getTerminator()->getOperand(0).getType();
+  auto argumentTypes = lambda.region().front().getArgumentTypes();
+
+  FunType newFunType =
+      FunType::get(rewriter.getContext(), (*llvm::make_reverse_iterator(argumentTypes.end())), outType);
+  for (auto argType = llvm::make_reverse_iterator(argumentTypes.end());
+       argType != llvm::make_reverse_iterator(argumentTypes.begin());
+       argType++) {
+    newFunType = FunType::get(rewriter.getContext(), *argType, newFunType);
+  }
+  lambda.getResult().setType(newFunType);
 }

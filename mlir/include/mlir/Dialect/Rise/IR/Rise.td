@@ -103,7 +103,7 @@ def ApplyOp : Rise_Op<"apply"> {
       "The type of this operation consequently depends on the fun and the "
       "given arguments i.e full or partial application.";
   let arguments = (ins FunType : $fun, Variadic<AnyType> : $arguments);
-  let results = (outs AnyType : $result);
+  let results = (outs DataType : $result);
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 

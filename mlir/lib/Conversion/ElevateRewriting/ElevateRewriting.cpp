@@ -6,6 +6,7 @@
 #include "mlir/Elevate2/core.h"
 #include "mlir/Dialect/Rise/Elevate2/traversal.h"
 #include "mlir/Dialect/Rise/Elevate2/algorithmic.h"
+#include "mlir/Dialect/Rise/Elevate2/predicates.h"
 #include "mlir/Conversion/ElevateRewriting/ElevateRewriting.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/Passes.h"
@@ -60,52 +61,99 @@ void ElevateRewritingPass::runOnFunction() {
 //  bool erased;
 //  applyOpPatternsAndFold(op, patterns, &erased);
 
-  funcOp.dump();
-
-
   ElevateRewriteDriver rewriter(op->getContext());
+  RiseDialect::dumpRiseExpression(outOp);
 
-  auto rr = topdown(seq(
-      debug("debug"), fuseReduceMap()))(lastApply, rewriter);
+  RewriteResult rr_fused = topdown(seq(debug("debug"), fuseReduceMap()))(lastApply, rewriter);
+//
+  auto rr_betared1 = flatMapSuccess(rr_fused, topdown(seq(debug("beta1"), betaReduction())), rewriter);
+  auto rr_betared2 = flatMapSuccess(rr_betared1, topdown(seq(debug("beta2"), betaReduction())), rewriter);
+//  lastApply = outOp.input().getDefiningOp();
+//
+  RiseDialect::dumpRiseExpression(outOp);
+//  llvm::dbgs() << "\n\n";
+//
+//  auto rr_loop_blocked = seq(fmap( splitJoin(8)), splitJoin(4))(lastApply, rewriter);
+//
+//  lastApply = outOp.input().getDefiningOp();
+//
+//  RiseDialect::dumpRiseExpression(outOp);
+//  llvm::dbgs() << "\n\n";
+//
+//  auto rr_fissioned = normalize(seq(debug("fission"), mapLastFission()))(lastApply,rewriter);
+//
+//  lastApply = outOp.input().getDefiningOp();
+//  RiseDialect::dumpRiseExpression(outOp);
+//  funcOp.dump();
+//
+//  auto rr_addid = argument(1,  argument(1, body( argument(2,addIdAfter()))))(lastApply, rewriter);
+//  lastApply = outOp.input().getDefiningOp();
+//  auto rr_double_transpose = topdown(createTransposePair())(lastApply, rewriter);
+//  lastApply = outOp.input().getDefiningOp();
+//  RiseDialect::dumpRiseExpression(outOp);
+//
+//
+//  auto rr_betaRed = normalize(seq(debug("betared"), betaReduction()))(lastApply, rewriter);
+  RiseDialect::dumpRiseExpression(outOp);
+//  lastApply = outOp.input().getDefiningOp();
+//
+//  funcOp.dump();
+//
+//  auto rr_moved_transpose = topdown(seq(debug("move"), mapMapFBeforeTranspose()))(lastApply, rewriter);
+//  lastApply = outOp.input().getDefiningOp();
+  lastApply = outOp.input().getDefiningOp();
 
-  auto rr1 = flatMapSuccess(rr, topdown(seq(debug("beta1"), betaReduction())), rewriter);
-  auto rr2 = flatMapSuccess(rr1, topdown(seq(debug("beta2"), betaReduction())), rewriter);
+//  auto rr_fissioned2 = topdown(seq(debug("fission"), mapLastFission()))(lastApply,rewriter);
 
-  auto rr3 = flatMapSuccess(rr2, topdown(addIdAfter()), rewriter);
-  auto rr4 = flatMapSuccess(rr3, topdown(createTransposePair()), rewriter);
-  auto rr5 = flatMapSuccess(rr4, topdown(removeTransposePair()), rewriter);
-
-  if (auto _ = std::get_if<Failure>(&rr)) {
+  if (auto _ = std::get_if<Failure>(&rr_fused)) {
     llvm::dbgs() << "logic error1!\n";
   } else {
     llvm::dbgs() << "success!\n";
   }
-  if (auto _ = std::get_if<Failure>(&rr1)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
-  }
-  if (auto _ = std::get_if<Failure>(&rr2)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
-  }
-  if (auto _ = std::get_if<Failure>(&rr3)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
-  }
-  if (auto _ = std::get_if<Failure>(&rr4)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
-  }
-  if (auto _ = std::get_if<Failure>(&rr5)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
-  }
+//  if (auto _ = std::get_if<Failure>(&rr_betared1)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_betared2)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_loop_blocked)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_addid)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_double_transpose)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_fissioned)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_moved_transpose)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
+//  if (auto _ = std::get_if<Failure>(&rr_fissioned2)) {
+//    llvm::dbgs() << "logic error1!\n";
+//  } else {
+//    llvm::dbgs() << "success!\n";
+//  }
   llvm::dbgs() << "////////////// finished elevate pass! //////////////\n";
+  RiseDialect::dumpRiseExpression(outOp);
+  llvm::dbgs() << "\n";
+  RiseDialect::dumpRiseExpression2(&loweringUnit);
   return;
 }
 

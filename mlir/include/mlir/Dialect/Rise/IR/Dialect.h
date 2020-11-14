@@ -57,6 +57,9 @@ public:
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
 
   static void dumpRiseExpression(Operation *op);
+  static void dumpRiseExpression2(LoweringUnitOp* op);
+  static DataType getAsDataType(Type type);
+  static DataType getFunTypeOutput(FunType funType);
   void initialize();
   friend class ::mlir::MLIRContext;
 };
