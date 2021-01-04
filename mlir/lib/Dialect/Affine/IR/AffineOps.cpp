@@ -2085,7 +2085,7 @@ verifyMemoryOpIndexing(AffineMemOpTy op, AffineMapAttr mapAttr,
     if (!idx.getType().isIndex())
       return success(); //op.emitOpError("index to load must have 'index' type");
   }
-  verifyDimAndSymbolIdentifiers(op, op.getMapOperands(), numDims);
+//  verifyDimAndSymbolIdentifiers(op, op.getMapOperands(), numDims);
 
   return success();
 }
