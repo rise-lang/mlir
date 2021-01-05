@@ -45,6 +45,22 @@ RewriteResult mlir::elevate::EtaReducibleRewritePattern::impl(Operation *op, Pat
   }
   return success(op);
 }
+// set out identity lambda and another arg around it.
+// and pass that lambda into a map
+// BENF should remove 1 of the lambdas
 auto mlir::elevate::etaReducible() -> EtaReducibleRewritePattern {
   return EtaReducibleRewritePattern();
+}
+template <typename T>
+RewriteResult mlir::elevate::IsaRewritePattern<T>::impl(
+    Operation *op, PatternRewriter &rewriter) const {
+  if (mlir::isa<T>(op)) {
+    return success(op);
+  } else {
+    return Failure();
+  }
+}
+template <typename T>
+auto mlir::elevate::_isa() -> IsaRewritePattern<T> {
+  return IsaRewritePattern<T>();
 }

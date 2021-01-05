@@ -24,8 +24,17 @@ auto mlir::elevate::one(const StrategyRewritePattern &s) -> OneRewritePattern {
 auto mlir::elevate::topdown(const StrategyRewritePattern &s) -> TopDownRewritePattern {
   return TopDownRewritePattern(s);
 }
+auto mlir::elevate::bottomUp(const StrategyRewritePattern &s) -> BottomUpRewritePattern {
+  return BottomUpRewritePattern(s);
+}
 auto mlir::elevate::normalize(const StrategyRewritePattern &s) -> NormalizeRewritePattern {
   return NormalizeRewritePattern(s);
+}
+auto mlir::elevate::outermost(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) -> OutermostRewritePattern {
+  return OutermostRewritePattern(predicate, s);
+}
+auto mlir::elevate::innermost(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) -> InnermostRewritePattern {
+  return InnermostRewritePattern(predicate, s);
 }
 
 RewriteResult ArgumentRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
@@ -115,7 +124,18 @@ RewriteResult TopDownRewritePattern::impl(Operation *op, PatternRewriter &rewrit
   return LeftChoiceRewritePattern(s, OneRewritePattern(TopDownRewritePattern(s)))(op, rewriter);
 }
 
+RewriteResult BottomUpRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  return LeftChoiceRewritePattern(OneRewritePattern(BottomUpRewritePattern(s)), s)(op, rewriter);
+}
+
 RewriteResult NormalizeRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return repeat(topdown(s))(op, rewriter);
 }
 
+RewriteResult OutermostRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  return topdown(seq(predicate, s))(op, rewriter);
+}
+
+RewriteResult InnermostRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+  return bottomUp(seq(predicate, s))(op, rewriter);
+}

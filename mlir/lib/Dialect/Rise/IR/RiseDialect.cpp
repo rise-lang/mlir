@@ -240,7 +240,7 @@ void RiseDialect::dumpRiseExpression2(LoweringUnitOp* op) {
         if (operand.isa<OpResult>()) {
           llvm::dbgs() << operand.getDefiningOp()->getName().stripDialect() << ", ";
         } else {
-          for (int i = 0; i < args.size(); i++) {
+          for (int i = 0; i < args.size()-1; i++) {
             if (args[i] == operand) llvm::dbgs() << "x" << i;
           }
         }
@@ -257,7 +257,25 @@ void RiseDialect::dumpRiseExpression2(LoweringUnitOp* op) {
   llvm::dbgs() << "\n";
 }
 
-void RiseDialect::dumpRiseExpression(Operation *op) {
+void dumpRiseExpression_value(Value val, SmallVector<BlockArgument, 4> &args) {
+//  llvm::dbgs() << "valsize:" << args.size();
+  for (int i = 0; i < args.size()-1; i++) {
+    if (args[i] == val) {
+      llvm::dbgs() << "x" << i;
+      return;
+    }
+  }
+  llvm::dbgs() << "x?";
+  emitWarning(val.getLoc()) << "Possible out of scope Value!";
+}
+
+void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, int indentLevel = 0) {
+  auto indent = [&]() -> void {
+    llvm::dbgs() << "\n";
+    for (int i = 0; i < indentLevel * 4; i++) {
+      llvm::dbgs() << " ";
+    }
+  };
   auto getDefiningOpOrNullptr = [&](Value val) -> Operation* {
     if (val.isa<OpResult>()) {
       return val.getDefiningOp();
@@ -281,52 +299,66 @@ void RiseDialect::dumpRiseExpression(Operation *op) {
     }
     return i;
   };
+  auto dumpOperands = [&](Operation *op) -> void {
+    for (int i = 0; i < op->getNumOperands(); i++) {
+      if (op->getOperand(i).isa<OpResult>()) {
+        dumpRiseExpression_recurse(op->getOperand(i).getDefiningOp(), args, indentLevel);
+      } else {
+        dumpRiseExpression_value(op->getOperand(i), args);
+      }
+      if (i < op->getNumOperands()-1) llvm::dbgs() << ",";
+    }
+  };
   if (op == nullptr) return;
   if (auto out = dyn_cast<OutOp>(op)) {
-    llvm::dbgs() << "out(";
-    dumpRiseExpression(getDefiningOpOrNullptr(out.getOperand(1)));
+    llvm::dbgs() << "out = (\n";
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(out.getOperand(1)), args, indentLevel);
     llvm::dbgs() << ")\n";
+
     return;
   }
   if (auto apply = dyn_cast<ApplyOp>(op)) {
     llvm::dbgs() << "App(";
-    dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(0)));
-    for (int i = 1; i < op->getNumOperands(); i++) {
-      llvm::dbgs() << ",";
-      if (!op->getOperand(i).isa<OpResult>()) {
-        if (auto lambda = dyn_cast<LambdaOp>(op->getOperand(i).getParentRegion()->getParentOp())) {
-          llvm::dbgs() << "x" << getNestingLevelForLambda(lambda);
-          continue;
-        }
-        if (auto embed = dyn_cast<EmbedOp>(op->getOperand(i).getParentRegion()->getParentOp())) {
-          llvm::dbgs() << "y" << getNestingLevelForEmbed(embed);
-          continue;
-        }
-      }
-      dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(i)));
-    }
+    dumpOperands(apply);
     llvm::dbgs() << ")";
     return;
   }
   if (auto lambda = dyn_cast<LambdaOp>(op)) {
-    int nestingLevel = getNestingLevelForLambda(lambda);
-    llvm::dbgs() << "λ(x" << nestingLevel;
-    llvm::dbgs() << "=>\n";
-    for (int i = 0; i < nestingLevel; i++) {
-      llvm::dbgs() << "  ";
+    // print args of this lambda
+    llvm::dbgs() << "λ(";
+    for (auto arg : lambda.region().front().getArguments()) {
+      args.push_back(arg);
+      llvm::dbgs() << "x" << args.size()-1;
+      if (arg != lambda.region().front().getArguments().back()) llvm::dbgs() << ",";
     }
-    dumpRiseExpression(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)));
-    llvm::dbgs() << "\n";
-    for (int i = 0; i < nestingLevel-1; i++) {
-      llvm::dbgs() << "  ";
-    }
+    llvm::dbgs() << "=>";
+    indentLevel++;
+    indent();
+//    for (int i = 0; i < nestingLevel; i++) {
+//      llvm::dbgs() << "  ";
+//    }
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)), args, indentLevel);
     llvm::dbgs() << ")";
+    indentLevel--;
+    indent();
     return;
   }
   if (auto embed = dyn_cast<EmbedOp>(op)) {
     llvm::dbgs() << "embed(";
-    dumpRiseExpression(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)));
+    for (auto arg : embed.region().front().getArguments()) {
+      args.push_back(arg);
+      llvm::dbgs() << "e" << args.size()-1;
+      if (arg != embed.region().front().getArguments().back()) llvm::dbgs() << ",";
+    }
+    llvm::dbgs() << "=> {";
+    indentLevel++;
+    indent();
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)), args, indentLevel);
+    indent();
+    llvm::dbgs() << "}, ";
+    dumpOperands(embed);
     llvm::dbgs() << ")";
+    indentLevel--;
     return;
   }
   if (auto mapSeq = dyn_cast<MapSeqOp>(op)) {
@@ -341,18 +373,27 @@ void RiseDialect::dumpRiseExpression(Operation *op) {
   // not first class printable op from RISE
   if (isa<RiseDialect>(op->getDialect())) {
     llvm::dbgs() << op->getName().getStringRef().drop_front(5);
-    for (int i = 0; i < op->getNumOperands(); i++) {
-      llvm::dbgs() << ",";
-      dumpRiseExpression(getDefiningOpOrNullptr(op->getOperand(i)));
-    }
+//    dumpOperands(op);
     return;
   }
-
+  if (FuncOp funcOp = dyn_cast<FuncOp>(op)) {
+    funcOp.walk([&](Operation* op){
+      if (isa<OutOp>(op)) {
+        RiseDialect::dumpRiseExpression(op);
+        llvm::dbgs() << "\n";
+      }
+    });
+    return;
+  }
   // not first class printable op from another Dialect
   llvm::dbgs() << op->getName();
 
 }
 
+void RiseDialect::dumpRiseExpression(Operation *op) {
+  SmallVector<BlockArgument, 4> args;
+  dumpRiseExpression_recurse(op, args);
+}
 
 DataType RiseDialect::getAsDataType(Type type) {
   if (auto dataType = type.dyn_cast<DataType>()) return dataType;

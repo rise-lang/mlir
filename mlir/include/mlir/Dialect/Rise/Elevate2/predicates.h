@@ -44,6 +44,16 @@ public:
 };
 auto etaReducible() -> EtaReducibleRewritePattern;
 
+template <typename T>
+class IsaRewritePattern : public StrategyRewritePattern {
+RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+
+public:
+IsaRewritePattern<T>() {};
+};
+template <typename T>
+auto _isa() -> IsaRewritePattern<T>;
+
 } // namespace elevate
 } // namespace mlir
 
