@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e map_slide_reduce -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=MAP_SLIDE_REDUCE
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<9x7xf32>, %inA:memref<9x9xf32>) {
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<9, array<9, scalar<f32>>>
@@ -33,8 +33,8 @@ func @rise_fun(%outArg:memref<9x7xf32>, %inA:memref<9x9xf32>) {
     }
     return
 }
-func @rtclock() -> (f64)
-func @print_flops(f64,f64,i64)
+func private @rtclock() -> (f64)
+func private @print_flops(f64,f64,i64)
 func @map_slide_reduce() {
     //prepare output Array
     %outputArray = alloc() : memref<9x7xf32>

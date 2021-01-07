@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mapMapId -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MAP_MAP_ADD
-
-func @print_memref_f32(memref<*xf32>)
+module {
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4xf32>, %inArg:memref<4x4xf32>) {
     rise.lowering_unit {
         %array2D = rise.in %inArg : !rise.array<4, array<4, scalar<f32>>>
@@ -37,6 +37,7 @@ func @mapMapId() {
     %print_me = memref_cast %outputArray : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
+}
 }
 // MAP_MAP_ADD: Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [4, 4] strides = [4, 1] data =
 // MAP_MAP_ADD: {{[[10,10,10,10],}}

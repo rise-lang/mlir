@@ -23,6 +23,7 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <iostream>
 #include <mlir/EDSC/Builders.h>
@@ -1428,8 +1429,9 @@ void ConvertRiseToImperativePass::runOnFunction() {
   });
 
   bool erased;
-  applyOpPatternsAndFold(module, patterns, &erased);
-  //  applyFullConversion(module, target, patterns);
+
+  applyOpPatternsAndFold(module, std::move(patterns), &erased);
+//  applyFullConversion(module, target, patterns);
   return;
 }
 

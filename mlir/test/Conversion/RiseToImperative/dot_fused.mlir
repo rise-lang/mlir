@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e fused_dot -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_DOT
-
-func @print_memref_f32(memref<*xf32>)
+module {
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<f32>, %inArg0:memref<1024xf32>, %inArg1:memref<1024xf32>)  {
     rise.lowering_unit {
         //Arrays
@@ -57,6 +57,7 @@ func @fused_dot() {
     %print_me = memref_cast %outputArray : memref<f32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
+}
 }
 // SIMPLE_DOT: Unranked Memref base@ = {{.*}} rank = 0 offset = 0 sizes = [] strides = [] data =
 // SIMPLE_DOT: [25600]

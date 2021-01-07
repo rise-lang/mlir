@@ -1,5 +1,5 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_reduction -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_1D_REDUCTION
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<f32>, %inArg:memref<1024xf32>) {
     rise.lowering_unit {
         %array0 = rise.in %inArg : !rise.array<1024, scalar<f32>>

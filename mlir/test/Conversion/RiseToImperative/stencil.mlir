@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=STENCIL
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 
 func @rise_fun(%outArg: memref<11xf32>, %in: memref<9xf32>) {
     rise.lowering_unit {

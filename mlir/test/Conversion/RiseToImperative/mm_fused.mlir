@@ -2,7 +2,7 @@
 // mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext,/opt/intel/lib/intel64_lin/libmkl_intel_ilp64.so,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_lib.so | FileCheck %s --check-prefix=MM_irreg
 
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:memref<2048x2048xf32>) {
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<2048, array<2048, scalar<f32>>>
@@ -52,8 +52,8 @@ func @rise_fun(%outArg:memref<2048x2048xf32>, %inA:memref<2048x2048xf32>, %inB:m
     }
     return
 }
-func @rtclock() -> (f64)
-func @print_flops(f64,f64,i64)
+func private @rtclock() -> (f64)
+func private @print_flops(f64,f64,i64)
 func @mm() {
     //prepare output Array
     %outputArray = alloc() : memref<2048x2048xf32>

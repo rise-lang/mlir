@@ -6,9 +6,7 @@ add_mlir_dialect_library(MLIRRiseEDSC
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Rise
 
   LINK_LIBS PUBLIC
-  MLIREDSC
   MLIRIR
-  MLIRRise
   MLIRAffineEDSC
   MLIRSCF
   )

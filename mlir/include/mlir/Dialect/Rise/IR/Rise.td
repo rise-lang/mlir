@@ -84,10 +84,16 @@ def LambdaOp : Rise_Op<"lambda", [SingleBlockImplicitTerminator<"ReturnOp">]> {
   let regions = (region SizedRegion<1> : $region);
   let results = (outs FunType : $lambdaType);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
-                            "FunType lambdaType, function_ref<Value(OpBuilder "
-                            "&, Location, MutableArrayRef<BlockArgument>)> "
-                            "bodyBuilder = nullptr">];
+  let builders = [
+    /// Builds an affine load op with the specified map and operands.
+    OpBuilderDAG<(ins "FunType":$lambdaType,
+                      CArg<"function_ref<Value(OpBuilder& , Location, MutableArrayRef<BlockArgument>)>",
+                          "nullptr">:$bodyBuilder)>
+  ];
+//  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
+//                            "FunType lambdaType, function_ref<Value(OpBuilder "
+//                            "&, Location, MutableArrayRef<BlockArgument>)> "
+//                            "bodyBuilder = nullptr">];
   let parser = [{ return parse$cppClass(parser, result); }];
   let verifier = [{ return verify$cppClass(*this); }];
 }
@@ -118,9 +124,12 @@ def LoweringUnitOp
                     "independently of other RISE operations.";
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
-                            "function_ref<void(OpBuilder &, Location)> "
-                            "bodyBuilder">];
+  let builders = [
+    OpBuilderDAG<(ins "function_ref<void(OpBuilder& , Location)>":$bodyBuilder)>
+  ];
+//  let builders = [OpBuilder<"OpBuilder &builder, OperationState &result, "
+//                            "function_ref<void(OpBuilder &, Location)> "
+//                            "bodyBuilder">];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -155,11 +164,16 @@ def EmbedOp : Rise_Op<"embed", [IsolatedFromAbove]> {
   let results = (outs AnyType : $wrapped);
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<
-      "OpBuilder &builder, OperationState &result, "
-      "Type wrapped, ValueRange exposedValues, function_ref<Value(OpBuilder "
-      "&, Location, MutableArrayRef<BlockArgument>)> "
-      "bodyBuilder = nullptr">];
+  let builders = [
+    OpBuilderDAG<(ins "Type":$wrapped, "ValueRange":$exposedValues, CArg<"function_ref<Value(OpBuilder& , Location, MutableArrayRef<BlockArgument>)>",
+    "nullptr">:$bodyBuilder)>
+
+//    OpBuilder<
+//      "OpBuilder &builder, OperationState &result, "
+//      "Type wrapped, ValueRange exposedValues, function_ref<Value(OpBuilder "
+//      "&, Location, MutableArrayRef<BlockArgument>)> "
+//      "bodyBuilder = nullptr">
+  ];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
@@ -170,8 +184,11 @@ def ReturnOp : Rise_Op<"return", [Terminator]> {
                     "rise.embed.";
   let arguments = (ins Variadic<AnyType> : $operands);
   let parser = [{ return parse$cppClass(parser, result); }];
-  let builders = [OpBuilder<"OpBuilder &b, OperationState &result",
-                            [{ build(b, result, llvm::None); }]>];
+  let builders = [
+    OpBuilderDAG<(ins), [{ build($_builder, $_state, llvm::None); }]>
+//    OpBuilder<"OpBuilder &b, OperationState &result",
+//                            [{ build(b, result, llvm::None); }]>
+  ];
 }
 
 //===----------------------------------------------------------------------===//

@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=MM_irreg
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 
 // A:10x2 * B:2x5 = C:10x5
 func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5xf32>) {
@@ -51,8 +51,8 @@ func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5x
     }
     return
 }
-func @rtclock() -> (f64)
-func @print_flops(f64,f64,i64)
+func private @rtclock() -> (f64)
+func private @print_flops(f64,f64,i64)
 func @mm() {
     //prepare output Array
     %outputArray = alloc() : memref<10x5xf32>

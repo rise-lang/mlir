@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-linalg-to-std -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_fst -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_FST
-
-func @print_memref_f32(memref<*xf32>)
+module {
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
     rise.lowering_unit {
         %array0 = rise.in %inArg0 : !rise.array<4, scalar<f32>>
@@ -40,6 +40,7 @@ func @simple_fst() {
     %print_me = memref_cast %outputArray : memref<4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
+}
 }
 // SIMPLE_FST: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_FST: [5, 5, 5, 5]

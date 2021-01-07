@@ -10,6 +10,7 @@ add_mlir_dialect_library(MLIRRise
   DEPENDS
   MLIRRiseIncGen
   MLIRRisePassIncGen
+  MLIRRiseEDSC
 
   LINK_LIBS PUBLIC
   MLIREDSC

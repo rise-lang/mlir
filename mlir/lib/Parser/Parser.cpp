@@ -173,9 +173,6 @@ public:
   /// returns null on failure.
   Value resolveSSAUse(SSAUseInfo useInfo);
 
-  ParseResult parseSSADefOrUseAndType(
-      const std::function<ParseResult(SSAUseInfo, Type)> &action);
-
   ParseResult parseOptionalSSAUseAndTypeList(SmallVectorImpl<Value> &results);
 
   /// Return the location of the value identified by its name and number if it
