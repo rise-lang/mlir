@@ -24,6 +24,9 @@
 // CHECK-DAG: [[$MAP13A:#map[0-9]+]] = affine_map<(d0) -> ((d0 + 6) ceildiv 8)>
 // CHECK-DAG: [[$MAP13B:#map[0-9]+]] = affine_map<(d0) -> ((d0 * 4 - 4) floordiv 3)>
 
+// Affine maps for test case: compose_affine_maps_multiple_symbols
+// CHECK-DAG: [[$MAP14:#map[0-9]+]] = affine_map<()[s0, s1] -> (((s1 + s0) * 4) floordiv s0)>
+
 // Affine maps for test case: partial_fold_map
 // CHECK-DAG: [[$MAP15:#map[0-9]+]] = affine_map<()[s0] -> (s0 - 42)>
 
@@ -216,6 +219,15 @@ func @compose_affine_maps_diamond_dependency(%arg0: f32, %arg1: memref<4x4xf32>)
   }
 
   return
+}
+
+// CHECK-LABEL: func @compose_affine_maps_multiple_symbols
+func @compose_affine_maps_multiple_symbols(%arg0: index, %arg1: index) -> index {
+  %a = affine.apply affine_map<(d0)[s0] -> (s0 + d0)> (%arg0)[%arg1]
+  %c = affine.apply affine_map<(d0) -> (d0 * 4)> (%a)
+  %e = affine.apply affine_map<(d0)[s0] -> (d0 floordiv s0)> (%c)[%arg1]
+  // CHECK: [[I0:%[0-9]+]] = affine.apply [[$MAP14]]()[%{{.*}}, %{{.*}}]
+  return %e : index
 }
 
 // CHECK-LABEL: func @arg_used_as_dim_and_symbol
@@ -423,7 +435,7 @@ func @fold_empty_loop() {
 
 // -----
 
-// CHECK-DAG: [[$SET:#set[0-9]+]] = affine_set<(d0, d1)[s0] : (d0 >= 0, -d0 + 1022 >= 0, d1 >= 0, -d1 + s0 - 2 >= 0)>
+// CHECK-DAG: [[$SET:#set[0-9]*]] = affine_set<(d0, d1)[s0] : (d0 >= 0, -d0 + 1022 >= 0, d1 >= 0, -d1 + s0 - 2 >= 0)>
 
 // CHECK-LABEL: func @canonicalize_affine_if
 // CHECK-SAME: [[M:%.*]]: index,
@@ -476,8 +488,6 @@ func @canonicalize_bounds(%M : index, %N : index) {
 // -----
 
 // Compose maps into affine load and store ops.
-
-// CHECK-DAG: #map{{[0-9]+}} = affine_map<(d0) -> (d0 + 1)>
 
 // CHECK-LABEL: @compose_into_affine_load_store
 func @compose_into_affine_load_store(%A : memref<1024xf32>, %u : index) {
@@ -594,7 +604,7 @@ func @rep(%arg0 : index, %arg1 : index) -> index {
 }
 
 // -----
-// CHECK-DAG: #[[lb:.*]] = affine_map<()[s0] -> (s0)>
+
 // CHECK-DAG: #[[ub:.*]] = affine_map<()[s0] -> (s0 + 2)>
 
 func @drop_duplicate_bounds(%N : index) {

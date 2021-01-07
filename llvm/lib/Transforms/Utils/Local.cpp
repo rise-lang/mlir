@@ -704,34 +704,6 @@ bool llvm::SimplifyInstructionsInBlock(BasicBlock *BB,
 //  Control Flow Graph Restructuring.
 //
 
-void llvm::RemovePredecessorAndSimplify(BasicBlock *BB, BasicBlock *Pred,
-                                        DomTreeUpdater *DTU) {
-  // This only adjusts blocks with PHI nodes.
-  if (!isa<PHINode>(BB->begin()))
-    return;
-
-  // Remove the entries for Pred from the PHI nodes in BB, but do not simplify
-  // them down.  This will leave us with single entry phi nodes and other phis
-  // that can be removed.
-  BB->removePredecessor(Pred, true);
-
-  WeakTrackingVH PhiIt = &BB->front();
-  while (PHINode *PN = dyn_cast<PHINode>(PhiIt)) {
-    PhiIt = &*++BasicBlock::iterator(cast<Instruction>(PhiIt));
-    Value *OldPhiIt = PhiIt;
-
-    if (!recursivelySimplifyInstruction(PN))
-      continue;
-
-    // If recursive simplification ended up deleting the next PHI node we would
-    // iterate to, then our iterator is invalid, restart scanning from the top
-    // of the block.
-    if (PhiIt != OldPhiIt) PhiIt = &BB->front();
-  }
-  if (DTU)
-    DTU->applyUpdatesPermissive({{DominatorTree::Delete, Pred, BB}});
-}
-
 void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB,
                                        DomTreeUpdater *DTU) {
 
@@ -760,7 +732,7 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB,
     for (auto I = pred_begin(PredBB), E = pred_end(PredBB); I != E; ++I) {
       Updates.push_back({DominatorTree::Delete, *I, PredBB});
       // This predecessor of PredBB may already have DestBB as a successor.
-      if (llvm::find(successors(*I), DestBB) == succ_end(*I))
+      if (!llvm::is_contained(successors(*I), DestBB))
         Updates.push_back({DominatorTree::Insert, *I, DestBB});
     }
   }
@@ -1072,7 +1044,7 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB,
     for (auto I = pred_begin(BB), E = pred_end(BB); I != E; ++I) {
       Updates.push_back({DominatorTree::Delete, *I, BB});
       // This predecessor of BB may already have Succ as a successor.
-      if (llvm::find(successors(*I), Succ) == succ_end(*I))
+      if (!llvm::is_contained(successors(*I), Succ))
         Updates.push_back({DominatorTree::Insert, *I, Succ});
     }
   }
@@ -1368,16 +1340,22 @@ static bool PhiHasDebugValue(DILocalVariable *DIVar,
 /// least n bits.
 static bool valueCoversEntireFragment(Type *ValTy, DbgVariableIntrinsic *DII) {
   const DataLayout &DL = DII->getModule()->getDataLayout();
-  uint64_t ValueSize = DL.getTypeAllocSizeInBits(ValTy);
-  if (auto FragmentSize = DII->getFragmentSizeInBits())
-    return ValueSize >= *FragmentSize;
+  TypeSize ValueSize = DL.getTypeAllocSizeInBits(ValTy);
+  if (Optional<uint64_t> FragmentSize = DII->getFragmentSizeInBits()) {
+    assert(!ValueSize.isScalable() &&
+           "Fragments don't work on scalable types.");
+    return ValueSize.getFixedSize() >= *FragmentSize;
+  }
   // We can't always calculate the size of the DI variable (e.g. if it is a
   // VLA). Try to use the size of the alloca that the dbg intrinsic describes
   // intead.
   if (DII->isAddressOfVariable())
     if (auto *AI = dyn_cast_or_null<AllocaInst>(DII->getVariableLocation()))
-      if (auto FragmentSize = AI->getAllocationSizeInBits(DL))
-        return ValueSize >= *FragmentSize;
+      if (Optional<TypeSize> FragmentSize = AI->getAllocationSizeInBits(DL)) {
+        assert(ValueSize.isScalable() == FragmentSize->isScalable() &&
+               "Both sizes should agree on the scalable flag.");
+        return TypeSize::isKnownGE(ValueSize, *FragmentSize);
+      }
   // Could not determine size of variable. Conservatively return false.
   return false;
 }
@@ -1392,7 +1370,7 @@ static DebugLoc getDebugValueLoc(DbgVariableIntrinsic *DII, Instruction *Src) {
   MDNode *Scope = DeclareLoc.getScope();
   DILocation *InlinedAt = DeclareLoc.getInlinedAt();
   // Produce an unknown location with the correct scope / inlinedAt fields.
-  return DebugLoc::get(0, 0, Scope, InlinedAt);
+  return DILocation::get(DII->getContext(), 0, 0, Scope, InlinedAt);
 }
 
 /// Inserts a llvm.dbg.value intrinsic before a store to an alloca'd value
@@ -2078,7 +2056,7 @@ unsigned llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap,
 }
 
 CallInst *llvm::createCallMatchingInvoke(InvokeInst *II) {
-  SmallVector<Value *, 8> Args(II->arg_begin(), II->arg_end());
+  SmallVector<Value *, 8> Args(II->args());
   SmallVector<OperandBundleDef, 1> OpBundles;
   II->getOperandBundlesAsDefs(OpBundles);
   CallInst *NewCall = CallInst::Create(II->getFunctionType(),
@@ -2135,7 +2113,7 @@ BasicBlock *llvm::changeToInvokeAndSplitBasicBlock(CallInst *CI,
   BB->getInstList().pop_back();
 
   // Create the new invoke instruction.
-  SmallVector<Value *, 8> InvokeArgs(CI->arg_begin(), CI->arg_end());
+  SmallVector<Value *, 8> InvokeArgs(CI->args());
   SmallVector<OperandBundleDef, 1> OpBundles;
 
   CI->getOperandBundlesAsDefs(OpBundles);
@@ -2672,10 +2650,13 @@ bool llvm::callsGCLeafFunction(const CallBase *Call,
     if (F->hasFnAttribute("gc-leaf-function"))
       return true;
 
-    if (auto IID = F->getIntrinsicID())
+    if (auto IID = F->getIntrinsicID()) {
       // Most LLVM intrinsics do not take safepoints.
       return IID != Intrinsic::experimental_gc_statepoint &&
-             IID != Intrinsic::experimental_deoptimize;
+             IID != Intrinsic::experimental_deoptimize &&
+             IID != Intrinsic::memcpy_element_unordered_atomic &&
+             IID != Intrinsic::memmove_element_unordered_atomic;
+    }
   }
 
   // Lib calls can be materialized by some passes, and won't be
@@ -2941,6 +2922,20 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
         Result->Provenance[BitIdx] = Res->Provenance[BitIdx];
       for (unsigned BitIdx = NarrowBitWidth; BitIdx < BitWidth; ++BitIdx)
         Result->Provenance[BitIdx] = BitPart::Unset;
+      return Result;
+    }
+
+    // BITREVERSE - most likely due to us previous matching a partial
+    // bitreverse.
+    if (match(V, m_BitReverse(m_Value(X)))) {
+      const auto &Res =
+          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      if (!Res)
+        return Result;
+
+      Result = BitPart(Res->Provider, BitWidth);
+      for (unsigned BitIdx = 0; BitIdx < BitWidth; ++BitIdx)
+        Result->Provenance[(BitWidth - 1) - BitIdx] = Res->Provenance[BitIdx];
       return Result;
     }
 

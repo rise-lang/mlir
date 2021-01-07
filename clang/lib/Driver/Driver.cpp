@@ -211,6 +211,11 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings,
   std::tie(IncludedFlagsBitmask, ExcludedFlagsBitmask) =
       getIncludeExcludeOptionFlagMasks(IsClCompatMode);
 
+  // Make sure that Flang-only options don't pollute the Clang output
+  // TODO: Make sure that Clang-only options don't pollute Flang output
+  if (!IsFlangMode())
+    ExcludedFlagsBitmask |= options::FlangOnlyOption;
+
   unsigned MissingArgIndex, MissingArgCount;
   InputArgList Args =
       getOpts().ParseArgs(ArgStrings, MissingArgIndex, MissingArgCount,
@@ -774,10 +779,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
 /// by Dirs.
 ///
 static bool searchForFile(SmallVectorImpl<char> &FilePath,
-                          ArrayRef<std::string> Dirs,
-                          StringRef FileName) {
+                          ArrayRef<StringRef> Dirs, StringRef FileName) {
   SmallString<128> WPath;
-  for (const std::string &Dir : Dirs) {
+  for (const StringRef &Dir : Dirs) {
     if (Dir.empty())
       continue;
     WPath.clear();
@@ -802,7 +806,7 @@ bool Driver::readConfigFile(StringRef FileName) {
   // Read options from config file.
   llvm::SmallString<128> CfgFileName(FileName);
   llvm::sys::path::native(CfgFileName);
-  ConfigFile = std::string(CfgFileName.str());
+  ConfigFile = std::string(CfgFileName);
   bool ContainErrors;
   CfgOptions = std::make_unique<InputArgList>(
       ParseArgStrings(NewCfgArgs, IsCLMode(), ContainErrors));
@@ -859,9 +863,10 @@ bool Driver::loadConfigFile() {
     std::vector<std::string> ConfigFiles =
         CLOptions->getAllArgValues(options::OPT_config);
     if (ConfigFiles.size() > 1) {
-      if (!std::all_of(
-              ConfigFiles.begin(), ConfigFiles.end(),
-              [ConfigFiles](std::string s) { return s == ConfigFiles[0]; })) {
+      if (!std::all_of(ConfigFiles.begin(), ConfigFiles.end(),
+                       [ConfigFiles](const std::string &s) {
+                         return s == ConfigFiles[0];
+                       })) {
         Diag(diag::err_drv_duplicate_config);
         return true;
       }
@@ -934,10 +939,7 @@ bool Driver::loadConfigFile() {
   }
 
   // Prepare list of directories where config file is searched for.
-  SmallVector<std::string, 3> CfgFileSearchDirs;
-  CfgFileSearchDirs.push_back(UserConfigDir);
-  CfgFileSearchDirs.push_back(SystemConfigDir);
-  CfgFileSearchDirs.push_back(Dir);
+  StringRef CfgFileSearchDirs[] = {UserConfigDir, SystemConfigDir, Dir};
 
   // Try to find config file. First try file with corrected architecture.
   llvm::SmallString<128> CfgFilePath;
@@ -968,7 +970,7 @@ bool Driver::loadConfigFile() {
   // --config. If it was deduced from executable name, it is not an error.
   if (FileSpecifiedExplicitly) {
     Diag(diag::err_drv_config_file_not_found) << CfgFileName;
-    for (const std::string &SearchDir : CfgFileSearchDirs)
+    for (const StringRef &SearchDir : CfgFileSearchDirs)
       if (!SearchDir.empty())
         Diag(diag::note_drv_config_file_searched_in) << SearchDir;
     return true;
@@ -1573,6 +1575,8 @@ void Driver::PrintHelp(bool ShowHidden) const {
 
   if (IsFlangMode())
     IncludedFlagsBitmask |= options::FlangOption;
+  else
+    ExcludedFlagsBitmask |= options::FlangOnlyOption;
 
   std::string Usage = llvm::formatv("{0} [options] file...", Name).str();
   getOpts().PrintHelp(llvm::outs(), Usage.c_str(), DriverTitle.c_str(),
@@ -1627,6 +1631,11 @@ void Driver::HandleAutocompletions(StringRef PassedFlags) const {
 
   unsigned int DisableFlags =
       options::NoDriverOption | options::Unsupported | options::Ignored;
+
+  // Make sure that Flang-only options don't pollute the Clang output
+  // TODO: Make sure that Clang-only options don't pollute Flang output
+  if (!IsFlangMode())
+    DisableFlags |= options::FlangOnlyOption;
 
   // Distinguish "--autocomplete=-someflag" and "--autocomplete=-someflag,"
   // because the latter indicates that the user put space before pushing tab
@@ -2451,8 +2460,9 @@ class OffloadingActionBuilder final {
 
         // If the host input is not CUDA or HIP, we don't need to bother about
         // this input.
-        if (IA->getType() != types::TY_CUDA &&
-            IA->getType() != types::TY_HIP) {
+        if (!(IA->getType() == types::TY_CUDA ||
+              IA->getType() == types::TY_HIP ||
+              IA->getType() == types::TY_PP_HIP)) {
           // The builder will ignore this input.
           IsActive = false;
           return ABRT_Inactive;
@@ -2480,7 +2490,7 @@ class OffloadingActionBuilder final {
 
         // If -fgpu-rdc is disabled, should not unbundle since there is no
         // device code to link.
-        if (!Relocatable)
+        if (UA->getType() == types::TY_Object && !Relocatable)
           return ABRT_Inactive;
 
         CudaDeviceActions.clear();
@@ -3241,7 +3251,8 @@ public:
     // the input is not a bundle.
     if (CanUseBundler && isa<InputAction>(HostAction) &&
         InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
-        !types::isSrcFile(HostAction->getType())) {
+        (!types::isSrcFile(HostAction->getType()) ||
+         HostAction->getType() == types::TY_PP_HIP)) {
       auto UnbundlingHostAction =
           C.MakeAction<OffloadUnbundlingJobAction>(HostAction);
       UnbundlingHostAction->registerDependentActionInfo(
@@ -3876,9 +3887,15 @@ void Driver::BuildJobs(Compilation &C) const {
     }
   }
 
+  const llvm::Triple &RawTriple = C.getDefaultToolChain().getTriple();
+  if (RawTriple.isOSAIX())
+    if (Arg *A = C.getArgs().getLastArg(options::OPT_G))
+      Diag(diag::err_drv_unsupported_opt_for_target)
+          << A->getSpelling() << RawTriple.str();
+
   // Collect the list of architectures.
   llvm::StringSet<> ArchNames;
-  if (C.getDefaultToolChain().getTriple().isOSBinFormatMachO())
+  if (RawTriple.isOSBinFormatMachO())
     for (const Arg *A : C.getArgs())
       if (A->getOption().matches(options::OPT_arch))
         ArchNames.insert(A->getValue());
@@ -3908,10 +3925,69 @@ void Driver::BuildJobs(Compilation &C) const {
                        /*TargetDeviceOffloadKind*/ Action::OFK_None);
   }
 
-  // If we have more than one job, then disable integrated-cc1 for now.
-  if (C.getJobs().size() > 1)
+  StringRef StatReportFile;
+  bool PrintProcessStat = false;
+  if (const Arg *A = C.getArgs().getLastArg(options::OPT_fproc_stat_report_EQ))
+    StatReportFile = A->getValue();
+  if (C.getArgs().hasArg(options::OPT_fproc_stat_report))
+    PrintProcessStat = true;
+
+  // If we have more than one job, then disable integrated-cc1 for now. Do this
+  // also when we need to report process execution statistics.
+  if (C.getJobs().size() > 1 || !StatReportFile.empty() || PrintProcessStat)
     for (auto &J : C.getJobs())
       J.InProcess = false;
+
+  if (!StatReportFile.empty() || PrintProcessStat) {
+    C.setPostCallback([=](const Command &Cmd, int Res) {
+      Optional<llvm::sys::ProcessStatistics> ProcStat =
+          Cmd.getProcessStatistics();
+      if (!ProcStat)
+        return;
+      if (PrintProcessStat) {
+        using namespace llvm;
+        // Human readable output.
+        outs() << sys::path::filename(Cmd.getExecutable()) << ": "
+               << "output=";
+        if (Cmd.getOutputFilenames().empty())
+          outs() << "\"\"";
+        else
+          outs() << Cmd.getOutputFilenames().front();
+        outs() << ", total="
+               << format("%.3f", ProcStat->TotalTime.count() / 1000.) << " ms"
+               << ", user="
+               << format("%.3f", ProcStat->UserTime.count() / 1000.) << " ms"
+               << ", mem=" << ProcStat->PeakMemory << " Kb\n";
+      }
+      if (!StatReportFile.empty()) {
+        // CSV format.
+        std::string Buffer;
+        llvm::raw_string_ostream Out(Buffer);
+        llvm::sys::printArg(Out, llvm::sys::path::filename(Cmd.getExecutable()),
+                            /*Quote*/ true);
+        Out << ',';
+        if (Cmd.getOutputFilenames().empty())
+          Out << "\"\"";
+        else
+          llvm::sys::printArg(Out, Cmd.getOutputFilenames().front(), true);
+        Out << ',' << ProcStat->TotalTime.count() << ','
+            << ProcStat->UserTime.count() << ',' << ProcStat->PeakMemory
+            << '\n';
+        Out.flush();
+        std::error_code EC;
+        llvm::raw_fd_ostream OS(StatReportFile, EC, llvm::sys::fs::OF_Append);
+        if (EC)
+          return;
+        auto L = OS.lock();
+        if (!L) {
+          llvm::errs() << "ERROR: Cannot lock file " << StatReportFile << ": "
+                       << toString(L.takeError()) << "\n";
+          return;
+        }
+        OS << Buffer;
+      }
+    });
+  }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
   // about any unused arguments.
@@ -4617,9 +4693,16 @@ static bool HasPreprocessOutput(const Action &JA) {
 
 const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
-                                       StringRef BoundArch, bool AtTopLevel,
+                                       StringRef OrigBoundArch, bool AtTopLevel,
                                        bool MultipleArchs,
                                        StringRef OffloadingPrefix) const {
+  std::string BoundArch = OrigBoundArch.str();
+#if defined(_WIN32)
+  // BoundArch may contains ':', which is invalid in file names on Windows,
+  // therefore replace it with '%'.
+  std::replace(BoundArch.begin(), BoundArch.end(), ':', '@');
+#endif
+
   llvm::PrettyStackTraceString CrashInfo("Computing output path");
   // Output to a user requested destination?
   if (AtTopLevel && !isa<DsymutilJobAction>(JA) && !isa<VerifyJobAction>(JA)) {
@@ -5028,9 +5111,7 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
                !Target.hasEnvironment())
         TC = std::make_unique<toolchains::MipsLLVMToolChain>(*this, Target,
                                                               Args);
-      else if (Target.getArch() == llvm::Triple::ppc ||
-               Target.getArch() == llvm::Triple::ppc64 ||
-               Target.getArch() == llvm::Triple::ppc64le)
+      else if (Target.isPPC())
         TC = std::make_unique<toolchains::PPCLinuxToolChain>(*this, Target,
                                                               Args);
       else if (Target.getArch() == llvm::Triple::ve)
@@ -5129,7 +5210,11 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
         break;
       case llvm::Triple::riscv32:
       case llvm::Triple::riscv64:
-        TC = std::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
+        if (toolchains::RISCVToolChain::hasGCCToolchain(*this, Args))
+          TC =
+              std::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
+        else
+          TC = std::make_unique<toolchains::BareMetal>(*this, Target, Args);
         break;
       case llvm::Triple::ve:
         TC = std::make_unique<toolchains::VEToolChain>(*this, Target, Args);

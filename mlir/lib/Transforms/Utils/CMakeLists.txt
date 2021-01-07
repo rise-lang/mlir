@@ -1,4 +1,5 @@
 add_mlir_library(MLIRTransformUtils
+  DialectConversion.cpp
   FoldUtils.cpp
   GreedyPatternRewriteDriver.cpp
   ElevateRewriteDriver.cpp
@@ -23,5 +24,6 @@ add_mlir_library(MLIRTransformUtils
   MLIRElevate
   MLIRSCF
   MLIRPass
+  MLIRRewrite
   MLIRStandard
   )

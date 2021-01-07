@@ -56,6 +56,10 @@ public:
 
   void adjustPassManager(PassManagerBuilder &) override;
 
+  void registerPassBuilderCallbacks(PassBuilder &PB,
+                                    bool DebugPassManager) override;
+  void registerDefaultAliasAnalyses(AAManager &) override;
+
   /// Get the integer value of a null pointer in the given address space.
   static int64_t getNullPointerValue(unsigned AddrSpace) {
     return (AddrSpace == AMDGPUAS::LOCAL_ADDRESS ||
@@ -64,6 +68,8 @@ public:
   }
 
   bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override;
+
+  unsigned getAssumedAddrSpace(const Value *V) const override;
 };
 
 //===----------------------------------------------------------------------===//

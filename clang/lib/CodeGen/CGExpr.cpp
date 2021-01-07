@@ -187,6 +187,7 @@ llvm::Value *CodeGenFunction::EvaluateExprAsBool(const Expr *E) {
 
   QualType BoolTy = getContext().BoolTy;
   SourceLocation Loc = E->getExprLoc();
+  CGFPOptionsRAII FPOptsRAII(*this, E);
   if (!E->getType()->isAnyComplexType())
     return EmitScalarConversion(EmitScalarExpr(E), E->getType(), BoolTy, Loc);
 
@@ -1521,6 +1522,29 @@ CodeGenFunction::tryEmitAsConstant(DeclRefExpr *refExpr) {
   if (result.HasSideEffects)
     return ConstantEmission();
 
+  // In CUDA/HIP device compilation, a lambda may capture a reference variable
+  // referencing a global host variable by copy. In this case the lambda should
+  // make a copy of the value of the global host variable. The DRE of the
+  // captured reference variable cannot be emitted as load from the host
+  // global variable as compile time constant, since the host variable is not
+  // accessible on device. The DRE of the captured reference variable has to be
+  // loaded from captures.
+  if (CGM.getLangOpts().CUDAIsDevice && result.Val.isLValue() &&
+      refExpr->refersToEnclosingVariableOrCapture()) {
+    auto *MD = dyn_cast_or_null<CXXMethodDecl>(CurCodeDecl);
+    if (MD && MD->getParent()->isLambda() &&
+        MD->getOverloadedOperator() == OO_Call) {
+      const APValue::LValueBase &base = result.Val.getLValueBase();
+      if (const ValueDecl *D = base.dyn_cast<const ValueDecl *>()) {
+        if (const VarDecl *VD = dyn_cast<const VarDecl>(D)) {
+          if (!VD->hasAttr<CUDADeviceAttr>()) {
+            return ConstantEmission();
+          }
+        }
+      }
+    }
+  }
+
   // Emit as a constant.
   auto C = ConstantEmitter(*this).emitAbstract(refExpr->getLocation(),
                                                result.Val, resultType);
@@ -1704,8 +1728,8 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
         llvm::Value *V = Builder.CreateLoad(Cast, Volatile, "loadVec4");
 
         // Shuffle vector to get vec3.
-        V = Builder.CreateShuffleVector(V, llvm::UndefValue::get(vec4Ty),
-                                        ArrayRef<int>{0, 1, 2}, "extractVec");
+        V = Builder.CreateShuffleVector(V, ArrayRef<int>{0, 1, 2},
+                                        "extractVec");
         return EmitFromMemory(V, Ty);
       }
     }
@@ -1812,8 +1836,7 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
       // Handle vec3 special.
       if (VecTy && cast<llvm::FixedVectorType>(VecTy)->getNumElements() == 3) {
         // Our source is a vec3, do a shuffle vector to make it a vec4.
-        Value = Builder.CreateShuffleVector(Value, llvm::UndefValue::get(VecTy),
-                                            ArrayRef<int>{0, 1, 2, -1},
+        Value = Builder.CreateShuffleVector(Value, ArrayRef<int>{0, 1, 2, -1},
                                             "extractVec");
         SrcTy = llvm::FixedVectorType::get(VecTy->getElementType(), 4);
       }
@@ -1985,8 +2008,7 @@ RValue CodeGenFunction::EmitLoadOfExtVectorElementLValue(LValue LV) {
   for (unsigned i = 0; i != NumResultElts; ++i)
     Mask.push_back(getAccessedFieldNo(i, Elts));
 
-  Vec = Builder.CreateShuffleVector(Vec, llvm::UndefValue::get(Vec->getType()),
-                                    Mask);
+  Vec = Builder.CreateShuffleVector(Vec, Mask);
   return RValue::get(Vec);
 }
 
@@ -2242,8 +2264,7 @@ void CodeGenFunction::EmitStoreThroughExtVectorComponentLValue(RValue Src,
       for (unsigned i = 0; i != NumSrcElts; ++i)
         Mask[getAccessedFieldNo(i, Elts)] = i;
 
-      Vec = Builder.CreateShuffleVector(
-          SrcVal, llvm::UndefValue::get(Vec->getType()), Mask);
+      Vec = Builder.CreateShuffleVector(SrcVal, Mask);
     } else if (NumDstElts > NumSrcElts) {
       // Extended the source vector to the same length and then shuffle it
       // into the destination.
@@ -2253,8 +2274,7 @@ void CodeGenFunction::EmitStoreThroughExtVectorComponentLValue(RValue Src,
       for (unsigned i = 0; i != NumSrcElts; ++i)
         ExtMask.push_back(i);
       ExtMask.resize(NumDstElts, -1);
-      llvm::Value *ExtSrcVal = Builder.CreateShuffleVector(
-          SrcVal, llvm::UndefValue::get(SrcVal->getType()), ExtMask);
+      llvm::Value *ExtSrcVal = Builder.CreateShuffleVector(SrcVal, ExtMask);
       // build identity
       SmallVector<int, 4> Mask;
       for (unsigned i = 0; i != NumDstElts; ++i)
@@ -2827,6 +2847,10 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     return MakeAddrLValue(CGM.GetAddrOfMSGuidDecl(GD), T,
                           AlignmentSource::Decl);
 
+  if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(ND))
+    return MakeAddrLValue(CGM.GetAddrOfTemplateParamObject(TPO), T,
+                          AlignmentSource::Decl);
+
   llvm_unreachable("Unhandled DeclRefExpr");
 }
 
@@ -3185,7 +3209,7 @@ void CodeGenFunction::EmitCheck(
   }
 
   if (TrapCond)
-    EmitTrapCheck(TrapCond);
+    EmitTrapCheck(TrapCond, CheckHandler);
   if (!FatalCond && !RecoverableCond)
     return;
 
@@ -3380,7 +3404,7 @@ void CodeGenFunction::EmitCfiCheckFail() {
   // Data == nullptr means the calling module has trap behaviour for this check.
   llvm::Value *DataIsNotNullPtr =
       Builder.CreateICmpNE(Data, llvm::ConstantPointerNull::get(Int8PtrTy));
-  EmitTrapCheck(DataIsNotNullPtr);
+  EmitTrapCheck(DataIsNotNullPtr, SanitizerHandler::CFICheckFail);
 
   llvm::StructType *SourceLocationTy =
       llvm::StructType::get(VoidPtrTy, Int32Ty, Int32Ty);
@@ -3419,7 +3443,7 @@ void CodeGenFunction::EmitCfiCheckFail() {
       EmitCheck(std::make_pair(Cond, Mask), SanitizerHandler::CFICheckFail, {},
                 {Data, Addr, ValidVtable});
     else
-      EmitTrapCheck(Cond);
+      EmitTrapCheck(Cond, SanitizerHandler::CFICheckFail);
   }
 
   FinishFunction();
@@ -3439,20 +3463,39 @@ void CodeGenFunction::EmitUnreachable(SourceLocation Loc) {
   Builder.CreateUnreachable();
 }
 
-void CodeGenFunction::EmitTrapCheck(llvm::Value *Checked) {
+void CodeGenFunction::EmitTrapCheck(llvm::Value *Checked,
+                                    SanitizerHandler CheckHandlerID) {
   llvm::BasicBlock *Cont = createBasicBlock("cont");
 
   // If we're optimizing, collapse all calls to trap down to just one per
-  // function to save on code size.
+  // check-type per function to save on code size.
+  if (TrapBBs.size() <= CheckHandlerID)
+    TrapBBs.resize(CheckHandlerID + 1);
+  llvm::BasicBlock *&TrapBB = TrapBBs[CheckHandlerID];
+
   if (!CGM.getCodeGenOpts().OptimizationLevel || !TrapBB) {
     TrapBB = createBasicBlock("trap");
     Builder.CreateCondBr(Checked, Cont, TrapBB);
     EmitBlock(TrapBB);
-    llvm::CallInst *TrapCall = EmitTrapCall(llvm::Intrinsic::trap);
+
+    llvm::CallInst *TrapCall =
+        Builder.CreateCall(CGM.getIntrinsic(llvm::Intrinsic::ubsantrap),
+                           llvm::ConstantInt::get(CGM.Int8Ty, CheckHandlerID));
+
+    if (!CGM.getCodeGenOpts().TrapFuncName.empty()) {
+      auto A = llvm::Attribute::get(getLLVMContext(), "trap-func-name",
+                                    CGM.getCodeGenOpts().TrapFuncName);
+      TrapCall->addAttribute(llvm::AttributeList::FunctionIndex, A);
+    }
     TrapCall->setDoesNotReturn();
     TrapCall->setDoesNotThrow();
     Builder.CreateUnreachable();
   } else {
+    auto Call = TrapBB->begin();
+    assert(isa<llvm::CallInst>(Call) && "Expected call in trap BB");
+
+    Call->applyMergedLocation(Call->getDebugLoc(),
+                              Builder.getCurrentDebugLocation());
     Builder.CreateCondBr(Checked, Cont, TrapBB);
   }
 
@@ -3460,7 +3503,8 @@ void CodeGenFunction::EmitTrapCheck(llvm::Value *Checked) {
 }
 
 llvm::CallInst *CodeGenFunction::EmitTrapCall(llvm::Intrinsic::ID IntrID) {
-  llvm::CallInst *TrapCall = Builder.CreateCall(CGM.getIntrinsic(IntrID));
+  llvm::CallInst *TrapCall =
+      Builder.CreateCall(CGM.getIntrinsic(IntrID));
 
   if (!CGM.getCodeGenOpts().TrapFuncName.empty()) {
     auto A = llvm::Attribute::get(getLLVMContext(), "trap-func-name",
@@ -3814,7 +3858,7 @@ LValue CodeGenFunction::EmitMatrixSubscriptExpr(const MatrixSubscriptExpr *E) {
   llvm::Value *ColIdx = EmitScalarExpr(E->getColumnIdx());
   llvm::Value *NumRows = Builder.getIntN(
       RowIdx->getType()->getScalarSizeInBits(),
-      E->getBase()->getType()->getAs<ConstantMatrixType>()->getNumRows());
+      E->getBase()->getType()->castAs<ConstantMatrixType>()->getNumRows());
   llvm::Value *FinalIdx =
       Builder.CreateAdd(Builder.CreateMul(ColIdx, NumRows), RowIdx);
   return LValue::MakeMatrixElt(

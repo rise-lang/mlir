@@ -68,6 +68,13 @@ void LoopBase<BlockT, LoopT>::getExitBlocks(
         ExitBlocks.push_back(Succ);
 }
 
+template <class BlockT, class LoopT>
+bool LoopBase<BlockT, LoopT>::hasNoExitBlocks() const {
+  SmallVector<BlockT *, 8> ExitBlocks;
+  getExitBlocks(ExitBlocks);
+  return ExitBlocks.empty();
+}
+
 /// getExitBlock - If getExitBlocks would return exactly one block,
 /// return that block. Otherwise return null.
 template <class BlockT, class LoopT>
@@ -668,10 +675,10 @@ static void compareLoops(const LoopT *L, const LoopT *OtherL,
   const SmallPtrSetImpl<const BlockT *> &BlocksSet = L->getBlocksSet();
   const SmallPtrSetImpl<const BlockT *> &OtherBlocksSet = L->getBlocksSet();
   assert(BlocksSet.size() == OtherBlocksSet.size() &&
-         std::all_of(BlocksSet.begin(), BlocksSet.end(),
-                     [&OtherBlocksSet](const BlockT *BB) {
-                       return OtherBlocksSet.count(BB);
-                     }) &&
+         llvm::all_of(BlocksSet,
+                      [&OtherBlocksSet](const BlockT *BB) {
+                        return OtherBlocksSet.count(BB);
+                      }) &&
          "Mismatched basic blocks in BlocksSets!");
 }
 #endif

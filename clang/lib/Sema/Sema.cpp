@@ -236,7 +236,9 @@ void Sema::Initialize() {
     return;
 
   // Initialize predefined 128-bit integer types, if needed.
-  if (Context.getTargetInfo().hasInt128Type()) {
+  if (Context.getTargetInfo().hasInt128Type() ||
+      (Context.getAuxTargetInfo() &&
+       Context.getAuxTargetInfo()->hasInt128Type())) {
     // If either of the 128-bit integer types are unavailable to name lookup,
     // define them now.
     DeclarationName Int128 = &Context.Idents.get("__int128_t");
@@ -369,6 +371,18 @@ void Sema::Initialize() {
 #include "clang/Basic/AArch64SVEACLETypes.def"
   }
 
+  if (Context.getTargetInfo().getTriple().isPPC64() &&
+      Context.getTargetInfo().hasFeature("paired-vector-memops")) {
+    if (Context.getTargetInfo().hasFeature("mma")) {
+#define PPC_VECTOR_MMA_TYPE(Name, Id, Size) \
+      addImplicitTypedef(#Name, Context.Id##Ty);
+#include "clang/Basic/PPCTypes.def"
+    }
+#define PPC_VECTOR_VSX_TYPE(Name, Id, Size) \
+    addImplicitTypedef(#Name, Context.Id##Ty);
+#include "clang/Basic/PPCTypes.def"
+  }
+
   if (Context.getTargetInfo().hasBuiltinMSVaList()) {
     DeclarationName MSVaList = &Context.Idents.get("__builtin_ms_va_list");
     if (IdResolver.begin(MSVaList) == IdResolver.end())
@@ -381,6 +395,9 @@ void Sema::Initialize() {
 }
 
 Sema::~Sema() {
+  assert(InstantiatingSpecializations.empty() &&
+         "failed to clean up an InstantiatingTemplate?");
+
   if (VisContext) FreeVisContext();
 
   // Kill all the active scopes.
@@ -494,7 +511,8 @@ void Sema::diagnoseNullableToNonnullConversion(QualType DstType,
                                                QualType SrcType,
                                                SourceLocation Loc) {
   Optional<NullabilityKind> ExprNullability = SrcType->getNullability(Context);
-  if (!ExprNullability || *ExprNullability != NullabilityKind::Nullable)
+  if (!ExprNullability || (*ExprNullability != NullabilityKind::Nullable &&
+                           *ExprNullability != NullabilityKind::NullableResult))
     return;
 
   Optional<NullabilityKind> TypeNullability = DstType->getNullability(Context);
@@ -1811,7 +1829,7 @@ bool Sema::findMacroSpelling(SourceLocation &locref, StringRef name) {
   loc = getSourceManager().getExpansionLoc(loc);
 
   // If that's written with the name, stop here.
-  SmallVector<char, 16> buffer;
+  SmallString<16> buffer;
   if (getPreprocessor().getSpelling(loc, buffer) == name) {
     locref = loc;
     return true;

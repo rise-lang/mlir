@@ -360,7 +360,6 @@ llvm::APSInt ConstantExpr::getResultAsAPSInt() const {
 }
 
 APValue ConstantExpr::getAPValueResult() const {
-  assert(hasAPValueResult());
 
   switch (ConstantExprBits.ResultKind) {
   case ConstantExpr::RSK_APValue:
@@ -370,6 +369,8 @@ APValue ConstantExpr::getAPValueResult() const {
         llvm::APSInt(llvm::APInt(ConstantExprBits.BitWidth, Int64Result()),
                      ConstantExprBits.IsUnsigned));
   case ConstantExpr::RSK_None:
+    if (ConstantExprBits.APValueKind == APValue::Indeterminate)
+      return APValue::IndeterminateValue();
     return APValue();
   }
   llvm_unreachable("invalid ResultKind");
@@ -483,6 +484,11 @@ DeclRefExpr *DeclRefExpr::CreateEmpty(const ASTContext &Context,
           NumTemplateArgs);
   void *Mem = Context.Allocate(Size, alignof(DeclRefExpr));
   return new (Mem) DeclRefExpr(EmptyShell());
+}
+
+void DeclRefExpr::setDecl(ValueDecl *NewD) {
+  D = NewD;
+  setDependence(computeDependence(this, NewD->getASTContext()));
 }
 
 SourceLocation DeclRefExpr::getBeginLoc() const {
@@ -1569,6 +1575,11 @@ MemberExpr *MemberExpr::CreateEmpty(const ASTContext &Context,
                                             NumTemplateArgs);
   void *Mem = Context.Allocate(Size, alignof(MemberExpr));
   return new (Mem) MemberExpr(EmptyShell());
+}
+
+void MemberExpr::setMemberDecl(ValueDecl *D) {
+  MemberDecl = D;
+  setDependence(computeDependence(this));
 }
 
 SourceLocation MemberExpr::getBeginLoc() const {
@@ -2815,13 +2826,18 @@ Expr *Expr::IgnoreParenNoopCasts(const ASTContext &Ctx) {
 
 Expr *Expr::IgnoreUnlessSpelledInSource() {
   auto IgnoreImplicitConstructorSingleStep = [](Expr *E) {
+    if (auto *Cast = dyn_cast<CXXFunctionalCastExpr>(E)) {
+      auto *SE = Cast->getSubExpr();
+      if (SE->getSourceRange() == E->getSourceRange())
+        return SE;
+    }
+
     if (auto *C = dyn_cast<CXXConstructExpr>(E)) {
       auto NumArgs = C->getNumArgs();
       if (NumArgs == 1 ||
           (NumArgs > 1 && isa<CXXDefaultArgExpr>(C->getArg(1)))) {
         Expr *A = C->getArg(0);
-        if (A->getSourceRange() == E->getSourceRange() ||
-            !isa<CXXTemporaryObjectExpr>(C))
+        if (A->getSourceRange() == E->getSourceRange() || C->isElidable())
           return A;
       }
     }
@@ -3227,9 +3243,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   if (!IncludePossibleEffects && getExprLoc().isMacroID())
     return false;
 
-  if (isInstantiationDependent())
-    return IncludePossibleEffects;
-
   switch (getStmtClass()) {
   case NoStmtClass:
   #define ABSTRACT_STMT(Type)
@@ -3249,7 +3262,8 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case TypoExprClass:
   case RecoveryExprClass:
   case CXXFoldExprClass:
-    llvm_unreachable("shouldn't see dependent / unresolved nodes here");
+    // Make a conservative assumption for dependent nodes.
+    return IncludePossibleEffects;
 
   case DeclRefExprClass:
   case ObjCIvarRefExprClass:
@@ -4406,7 +4420,7 @@ UnaryOperator::UnaryOperator(const ASTContext &Ctx, Expr *input, Opcode opc,
   UnaryOperatorBits.HasFPFeatures = FPFeatures.requiresTrailingStorage();
   if (hasStoredFPFeatures())
     setStoredFPFeatures(FPFeatures);
-  setDependence(computeDependence(this));
+  setDependence(computeDependence(this, Ctx));
 }
 
 UnaryOperator *UnaryOperator::Create(const ASTContext &C, Expr *input,

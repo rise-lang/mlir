@@ -21,9 +21,6 @@ class Test_Type<string name> : TypeDef<Test_Dialect, name> { }
 
 def SimpleTypeA : Test_Type<"SimpleA"> {
   let mnemonic = "smpla";
-
-  let printer = [{ $_printer << "smpla"; }];
-  let parser = [{ return get($_ctxt); }];
 }
 
 // A more complex parameterized type.
@@ -55,7 +52,7 @@ def IntegerType : Test_Type<"TestInteger"> {
   let parameters = (
     ins
     // SignednessSemantics is defined below.
-    "::mlir::TestIntegerType::SignednessSemantics":$signedness,
+    "::mlir::test::TestIntegerType::SignednessSemantics":$signedness,
     "unsigned":$width
   );
 
@@ -108,7 +105,7 @@ class FieldInfo_Type<string name> : Test_Type<name> {
     // An ArrayRef of something which requires allocation in the storage
     // constructor.
     ArrayRefOfSelfAllocationParameter<
-      "::mlir::FieldInfo", // FieldInfo is defined/declared in TestTypes.h.
+      "::mlir::test::FieldInfo", // FieldInfo is defined/declared in TestTypes.h.
       "Models struct fields">: $fields
   );
 

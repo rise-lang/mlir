@@ -46,7 +46,7 @@ void delete_B(B *b) { delete b; }
 // CHECK-NOT: call
 // CHECK: %[[VTABLE:.*]] = load
 // CHECK: %[[DTOR:.*]] = load
-// CHECK: call {{void|i8\*|x86_thiscallcc i8\*}} %[[DTOR]](%{{.*}}* %[[b]]
+// CHECK: call {{void|i8\*|x86_thiscallcc i8\*}} %[[DTOR]](%{{.*}}* {{[^,]*}} %[[b]]
 // CHECK-MSABI-SAME: , i32 1)
 // CHECK-NOT: call
 // CHECK: }
@@ -97,7 +97,7 @@ void delete_D(D *d) { delete d; }
 // CHECK: %[[VTABLE:.*]] = load
 // CHECK: %[[DTOR:.*]] = load
 //
-// CHECK: call {{void|i8\*|x86_thiscallcc i8\*}} %[[DTOR]](%{{.*}}* %[[d]]
+// CHECK: call {{void|i8\*|x86_thiscallcc i8\*}} %[[DTOR]](%{{.*}}* {{[^,]*}} %[[d]]
 // CHECK-MSABI-SAME: , i32 1)
 // CHECK-NOT: call
 // CHECK: }
@@ -119,7 +119,7 @@ void call_in_dtor();
 
 struct H : G { virtual ~H(); } h;
 H::~H() { call_in_dtor(); }
-// CHECK-ITANIUM-LABEL: define void @_ZN1HD0Ev(
+// CHECK-ITANIUM-LABEL: define{{.*}} void @_ZN1HD0Ev(
 // CHECK-ITANIUM-NOT: call
 // CHECK-ITANIUM: getelementptr {{.*}}, i64 24
 // CHECK-ITANIUM-NOT: call
@@ -150,7 +150,7 @@ H::~H() { call_in_dtor(); }
 
 struct I : H { virtual ~I(); alignas(32) char buffer[32]; } i;
 I::~I() { call_in_dtor(); }
-// CHECK-ITANIUM-LABEL: define void @_ZN1ID0Ev(
+// CHECK-ITANIUM-LABEL: define{{.*}} void @_ZN1ID0Ev(
 // CHECK-ITANIUM-NOT: call
 // CHECK-ITANIUM: getelementptr {{.*}}, i64 24
 // CHECK-ITANIUM-NOT: call

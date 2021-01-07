@@ -31,6 +31,10 @@ StringRef TypeDef::getCppClassName() const {
   return def->getValueAsString("cppClassName");
 }
 
+StringRef TypeDef::getCppBaseClassName() const {
+  return def->getValueAsString("cppBaseClassName");
+}
+
 bool TypeDef::hasDescription() const {
   const llvm::RecordVal *s = def->getValue("description");
   return s != nullptr && isa<llvm::StringInit>(s->getValue());
@@ -78,10 +82,10 @@ llvm::Optional<StringRef> TypeDef::getMnemonic() const {
   return def->getValueAsOptionalString("mnemonic");
 }
 llvm::Optional<StringRef> TypeDef::getPrinterCode() const {
-  return def->getValueAsOptionalCode("printer");
+  return def->getValueAsOptionalString("printer");
 }
 llvm::Optional<StringRef> TypeDef::getParserCode() const {
-  return def->getValueAsOptionalCode("parser");
+  return def->getValueAsOptionalString("parser");
 }
 bool TypeDef::genAccessors() const {
   return def->getValueAsBit("genAccessors");
@@ -105,14 +109,16 @@ bool TypeDef::operator<(const TypeDef &other) const {
 StringRef TypeParameter::getName() const {
   return def->getArgName(num)->getValue();
 }
-llvm::Optional<StringRef> TypeParameter::getAllocator() const {
+Optional<StringRef> TypeParameter::getAllocator() const {
   llvm::Init *parameterType = def->getArg(num);
-  if (auto *stringType = dyn_cast<llvm::StringInit>(parameterType))
+  if (isa<llvm::StringInit>(parameterType))
     return llvm::Optional<StringRef>();
 
   if (auto *typeParameter = dyn_cast<llvm::DefInit>(parameterType)) {
     llvm::RecordVal *code = typeParameter->getDef()->getValue("allocator");
-    if (llvm::CodeInit *ci = dyn_cast<llvm::CodeInit>(code->getValue()))
+    if (!code)
+      return llvm::Optional<StringRef>();
+    if (llvm::StringInit *ci = dyn_cast<llvm::StringInit>(code->getValue()))
       return ci->getValue();
     if (isa<llvm::UnsetInit>(code->getValue()))
       return llvm::Optional<StringRef>();
@@ -136,14 +142,14 @@ StringRef TypeParameter::getCppType() const {
       "Parameters DAG arguments must be either strings or defs "
       "which inherit from TypeParameter\n");
 }
-llvm::Optional<StringRef> TypeParameter::getDescription() const {
+Optional<StringRef> TypeParameter::getSummary() const {
   auto *parameterType = def->getArg(num);
   if (auto *typeParameter = dyn_cast<llvm::DefInit>(parameterType)) {
-    const auto *desc = typeParameter->getDef()->getValue("description");
+    const auto *desc = typeParameter->getDef()->getValue("summary");
     if (llvm::StringInit *ci = dyn_cast<llvm::StringInit>(desc->getValue()))
       return ci->getValue();
   }
-  return llvm::Optional<StringRef>();
+  return Optional<StringRef>();
 }
 StringRef TypeParameter::getSyntax() const {
   auto *parameterType = def->getArg(num);

@@ -1311,3 +1311,151 @@ module attributes {llvm.data_layout = "E"} {
   llvm.func @module_big_endian()
 }
 
+// -----
+
+// CHECK: "CodeView", i32 1
+module attributes {llvm.target_triple = "x86_64-pc-windows-msvc"} {}
+
+// -----
+
+// CHECK-NOT: "CodeView", i32 1
+// CHECK: aarch64-linux-android
+module attributes {llvm.target_triple = "aarch64-linux-android"} {}
+
+// -----
+
+// CHECK-NOT: "CodeView", i32 1
+module attributes {} {}
+
+// -----
+
+// CHECK-LABEL: @useInlineAsm
+llvm.func @useInlineAsm(%arg0: !llvm.i32) {
+  // Constraints string is checked at LLVM InlineAsm instruction construction time.
+  // So we can't just use "bar" everywhere, number of in/out arguments has to match.
+
+  // CHECK-NEXT:  call void asm "foo", "r"(i32 {{.*}}), !dbg !7
+  llvm.inline_asm "foo", "r" %arg0 : (!llvm.i32) -> ()
+
+  // CHECK-NEXT:  call i8 asm "foo", "=r,r"(i32 {{.*}}), !dbg !9
+  %0 = llvm.inline_asm "foo", "=r,r" %arg0 : (!llvm.i32) -> !llvm.i8
+
+  // CHECK-NEXT:  call i8 asm "foo", "=r,r,r"(i32 {{.*}}, i32 {{.*}}), !dbg !10
+  %1 = llvm.inline_asm "foo", "=r,r,r" %arg0, %arg0 : (!llvm.i32, !llvm.i32) -> !llvm.i8
+
+  // CHECK-NEXT:  call i8 asm sideeffect "foo", "=r,r,r"(i32 {{.*}}, i32 {{.*}}), !dbg !11
+  %2 = llvm.inline_asm has_side_effects "foo", "=r,r,r" %arg0, %arg0 : (!llvm.i32, !llvm.i32) -> !llvm.i8
+
+  // CHECK-NEXT:  call i8 asm alignstack "foo", "=r,r,r"(i32 {{.*}}, i32 {{.*}}), !dbg !12
+  %3 = llvm.inline_asm is_align_stack "foo", "=r,r,r" %arg0, %arg0 : (!llvm.i32, !llvm.i32) -> !llvm.i8
+
+  // CHECK-NEXT:  call i8 asm inteldialect "foo", "=r,r,r"(i32 {{.*}}, i32 {{.*}}), !dbg !13
+  %4 = llvm.inline_asm asm_dialect = "intel" "foo", "=r,r,r" %arg0, %arg0 : (!llvm.i32, !llvm.i32) -> !llvm.i8
+
+  // CHECK-NEXT:  call { i8, i8 } asm "foo", "=r,=r,r"(i32 {{.*}}), !dbg !14
+  %5 = llvm.inline_asm "foo", "=r,=r,r" %arg0 : (!llvm.i32) -> !llvm.struct<(i8, i8)>
+
+  llvm.return
+}
+
+// -----
+
+llvm.func @fastmathFlagsFunc(!llvm.float) -> !llvm.float
+
+// CHECK-LABEL: @fastmathFlags
+llvm.func @fastmathFlags(%arg0: !llvm.float) {
+// CHECK: {{.*}} = fadd nnan ninf float {{.*}}, {{.*}}
+// CHECK: {{.*}} = fsub nnan ninf float {{.*}}, {{.*}}
+// CHECK: {{.*}} = fmul nnan ninf float {{.*}}, {{.*}}
+// CHECK: {{.*}} = fdiv nnan ninf float {{.*}}, {{.*}}
+// CHECK: {{.*}} = frem nnan ninf float {{.*}}, {{.*}}
+  %0 = llvm.fadd %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+  %1 = llvm.fsub %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+  %2 = llvm.fmul %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+  %3 = llvm.fdiv %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+  %4 = llvm.frem %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+
+// CHECK: {{.*}} = fcmp nnan ninf oeq {{.*}}, {{.*}}
+  %5 = llvm.fcmp "oeq" %arg0, %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+
+// CHECK: {{.*}} = fneg nnan ninf float {{.*}}
+  %6 = llvm.fneg %arg0 {fastmathFlags = #llvm.fastmath<nnan, ninf>} : !llvm.float
+
+// CHECK: {{.*}} = call float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call nnan float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call ninf float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call nsz float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call arcp float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call contract float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call afn float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call reassoc float @fastmathFlagsFunc({{.*}})
+// CHECK: {{.*}} = call fast float @fastmathFlagsFunc({{.*}})
+  %8 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<>} : (!llvm.float) -> (!llvm.float)
+  %9 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<nnan>} : (!llvm.float) -> (!llvm.float)
+  %10 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<ninf>} : (!llvm.float) -> (!llvm.float)
+  %11 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<nsz>} : (!llvm.float) -> (!llvm.float)
+  %12 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<arcp>} : (!llvm.float) -> (!llvm.float)
+  %13 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<contract>} : (!llvm.float) -> (!llvm.float)
+  %14 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<afn>} : (!llvm.float) -> (!llvm.float)
+  %15 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<reassoc>} : (!llvm.float) -> (!llvm.float)
+  %16 = llvm.call @fastmathFlagsFunc(%arg0) {fastmathFlags = #llvm.fastmath<fast>} : (!llvm.float) -> (!llvm.float)
+  llvm.return
+}
+
+// -----
+
+// CHECK-LABEL: @switch_args
+llvm.func @switch_args(%arg0: !llvm.i32) {
+  %0 = llvm.mlir.constant(5 : i32) : !llvm.i32
+  %1 = llvm.mlir.constant(7 : i32) : !llvm.i32
+  %2 = llvm.mlir.constant(11 : i32) : !llvm.i32
+  // CHECK:      switch i32 %[[SWITCH_arg0:[0-9]+]], label %[[SWITCHDEFAULT_bb1:[0-9]+]] [
+  // CHECK-NEXT:   i32 -1, label %[[SWITCHCASE_bb2:[0-9]+]]
+  // CHECK-NEXT:   i32 1, label %[[SWITCHCASE_bb3:[0-9]+]]
+  // CHECK-NEXT: ]
+  llvm.switch %arg0, ^bb1 [
+    -1: ^bb2(%0 : !llvm.i32),
+    1: ^bb3(%1, %2 : !llvm.i32, !llvm.i32)
+  ]
+
+// CHECK:      [[SWITCHDEFAULT_bb1]]:
+// CHECK-NEXT:   ret i32 %[[SWITCH_arg0]]
+^bb1:  // pred: ^bb0
+  llvm.return %arg0 : !llvm.i32
+
+// CHECK:      [[SWITCHCASE_bb2]]:
+// CHECK-NEXT:   phi i32 [ 5, %1 ]
+// CHECK-NEXT:   ret i32
+^bb2(%3: !llvm.i32): // pred: ^bb0
+  llvm.return %1 : !llvm.i32
+
+// CHECK:      [[SWITCHCASE_bb3]]:
+// CHECK-NEXT:   phi i32 [ 7, %1 ]
+// CHECK-NEXT:   phi i32 [ 11, %1 ]
+// CHECK-NEXT:   ret i32
+^bb3(%4: !llvm.i32, %5: !llvm.i32): // pred: ^bb0
+  llvm.return %4 : !llvm.i32
+}
+
+// CHECK-LABEL: @switch_weights
+llvm.func @switch_weights(%arg0: !llvm.i32) {
+  %0 = llvm.mlir.constant(19 : i32) : !llvm.i32
+  %1 = llvm.mlir.constant(23 : i32) : !llvm.i32
+  %2 = llvm.mlir.constant(29 : i32) : !llvm.i32
+  // CHECK: !prof ![[SWITCH_WEIGHT_NODE:[0-9]+]]
+  llvm.switch %arg0, ^bb1(%0 : !llvm.i32) [
+    9: ^bb2(%1, %2 : !llvm.i32, !llvm.i32),
+    99: ^bb3
+  ] {branch_weights = dense<[13, 17, 19]> : vector<3xi32>}
+
+^bb1(%3: !llvm.i32):  // pred: ^bb0
+  llvm.return %3 : !llvm.i32
+
+^bb2(%4: !llvm.i32, %5: !llvm.i32): // pred: ^bb0
+  llvm.return %5 : !llvm.i32
+
+^bb3: // pred: ^bb0
+  llvm.return %arg0 : !llvm.i32
+}
+
+// CHECK: ![[SWITCH_WEIGHT_NODE]] = !{!"branch_weights", i32 13, i32 17, i32 19}

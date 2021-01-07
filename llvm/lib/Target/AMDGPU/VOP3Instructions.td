@@ -193,12 +193,8 @@ class VOP3_Profile<VOPProfile P, VOP3Features Features = VOP3_REGULAR> : VOPProf
 }
 
 class VOP3b_Profile<ValueType vt> : VOPProfile<[vt, vt, vt, vt]> {
-  // v_div_scale_{f32|f64} do not support input modifiers.
-  let HasModifiers = 0;
-  let HasClamp = 0;
-  let HasOMod = 0;
   let Outs64 = (outs DstRC:$vdst, VOPDstS64orS32:$sdst);
-  let Asm64 = " $vdst, $sdst, $src0, $src1, $src2";
+  let Asm64 = " $vdst, $sdst, $src0_modifiers, $src1_modifiers, $src2_modifiers$clamp$omod";
 }
 
 def VOP3b_F32_I1_F32_F32_F32 : VOP3b_Profile<f32> {
@@ -297,7 +293,7 @@ def V_MAD_LEGACY_F32 : VOP3Inst <"v_mad_legacy_f32", VOP3_Profile<VOP_F32_F32_F3
 def V_MAD_F32 : VOP3Inst <"v_mad_f32", VOP3_Profile<VOP_F32_F32_F32_F32>, fmad>;
 } // End SubtargetPredicate = HasMadMacInsts
 
-let SubtargetPredicate = HasNoMadMacF32Insts in
+let SubtargetPredicate = HasFmaLegacy32 in
 def V_FMA_LEGACY_F32 : VOP3Inst <"v_fma_legacy_f32",
                                  VOP3_Profile<VOP_F32_F32_F32_F32>,
                                  int_amdgcn_fma_legacy>;
@@ -388,13 +384,11 @@ def V_LDEXP_F64 : VOP3Inst <"v_ldexp_f64", VOP3_Profile<VOP_F64_F64_I32>, AMDGPU
 let mayRaiseFPException = 0 in { // Seems suspicious but manual doesn't say it does.
 def V_DIV_SCALE_F32 : VOP3_Pseudo <"v_div_scale_f32", VOP3b_F32_I1_F32_F32_F32, [], 1> {
   let SchedRW = [WriteFloatFMA, WriteSALU];
-  let AsmMatchConverter = "";
 }
 
 // Double precision division pre-scale.
 def V_DIV_SCALE_F64 : VOP3_Pseudo <"v_div_scale_f64", VOP3b_F64_I1_F64_F64_F64, [], 1> {
   let SchedRW = [WriteDouble, WriteSALU];
-  let AsmMatchConverter = "";
   let FPDPRounding = 1;
 }
 } // End mayRaiseFPException = 0
@@ -700,7 +694,7 @@ def VOP3_PERMLANE_Profile : VOP3_Profile<VOPProfile <[i32, i32, i32, i32]>, VOP3
   let InsVOP3OpSel = (ins IntOpSelMods:$src0_modifiers, VRegSrc_32:$src0,
                           IntOpSelMods:$src1_modifiers, SCSrc_b32:$src1,
                           IntOpSelMods:$src2_modifiers, SCSrc_b32:$src2,
-                          VGPR_32:$vdst_in, op_sel:$op_sel);
+                          VGPR_32:$vdst_in, op_sel0:$op_sel);
   let HasClamp = 0;
   let HasOMod = 0;
 }
@@ -873,6 +867,10 @@ let InOperandList = (ins SSrcOrLds_b32:$src0, SCSrc_b32:$src1, VGPR_32:$vdst_in)
   defm V_WRITELANE_B32 : VOP3_Real_gfx10<0x361>;
 } // End InOperandList = (ins SSrcOrLds_b32:$src0, SCSrc_b32:$src1, VGPR_32:$vdst_in)
 
+let SubtargetPredicate = isGFX10Before1030 in {
+  defm V_MUL_LO_I32      : VOP3_Real_gfx10<0x16b>;
+}
+
 defm V_XOR3_B32           : VOP3_Real_gfx10<0x178>;
 defm V_LSHLREV_B64        : VOP3_Real_gfx10<0x2ff>;
 defm V_LSHRREV_B64        : VOP3_Real_gfx10<0x300>;
@@ -998,6 +996,7 @@ multiclass VOP3be_Real_gfx6_gfx7_gfx10<bits<10> op> :
 defm V_LSHL_B64        : VOP3_Real_gfx6_gfx7<0x161>;
 defm V_LSHR_B64        : VOP3_Real_gfx6_gfx7<0x162>;
 defm V_ASHR_I64        : VOP3_Real_gfx6_gfx7<0x163>;
+defm V_MUL_LO_I32      : VOP3_Real_gfx6_gfx7<0x16b>;
 
 defm V_MAD_LEGACY_F32  : VOP3_Real_gfx6_gfx7_gfx10<0x140>;
 defm V_MAD_F32         : VOP3_Real_gfx6_gfx7_gfx10<0x141>;
@@ -1039,7 +1038,6 @@ defm V_MAX_F64         : VOP3_Real_gfx6_gfx7_gfx10<0x167>;
 defm V_LDEXP_F64       : VOP3_Real_gfx6_gfx7_gfx10<0x168>;
 defm V_MUL_LO_U32      : VOP3_Real_gfx6_gfx7_gfx10<0x169>;
 defm V_MUL_HI_U32      : VOP3_Real_gfx6_gfx7_gfx10<0x16a>;
-defm V_MUL_LO_I32      : VOP3_Real_gfx6_gfx7_gfx10<0x16b>;
 defm V_MUL_HI_I32      : VOP3_Real_gfx6_gfx7_gfx10<0x16c>;
 defm V_DIV_FMAS_F32    : VOP3_Real_gfx6_gfx7_gfx10<0x16f>;
 defm V_DIV_FMAS_F64    : VOP3_Real_gfx6_gfx7_gfx10<0x170>;

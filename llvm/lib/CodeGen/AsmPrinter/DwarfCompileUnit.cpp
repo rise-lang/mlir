@@ -558,7 +558,12 @@ void DwarfCompileUnit::addScopeRangeList(DIE &ScopeDIE,
 
 void DwarfCompileUnit::attachRangesOrLowHighPC(
     DIE &Die, SmallVector<RangeSpan, 2> Ranges) {
-  if (Ranges.size() == 1 || !DD->useRangesSection()) {
+  assert(!Ranges.empty());
+  if (!DD->useRangesSection() ||
+      (Ranges.size() == 1 &&
+       (!DD->alwaysUseRanges() ||
+        DD->getSectionLabel(&Ranges.front().Begin->getSection()) ==
+            Ranges.front().Begin))) {
     const RangeSpan &Front = Ranges.front();
     const RangeSpan &Back = Ranges.back();
     attachLowHighPC(Die, Front.Begin, Back.End);
@@ -730,10 +735,14 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
     Register FrameReg;
     const DIExpression *Expr = Fragment.Expr;
     const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
-    int Offset = TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
+    StackOffset Offset =
+        TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
     DwarfExpr.addFragmentOffset(Expr);
+
+    auto *TRI = Asm->MF->getSubtarget().getRegisterInfo();
     SmallVector<uint64_t, 8> Ops;
-    DIExpression::appendOffset(Ops, Offset);
+    TRI->getOffsetOpcodes(Offset, Ops);
+
     // According to
     // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
     // cuda-gdb requires DW_AT_address_class for all variables to be able to
@@ -810,6 +819,19 @@ static SmallVector<const DIVariable *, 2> dependencies(DbgVariable *Var) {
         if (auto *Dependency = UB.dyn_cast<DIVariable *>())
           Result.push_back(Dependency);
       if (auto ST = Subrange->getStride())
+        if (auto *Dependency = ST.dyn_cast<DIVariable *>())
+          Result.push_back(Dependency);
+    } else if (auto *GenericSubrange = dyn_cast<DIGenericSubrange>(El)) {
+      if (auto Count = GenericSubrange->getCount())
+        if (auto *Dependency = Count.dyn_cast<DIVariable *>())
+          Result.push_back(Dependency);
+      if (auto LB = GenericSubrange->getLowerBound())
+        if (auto *Dependency = LB.dyn_cast<DIVariable *>())
+          Result.push_back(Dependency);
+      if (auto UB = GenericSubrange->getUpperBound())
+        if (auto *Dependency = UB.dyn_cast<DIVariable *>())
+          Result.push_back(Dependency);
+      if (auto ST = GenericSubrange->getStride())
         if (auto *Dependency = ST.dyn_cast<DIVariable *>())
           Result.push_back(Dependency);
     }

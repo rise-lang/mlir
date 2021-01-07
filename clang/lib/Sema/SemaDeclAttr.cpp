@@ -23,6 +23,7 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/CharInfo.h"
+#include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
@@ -38,6 +39,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/IR/Assumptions.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -1380,6 +1382,43 @@ static void handlePackedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     S.Diag(AL.getLoc(), diag::warn_attribute_ignored) << AL;
 }
 
+static void handlePreferredName(Sema &S, Decl *D, const ParsedAttr &AL) {
+  auto *RD = cast<CXXRecordDecl>(D);
+  ClassTemplateDecl *CTD = RD->getDescribedClassTemplate();
+  assert(CTD && "attribute does not appertain to this declaration");
+
+  ParsedType PT = AL.getTypeArg();
+  TypeSourceInfo *TSI = nullptr;
+  QualType T = S.GetTypeFromParser(PT, &TSI);
+  if (!TSI)
+    TSI = S.Context.getTrivialTypeSourceInfo(T, AL.getLoc());
+
+  if (!T.hasQualifiers() && T->isTypedefNameType()) {
+    // Find the template name, if this type names a template specialization.
+    const TemplateDecl *Template = nullptr;
+    if (const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
+            T->getAsCXXRecordDecl())) {
+      Template = CTSD->getSpecializedTemplate();
+    } else if (const auto *TST = T->getAs<TemplateSpecializationType>()) {
+      while (TST && TST->isTypeAlias())
+        TST = TST->getAliasedType()->getAs<TemplateSpecializationType>();
+      if (TST)
+        Template = TST->getTemplateName().getAsTemplateDecl();
+    }
+
+    if (Template && declaresSameEntity(Template, CTD)) {
+      D->addAttr(::new (S.Context) PreferredNameAttr(S.Context, AL, TSI));
+      return;
+    }
+  }
+
+  S.Diag(AL.getLoc(), diag::err_attribute_preferred_name_arg_invalid)
+      << T << CTD;
+  if (const auto *TT = T->getAs<TypedefType>())
+    S.Diag(TT->getDecl()->getLocation(), diag::note_entity_declared_at)
+        << TT->getDecl();
+}
+
 static bool checkIBOutletCommon(Sema &S, Decl *D, const ParsedAttr &AL) {
   // The IBOutlet/IBOutletCollection attributes only apply to instance
   // variables or properties of Objective-C classes.  The outlet must also
@@ -1673,6 +1712,42 @@ void Sema::AddAllocAlignAttr(Decl *D, const AttributeCommonInfo &CI,
   }
 
   D->addAttr(::new (Context) AllocAlignAttr(Context, CI, Idx));
+}
+
+/// Check if \p AssumptionStr is a known assumption and warn if not.
+static void checkAssumptionAttr(Sema &S, SourceLocation Loc,
+                                StringRef AssumptionStr) {
+  if (llvm::KnownAssumptionStrings.count(AssumptionStr))
+    return;
+
+  unsigned BestEditDistance = 3;
+  StringRef Suggestion;
+  for (const auto &KnownAssumptionIt : llvm::KnownAssumptionStrings) {
+    unsigned EditDistance =
+        AssumptionStr.edit_distance(KnownAssumptionIt.getKey());
+    if (EditDistance < BestEditDistance) {
+      Suggestion = KnownAssumptionIt.getKey();
+      BestEditDistance = EditDistance;
+    }
+  }
+
+  if (!Suggestion.empty())
+    S.Diag(Loc, diag::warn_assume_attribute_string_unknown_suggested)
+        << AssumptionStr << Suggestion;
+  else
+    S.Diag(Loc, diag::warn_assume_attribute_string_unknown) << AssumptionStr;
+}
+
+static void handleAssumumptionAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // Handle the case where the attribute has a text message.
+  StringRef Str;
+  SourceLocation AttrStrLoc;
+  if (!S.checkStringLiteralArgumentAttr(AL, 0, Str, &AttrStrLoc))
+    return;
+
+  checkAssumptionAttr(S, AttrStrLoc, Str);
+
+  D->addAttr(::new (S.Context) AssumptionAttr(S.Context, AL, Str));
 }
 
 /// Normalize the attribute, __foo__ becomes foo.
@@ -2055,7 +2130,8 @@ bool Sema::CheckAttrNoArgs(const ParsedAttr &Attrs) {
 bool Sema::CheckAttrTarget(const ParsedAttr &AL) {
   // Check whether the attribute is valid on the current target.
   if (!AL.existsInTarget(Context.getTargetInfo())) {
-    Diag(AL.getLoc(), diag::warn_unknown_attribute_ignored) << AL;
+    Diag(AL.getLoc(), diag::warn_unknown_attribute_ignored)
+        << AL << AL.getRange();
     AL.setInvalid();
     return true;
   }
@@ -3005,8 +3081,14 @@ static void handleSectionAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
 
   SectionAttr *NewAttr = S.mergeSectionAttr(D, AL, Str);
-  if (NewAttr)
+  if (NewAttr) {
     D->addAttr(NewAttr);
+    if (isa<FunctionDecl, FunctionTemplateDecl, ObjCMethodDecl,
+            ObjCPropertyDecl>(D))
+      S.UnifySection(NewAttr->getName(),
+                     ASTContext::PSF_Execute | ASTContext::PSF_Read,
+                     cast<NamedDecl>(D));
+  }
 }
 
 // This is used for `__declspec(code_seg("segname"))` on a decl.
@@ -3611,6 +3693,26 @@ static void handleCallbackAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       S.Context, AL, EncodingIndices.data(), EncodingIndices.size()));
 }
 
+static bool isFunctionLike(const Type &T) {
+  // Check for explicit function types.
+  // 'called_once' is only supported in Objective-C and it has
+  // function pointers and block pointers.
+  return T.isFunctionPointerType() || T.isBlockPointerType();
+}
+
+/// Handle 'called_once' attribute.
+static void handleCalledOnceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // 'called_once' only applies to parameters representing functions.
+  QualType T = cast<ParmVarDecl>(D)->getType();
+
+  if (!isFunctionLike(*T)) {
+    S.Diag(AL.getLoc(), diag::err_called_once_attribute_wrong_type);
+    return;
+  }
+
+  D->addAttr(::new (S.Context) CalledOnceAttr(S.Context, AL));
+}
+
 static void handleTransparentUnionAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Try to find the underlying union declaration.
   RecordDecl *RD = nullptr;
@@ -3682,20 +3784,68 @@ static void handleTransparentUnionAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   RD->addAttr(::new (S.Context) TransparentUnionAttr(S.Context, AL));
 }
 
+void Sema::AddAnnotationAttr(Decl *D, const AttributeCommonInfo &CI,
+                             StringRef Str, MutableArrayRef<Expr *> Args) {
+  auto *Attr = AnnotateAttr::Create(Context, Str, Args.data(), Args.size(), CI);
+  llvm::SmallVector<PartialDiagnosticAt, 8> Notes;
+  for (unsigned Idx = 0; Idx < Attr->args_size(); Idx++) {
+    Expr *&E = Attr->args_begin()[Idx];
+    assert(E && "error are handled before");
+    if (E->isValueDependent() || E->isTypeDependent())
+      continue;
+
+    if (E->getType()->isArrayType())
+      E = ImpCastExprToType(E, Context.getPointerType(E->getType()),
+                            clang::CK_ArrayToPointerDecay)
+              .get();
+    if (E->getType()->isFunctionType())
+      E = ImplicitCastExpr::Create(Context,
+                                   Context.getPointerType(E->getType()),
+                                   clang::CK_FunctionToPointerDecay, E, nullptr,
+                                   VK_RValue, FPOptionsOverride());
+    if (E->isLValue())
+      E = ImplicitCastExpr::Create(Context, E->getType().getNonReferenceType(),
+                                   clang::CK_LValueToRValue, E, nullptr,
+                                   VK_RValue, FPOptionsOverride());
+
+    Expr::EvalResult Eval;
+    Notes.clear();
+    Eval.Diag = &Notes;
+
+    bool Result =
+        E->EvaluateAsConstantExpr(Eval, Context);
+
+    /// Result means the expression can be folded to a constant.
+    /// Note.empty() means the expression is a valid constant expression in the
+    /// current language mode.
+    if (!Result || !Notes.empty()) {
+      Diag(E->getBeginLoc(), diag::err_attribute_argument_n_type)
+          << CI << (Idx + 1) << AANT_ArgumentConstantExpr;
+      for (auto &Note : Notes)
+        Diag(Note.first, Note.second);
+      return;
+    }
+    assert(Eval.Val.hasValue());
+    E = ConstantExpr::Create(Context, E, Eval.Val);
+  }
+  D->addAttr(Attr);
+}
+
 static void handleAnnotateAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-  // Make sure that there is a string literal as the annotation's single
+  // Make sure that there is a string literal as the annotation's first
   // argument.
   StringRef Str;
   if (!S.checkStringLiteralArgumentAttr(AL, 0, Str))
     return;
 
-  // Don't duplicate annotations that are already set.
-  for (const auto *I : D->specific_attrs<AnnotateAttr>()) {
-    if (I->getAnnotation() == Str)
-      return;
+  llvm::SmallVector<Expr *, 4> Args;
+  Args.reserve(AL.getNumArgs() - 1);
+  for (unsigned Idx = 1; Idx < AL.getNumArgs(); Idx++) {
+    assert(!AL.isArgIdent(Idx));
+    Args.push_back(AL.getArgAsExpr(Idx));
   }
 
-  D->addAttr(::new (S.Context) AnnotateAttr(S.Context, AL, Str));
+  S.AddAnnotationAttr(D, AL, Str, Args);
 }
 
 static void handleAlignValueAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -4346,8 +4496,8 @@ static void handleConstantAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (checkAttrMutualExclusion<CUDASharedAttr>(S, D, AL))
     return;
   const auto *VD = cast<VarDecl>(D);
-  if (!VD->hasGlobalStorage()) {
-    S.Diag(AL.getLoc(), diag::err_cuda_nonglobal_constant);
+  if (VD->hasLocalStorage()) {
+    S.Diag(AL.getLoc(), diag::err_cuda_nonstatic_constdev);
     return;
   }
   D->addAttr(::new (S.Context) CUDAConstantAttr(S.Context, AL));
@@ -4406,6 +4556,20 @@ static void handleGlobalAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // debug info for the stub function to avoid confusing the debugger.
   if (S.LangOpts.HIP && !S.LangOpts.CUDAIsDevice)
     D->addAttr(NoDebugAttr::CreateImplicit(S.Context));
+}
+
+static void handleDeviceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (checkAttrMutualExclusion<CUDAGlobalAttr>(S, D, AL)) {
+    return;
+  }
+
+  if (const auto *VD = dyn_cast<VarDecl>(D)) {
+    if (VD->hasLocalStorage()) {
+      S.Diag(AL.getLoc(), diag::err_cuda_nonstatic_constdev);
+      return;
+    }
+  }
+  D->addAttr(::new (S.Context) CUDADeviceAttr(S.Context, AL));
 }
 
 static void handleGNUInlineAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -5374,7 +5538,8 @@ static void handleNSErrorDomain(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
-  if (!isNSStringType(VD->getType(), S.Context)) {
+  if (!isNSStringType(VD->getType(), S.Context) &&
+      !isCFStringType(VD->getType(), S.Context)) {
     S.Diag(Loc, diag::err_nserrordomain_wrong_type) << VD;
     return;
   }
@@ -5541,6 +5706,16 @@ static void handleObjCPreciseLifetimeAttr(Sema &S, Decl *D,
   }
 
   D->addAttr(::new (S.Context) ObjCPreciseLifetimeAttr(S.Context, AL));
+}
+
+static void handleSwiftAttrAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // Make sure that there is a string literal as the annotation's single
+  // argument.
+  StringRef Str;
+  if (!S.checkStringLiteralArgumentAttr(AL, 0, Str))
+    return;
+
+  D->addAttr(::new (S.Context) SwiftAttrAttr(S.Context, AL, Str));
 }
 
 static void handleSwiftBridge(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -5848,7 +6023,7 @@ validateSwiftFunctionName(Sema &S, const ParsedAttr &AL, SourceLocation Loc,
 }
 
 bool Sema::DiagnoseSwiftName(Decl *D, StringRef Name, SourceLocation Loc,
-                             const ParsedAttr &AL) {
+                             const ParsedAttr &AL, bool IsAsync) {
   if (isa<ObjCMethodDecl>(D) || isa<FunctionDecl>(D)) {
     ArrayRef<ParmVarDecl*> Params;
     unsigned ParamCount;
@@ -5867,6 +6042,16 @@ bool Sema::DiagnoseSwiftName(Decl *D, StringRef Name, SourceLocation Loc,
             << ExpectedFunctionWithProtoType;
         return false;
       }
+    }
+
+    // The async name drops the last callback parameter.
+    if (IsAsync) {
+      if (ParamCount == 0) {
+        Diag(Loc, diag::warn_attr_swift_name_decl_missing_params)
+            << AL << isa<ObjCMethodDecl>(D);
+        return false;
+      }
+      ParamCount -= 1;
     }
 
     unsigned SwiftParamCount;
@@ -5902,10 +6087,11 @@ bool Sema::DiagnoseSwiftName(Decl *D, StringRef Name, SourceLocation Loc,
           << SwiftParamCount;
       return false;
     }
-  } else if (isa<EnumConstantDecl>(D) || isa<ObjCProtocolDecl>(D) ||
-             isa<ObjCInterfaceDecl>(D) || isa<ObjCPropertyDecl>(D) ||
-             isa<VarDecl>(D) || isa<TypedefNameDecl>(D) || isa<TagDecl>(D) ||
-             isa<IndirectFieldDecl>(D) || isa<FieldDecl>(D)) {
+  } else if ((isa<EnumConstantDecl>(D) || isa<ObjCProtocolDecl>(D) ||
+              isa<ObjCInterfaceDecl>(D) || isa<ObjCPropertyDecl>(D) ||
+              isa<VarDecl>(D) || isa<TypedefNameDecl>(D) || isa<TagDecl>(D) ||
+              isa<IndirectFieldDecl>(D) || isa<FieldDecl>(D)) &&
+             !IsAsync) {
     StringRef ContextName, BaseName;
 
     std::tie(ContextName, BaseName) = Name.split('.');
@@ -5936,10 +6122,22 @@ static void handleSwiftName(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (!S.checkStringLiteralArgumentAttr(AL, 0, Name, &Loc))
     return;
 
-  if (!S.DiagnoseSwiftName(D, Name, Loc, AL))
+  if (!S.DiagnoseSwiftName(D, Name, Loc, AL, /*IsAsync=*/false))
     return;
 
   D->addAttr(::new (S.Context) SwiftNameAttr(S.Context, AL, Name));
+}
+
+static void handleSwiftAsyncName(Sema &S, Decl *D, const ParsedAttr &AL) {
+  StringRef Name;
+  SourceLocation Loc;
+  if (!S.checkStringLiteralArgumentAttr(AL, 0, Name, &Loc))
+    return;
+
+  if (!S.DiagnoseSwiftName(D, Name, Loc, AL, /*IsAsync=*/true))
+    return;
+
+  D->addAttr(::new (S.Context) SwiftAsyncNameAttr(S.Context, AL, Name));
 }
 
 static void handleSwiftNewType(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -5967,6 +6165,56 @@ static void handleSwiftNewType(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
 
   D->addAttr(::new (S.Context) SwiftNewTypeAttr(S.Context, AL, Kind));
+}
+
+static void handleSwiftAsyncAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!AL.isArgIdent(0)) {
+    S.Diag(AL.getLoc(), diag::err_attribute_argument_n_type)
+        << AL << 1 << AANT_ArgumentIdentifier;
+    return;
+  }
+
+  SwiftAsyncAttr::Kind Kind;
+  IdentifierInfo *II = AL.getArgAsIdent(0)->Ident;
+  if (!SwiftAsyncAttr::ConvertStrToKind(II->getName(), Kind)) {
+    S.Diag(AL.getLoc(), diag::err_swift_async_no_access) << AL << II;
+    return;
+  }
+
+  ParamIdx Idx;
+  if (Kind == SwiftAsyncAttr::None) {
+    // If this is 'none', then there shouldn't be any additional arguments.
+    if (!checkAttributeNumArgs(S, AL, 1))
+      return;
+  } else {
+    // Non-none swift_async requires a completion handler index argument.
+    if (!checkAttributeNumArgs(S, AL, 2))
+      return;
+
+    Expr *HandlerIdx = AL.getArgAsExpr(1);
+    if (!checkFunctionOrMethodParameterIndex(S, D, AL, 2, HandlerIdx, Idx))
+      return;
+
+    const ParmVarDecl *CompletionBlock =
+        getFunctionOrMethodParam(D, Idx.getASTIndex());
+    QualType CompletionBlockType = CompletionBlock->getType();
+    if (!CompletionBlockType->isBlockPointerType()) {
+      S.Diag(CompletionBlock->getLocation(),
+             diag::err_swift_async_bad_block_type)
+          << CompletionBlock->getType();
+      return;
+    }
+    QualType BlockTy =
+        CompletionBlockType->getAs<BlockPointerType>()->getPointeeType();
+    if (!BlockTy->getAs<FunctionType>()->getReturnType()->isVoidType()) {
+      S.Diag(CompletionBlock->getLocation(),
+             diag::err_swift_async_bad_block_type)
+          << CompletionBlock->getType();
+      return;
+    }
+  }
+
+  D->addAttr(::new (S.Context) SwiftAsyncAttr(S.Context, AL, Kind, Idx));
 }
 
 //===----------------------------------------------------------------------===//
@@ -6727,16 +6975,14 @@ DLLExportAttr *Sema::mergeDLLExportAttr(Decl *D,
 
 static void handleDLLAttr(Sema &S, Decl *D, const ParsedAttr &A) {
   if (isa<ClassTemplatePartialSpecializationDecl>(D) &&
-      (S.Context.getTargetInfo().getCXXABI().isMicrosoft() ||
-       S.Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment())) {
+      (S.Context.getTargetInfo().shouldDLLImportComdatSymbols())) {
     S.Diag(A.getRange().getBegin(), diag::warn_attribute_ignored) << A;
     return;
   }
 
   if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
     if (FD->isInlined() && A.getKind() == ParsedAttr::AT_DLLImport &&
-        !(S.Context.getTargetInfo().getCXXABI().isMicrosoft() ||
-          S.Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment())) {
+        !(S.Context.getTargetInfo().shouldDLLImportComdatSymbols())) {
       // MinGW doesn't allow dllimport on inline functions.
       S.Diag(A.getRange().getBegin(), diag::warn_attribute_ignored_on_inline)
           << A;
@@ -6745,8 +6991,7 @@ static void handleDLLAttr(Sema &S, Decl *D, const ParsedAttr &A) {
   }
 
   if (const auto *MD = dyn_cast<CXXMethodDecl>(D)) {
-    if ((S.Context.getTargetInfo().getCXXABI().isMicrosoft() ||
-         S.Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment()) &&
+    if ((S.Context.getTargetInfo().shouldDLLImportComdatSymbols()) &&
         MD->getParent()->isLambda()) {
       S.Diag(A.getRange().getBegin(), diag::err_attribute_dll_lambda) << A;
       return;
@@ -7299,7 +7544,7 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
            AL.isDeclspecAttribute()
                ? (unsigned)diag::warn_unhandled_ms_attribute_ignored
                : (unsigned)diag::warn_unknown_attribute_ignored)
-        << AL;
+        << AL << AL.getRange();
     return;
   }
 
@@ -7423,19 +7668,12 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handlePassObjectSizeAttr(S, D, AL);
     break;
   case ParsedAttr::AT_Constructor:
-    if (S.Context.getTargetInfo().getTriple().isOSAIX())
-      llvm::report_fatal_error(
-          "'constructor' attribute is not yet supported on AIX");
-    else
       handleConstructorAttr(S, D, AL);
     break;
   case ParsedAttr::AT_Deprecated:
     handleDeprecatedAttr(S, D, AL);
     break;
   case ParsedAttr::AT_Destructor:
-    if (S.Context.getTargetInfo().getTriple().isOSAIX())
-      llvm::report_fatal_error("'destructor' attribute is not yet supported on AIX");
-    else
       handleDestructorAttr(S, D, AL);
     break;
   case ParsedAttr::AT_EnableIf:
@@ -7474,12 +7712,14 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_Callback:
     handleCallbackAttr(S, D, AL);
     break;
+  case ParsedAttr::AT_CalledOnce:
+    handleCalledOnceAttr(S, D, AL);
+    break;
   case ParsedAttr::AT_CUDAGlobal:
     handleGlobalAttr(S, D, AL);
     break;
   case ParsedAttr::AT_CUDADevice:
-    handleSimpleAttributeWithExclusions<CUDADeviceAttr, CUDAGlobalAttr>(S, D,
-                                                                        AL);
+    handleDeviceAttr(S, D, AL);
     break;
   case ParsedAttr::AT_CUDAHost:
     handleSimpleAttributeWithExclusions<CUDAHostAttr, CUDAGlobalAttr>(S, D, AL);
@@ -7541,6 +7781,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_AnyX86NoCfCheck:
     handleNoCfCheckAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_Leaf:
+    handleSimpleAttribute<LeafAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_NoThrow:
     if (!AL.isUsedAsTypeAttr())
@@ -7642,6 +7885,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_Packed:
     handlePackedAttr(S, D, AL);
     break;
+  case ParsedAttr::AT_PreferredName:
+    handlePreferredName(S, D, AL);
+    break;
   case ParsedAttr::AT_Section:
     handleSectionAttr(S, D, AL);
     break;
@@ -7666,6 +7912,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_Unavailable:
     handleAttrWithMessage<UnavailableAttr>(S, D, AL);
     break;
+  case ParsedAttr::AT_Assumption:
+    handleAssumumptionAttr(S, D, AL);
+    break;
   case ParsedAttr::AT_ObjCDirect:
     handleObjCDirectAttr(S, D, AL);
     break;
@@ -7689,6 +7938,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_DisableTailCalls:
     handleSimpleAttributeWithExclusions<DisableTailCallsAttr, NakedAttr>(S, D,
                                                                          AL);
+    break;
+  case ParsedAttr::AT_NoMerge:
+    handleSimpleAttribute<NoMergeAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_Visibility:
     handleVisibilityAttr(S, D, AL, false);
@@ -7888,6 +8140,12 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
 
   // Swift attributes.
+  case ParsedAttr::AT_SwiftAsyncName:
+    handleSwiftAsyncName(S, D, AL);
+    break;
+  case ParsedAttr::AT_SwiftAttr:
+    handleSwiftAttrAttr(S, D, AL);
+    break;
   case ParsedAttr::AT_SwiftBridge:
     handleSwiftBridge(S, D, AL);
     break;
@@ -7908,6 +8166,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_SwiftPrivate:
     handleSimpleAttribute<SwiftPrivateAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_SwiftAsync:
+    handleSwiftAsyncAttr(S, D, AL);
     break;
 
   // XRay attributes.
@@ -8113,8 +8374,8 @@ NamedDecl * Sema::DeclClonePragmaWeak(NamedDecl *ND, IdentifierInfo *II,
     NewFD = FunctionDecl::Create(
         FD->getASTContext(), FD->getDeclContext(), Loc, Loc,
         DeclarationName(II), FD->getType(), FD->getTypeSourceInfo(), SC_None,
-        false /*isInlineSpecified*/, FD->hasPrototype(), CSK_unspecified,
-        FD->getTrailingRequiresClause());
+        false /*isInlineSpecified*/, FD->hasPrototype(),
+        ConstexprSpecKind::Unspecified, FD->getTrailingRequiresClause());
     NewD = NewFD;
 
     if (FD->getQualifier())

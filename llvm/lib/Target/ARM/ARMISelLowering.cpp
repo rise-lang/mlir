@@ -289,6 +289,8 @@ void ARMTargetLowering::addMVEVectorTypes(bool HasMVEFP) {
     setOperationAction(ISD::UDIVREM, VT, Expand);
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
+    setOperationAction(ISD::SELECT, VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
 
     // Vector reductions
     setOperationAction(ISD::VECREDUCE_ADD, VT, Legal);
@@ -335,6 +337,8 @@ void ARMTargetLowering::addMVEVectorTypes(bool HasMVEFP) {
     setOperationAction(ISD::SETCC, VT, Custom);
     setOperationAction(ISD::MLOAD, VT, Custom);
     setOperationAction(ISD::MSTORE, VT, Legal);
+    setOperationAction(ISD::SELECT, VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
 
     // Pre and Post inc are supported on loads and stores
     for (unsigned im = (unsigned)ISD::PRE_INC;
@@ -1718,6 +1722,7 @@ const char *ARMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARMISD::VCVTL:         return "ARMISD::VCVTL";
   case ARMISD::VMULLs:        return "ARMISD::VMULLs";
   case ARMISD::VMULLu:        return "ARMISD::VMULLu";
+  case ARMISD::VQDMULH:       return "ARMISD::VQDMULH";
   case ARMISD::VADDVs:        return "ARMISD::VADDVs";
   case ARMISD::VADDVu:        return "ARMISD::VADDVu";
   case ARMISD::VADDVps:       return "ARMISD::VADDVps";
@@ -8719,10 +8724,11 @@ static bool isSignExtended(SDNode *N, SelectionDAG &DAG) {
   return false;
 }
 
-/// isZeroExtended - Check if a node is a vector value that is zero-extended
-/// or a constant BUILD_VECTOR with zero-extended elements.
+/// isZeroExtended - Check if a node is a vector value that is zero-extended (or
+/// any-extended) or a constant BUILD_VECTOR with zero-extended elements.
 static bool isZeroExtended(SDNode *N, SelectionDAG &DAG) {
-  if (N->getOpcode() == ISD::ZERO_EXTEND || ISD::isZEXTLoad(N))
+  if (N->getOpcode() == ISD::ZERO_EXTEND || N->getOpcode() == ISD::ANY_EXTEND ||
+      ISD::isZEXTLoad(N))
     return true;
   if (isExtendedBUILD_VECTOR(N, DAG, false))
     return true;
@@ -8790,13 +8796,14 @@ static SDValue SkipLoadExtensionForVMULL(LoadSDNode *LD, SelectionDAG& DAG) {
 }
 
 /// SkipExtensionForVMULL - For a node that is a SIGN_EXTEND, ZERO_EXTEND,
-/// extending load, or BUILD_VECTOR with extended elements, return the
-/// unextended value. The unextended vector should be 64 bits so that it can
+/// ANY_EXTEND, extending load, or BUILD_VECTOR with extended elements, return
+/// the unextended value. The unextended vector should be 64 bits so that it can
 /// be used as an operand to a VMULL instruction. If the original vector size
 /// before extension is less than 64 bits we add a an extension to resize
 /// the vector to 64 bits.
 static SDValue SkipExtensionForVMULL(SDNode *N, SelectionDAG &DAG) {
-  if (N->getOpcode() == ISD::SIGN_EXTEND || N->getOpcode() == ISD::ZERO_EXTEND)
+  if (N->getOpcode() == ISD::SIGN_EXTEND ||
+      N->getOpcode() == ISD::ZERO_EXTEND || N->getOpcode() == ISD::ANY_EXTEND)
     return AddRequiredExtensionForVMULL(N->getOperand(0), DAG,
                                         N->getOperand(0)->getValueType(0),
                                         N->getValueType(0),
@@ -10396,8 +10403,7 @@ void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
 
     // Remove the landing pad successor from the invoke block and replace it
     // with the new dispatch block.
-    SmallVector<MachineBasicBlock*, 4> Successors(BB->succ_begin(),
-                                                  BB->succ_end());
+    SmallVector<MachineBasicBlock*, 4> Successors(BB->successors());
     while (!Successors.empty()) {
       MachineBasicBlock *SMBB = Successors.pop_back_val();
       if (SMBB->isEHPad()) {
@@ -10881,7 +10887,7 @@ ARMTargetLowering::EmitLowered__chkstk(MachineInstr &MI,
 
     BuildMI(*MBB, MI, DL, TII.get(ARM::t2MOVi32imm), Reg)
       .addExternalSymbol("__chkstk");
-    BuildMI(*MBB, MI, DL, TII.get(ARM::tBLXr))
+    BuildMI(*MBB, MI, DL, TII.get(gettBLXrOpcode(*MBB->getParent())))
         .add(predOps(ARMCC::AL))
         .addReg(Reg, RegState::Kill)
         .addReg(ARM::R4, RegState::Implicit | RegState::Kill)
@@ -11260,6 +11266,14 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return EmitLowered__chkstk(MI, BB);
   case ARM::WIN__DBZCHK:
     return EmitLowered__dbzchk(MI, BB);
+  case ARM::t2DoLoopStart:
+    // We are just here to set a register allocation hint, prefering lr for the
+    // input register to make it more likely to be movable and removable, later
+    // in the pipeline.
+    Register R = MI.getOperand(1).getReg();
+    MachineFunction *MF = MI.getParent()->getParent();
+    MF->getRegInfo().setRegAllocationHint(R, ARMRI::RegLR, 0);
+    return BB;
   }
 }
 
@@ -12206,9 +12220,93 @@ static SDValue PerformSELECTCombine(SDNode *N,
   return Reduction;
 }
 
+// A special combine for the vqdmulh family of instructions. This is one of the
+// potential set of patterns that could patch this instruction. The base pattern
+// you would expect to be min(max(ashr(mul(mul(sext(x), 2), sext(y)), 16))).
+// This matches the different min(max(ashr(mul(mul(sext(x), sext(y)), 2), 16))),
+// which llvm will have optimized to min(ashr(mul(sext(x), sext(y)), 15))) as
+// the max is unnecessary.
+static SDValue PerformVQDMULHCombine(SDNode *N, SelectionDAG &DAG) {
+  EVT VT = N->getValueType(0);
+  SDValue Shft;
+  ConstantSDNode *Clamp;
+
+  if (N->getOpcode() == ISD::SMIN) {
+    Shft = N->getOperand(0);
+    Clamp = isConstOrConstSplat(N->getOperand(1));
+  } else if (N->getOpcode() == ISD::VSELECT) {
+    // Detect a SMIN, which for an i64 node will be a vselect/setcc, not a smin.
+    SDValue Cmp = N->getOperand(0);
+    if (Cmp.getOpcode() != ISD::SETCC ||
+        cast<CondCodeSDNode>(Cmp.getOperand(2))->get() != ISD::SETLT ||
+        Cmp.getOperand(0) != N->getOperand(1) ||
+        Cmp.getOperand(1) != N->getOperand(2))
+      return SDValue();
+    Shft = N->getOperand(1);
+    Clamp = isConstOrConstSplat(N->getOperand(2));
+  } else
+    return SDValue();
+
+  if (!Clamp)
+    return SDValue();
+
+  MVT ScalarType;
+  int ShftAmt = 0;
+  switch (Clamp->getSExtValue()) {
+  case (1 << 7) - 1:
+    ScalarType = MVT::i8;
+    ShftAmt = 7;
+    break;
+  case (1 << 15) - 1:
+    ScalarType = MVT::i16;
+    ShftAmt = 15;
+    break;
+  case (1ULL << 31) - 1:
+    ScalarType = MVT::i32;
+    ShftAmt = 31;
+    break;
+  default:
+    return SDValue();
+  }
+
+  if (Shft.getOpcode() != ISD::SRA)
+    return SDValue();
+  ConstantSDNode *N1 = isConstOrConstSplat(Shft.getOperand(1));
+  if (!N1 || N1->getSExtValue() != ShftAmt)
+    return SDValue();
+
+  SDValue Mul = Shft.getOperand(0);
+  if (Mul.getOpcode() != ISD::MUL)
+    return SDValue();
+
+  SDValue Ext0 = Mul.getOperand(0);
+  SDValue Ext1 = Mul.getOperand(1);
+  if (Ext0.getOpcode() != ISD::SIGN_EXTEND ||
+      Ext1.getOpcode() != ISD::SIGN_EXTEND)
+    return SDValue();
+  EVT VecVT = Ext0.getOperand(0).getValueType();
+  if (VecVT != MVT::v4i32 && VecVT != MVT::v8i16 && VecVT != MVT::v16i8)
+    return SDValue();
+  if (Ext1.getOperand(0).getValueType() != VecVT ||
+      VecVT.getScalarType() != ScalarType ||
+      VT.getScalarSizeInBits() < ScalarType.getScalarSizeInBits() * 2)
+    return SDValue();
+
+  SDLoc DL(Mul);
+  SDValue VQDMULH = DAG.getNode(ARMISD::VQDMULH, DL, VecVT, Ext0.getOperand(0),
+                                Ext1.getOperand(0));
+  return DAG.getNode(ISD::SIGN_EXTEND, DL, VT, VQDMULH);
+}
+
 static SDValue PerformVSELECTCombine(SDNode *N,
                                      TargetLowering::DAGCombinerInfo &DCI,
                                      const ARMSubtarget *Subtarget) {
+  if (!Subtarget->hasMVEIntegerOps())
+    return SDValue();
+
+  if (SDValue V = PerformVQDMULHCombine(N, DCI.DAG))
+    return V;
+
   // Transforms vselect(not(cond), lhs, rhs) into vselect(cond, rhs, lhs).
   //
   // We need to re-implement this optimization here as the implementation in the
@@ -12218,9 +12316,6 @@ static SDValue PerformVSELECTCombine(SDNode *N,
   //
   // Currently, this is only done for MVE, as it's the only target that benefits
   // from this transformation (e.g. VPNOT+VPSEL becomes a single VPSEL).
-  if (!Subtarget->hasMVEIntegerOps())
-    return SDValue();
-
   if (N->getOperand(0).getOpcode() != ISD::XOR)
     return SDValue();
   SDValue XOR = N->getOperand(0);
@@ -13754,6 +13849,23 @@ PerformPREDICATE_CASTCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
     return DCI.DAG.getNode(ARMISD::PREDICATE_CAST, dl, VT, Op->getOperand(0));
   }
 
+  // Turn pred_cast(xor x, -1) into xor(pred_cast x, -1), in order to produce
+  // more VPNOT which might get folded as else predicates.
+  if (Op.getValueType() == MVT::i32 && isBitwiseNot(Op)) {
+    SDValue X =
+        DCI.DAG.getNode(ARMISD::PREDICATE_CAST, dl, VT, Op->getOperand(0));
+    SDValue C = DCI.DAG.getNode(ARMISD::PREDICATE_CAST, dl, VT,
+                                DCI.DAG.getConstant(65535, dl, MVT::i32));
+    return DCI.DAG.getNode(ISD::XOR, dl, VT, X, C);
+  }
+
+  // Only the bottom 16 bits of the source register are used.
+  if (Op.getValueType() == MVT::i32) {
+    APInt DemandedMask = APInt::getLowBitsSet(32, 16);
+    const TargetLowering &TLI = DCI.DAG.getTargetLoweringInfo();
+    if (TLI.SimplifyDemandedBits(Op, DemandedMask, DCI))
+      return SDValue(N, 0);
+  }
   return SDValue();
 }
 
@@ -14582,6 +14694,14 @@ static SDValue PerformSplittingToNarrowingStores(StoreSDNode *St,
     return true;
   };
 
+  // It may be preferable to keep the store unsplit as the trunc may end up
+  // being removed. Check that here.
+  if (Trunc.getOperand(0).getOpcode() == ISD::SMIN) {
+    if (SDValue U = PerformVQDMULHCombine(Trunc.getOperand(0).getNode(), DAG)) {
+      DAG.ReplaceAllUsesWith(Trunc.getOperand(0), U);
+      return SDValue();
+    }
+  }
   if (auto *Shuffle = dyn_cast<ShuffleVectorSDNode>(Trunc->getOperand(0)))
     if (isVMOVNOriginalMask(Shuffle->getMask(), false) ||
         isVMOVNOriginalMask(Shuffle->getMask(), true))
@@ -14841,12 +14961,23 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
   //   VADDLV u/s 32
   //   VMLALV u/s 16/32
 
+  // If the input vector is smaller than legal (v4i8/v4i16 for example) we can
+  // extend it and use v4i32 instead.
+  auto ExtendIfNeeded = [&](SDValue A, unsigned ExtendCode) {
+    EVT AVT = A.getValueType();
+    if (!AVT.is128BitVector())
+      A = DAG.getNode(ExtendCode, dl,
+                      AVT.changeVectorElementType(MVT::getIntegerVT(
+                          128 / AVT.getVectorMinNumElements())),
+                      A);
+    return A;
+  };
   auto IsVADDV = [&](MVT RetTy, unsigned ExtendCode, ArrayRef<MVT> ExtTypes) {
     if (ResVT != RetTy || N0->getOpcode() != ExtendCode)
       return SDValue();
     SDValue A = N0->getOperand(0);
     if (llvm::any_of(ExtTypes, [&A](MVT Ty) { return A.getValueType() == Ty; }))
-      return A;
+      return ExtendIfNeeded(A, ExtendCode);
     return SDValue();
   };
   auto IsPredVADDV = [&](MVT RetTy, unsigned ExtendCode,
@@ -14860,7 +14991,7 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
       return SDValue();
     SDValue A = Ext->getOperand(0);
     if (llvm::any_of(ExtTypes, [&A](MVT Ty) { return A.getValueType() == Ty; }))
-      return A;
+      return ExtendIfNeeded(A, ExtendCode);
     return SDValue();
   };
   auto IsVMLAV = [&](MVT RetTy, unsigned ExtendCode, ArrayRef<MVT> ExtTypes,
@@ -14889,8 +15020,12 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     A = ExtA->getOperand(0);
     B = ExtB->getOperand(0);
     if (A.getValueType() == B.getValueType() &&
-        llvm::any_of(ExtTypes, [&A](MVT Ty) { return A.getValueType() == Ty; }))
+        llvm::any_of(ExtTypes,
+                     [&A](MVT Ty) { return A.getValueType() == Ty; })) {
+      A = ExtendIfNeeded(A, ExtendCode);
+      B = ExtendIfNeeded(B, ExtendCode);
       return true;
+    }
     return false;
   };
   auto IsPredVMLAV = [&](MVT RetTy, unsigned ExtendCode, ArrayRef<MVT> ExtTypes,
@@ -14919,8 +15054,12 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     A = ExtA->getOperand(0);
     B = ExtB->getOperand(0);
     if (A.getValueType() == B.getValueType() &&
-        llvm::any_of(ExtTypes, [&A](MVT Ty) { return A.getValueType() == Ty; }))
+        llvm::any_of(ExtTypes,
+                     [&A](MVT Ty) { return A.getValueType() == Ty; })) {
+      A = ExtendIfNeeded(A, ExtendCode);
+      B = ExtendIfNeeded(B, ExtendCode);
       return true;
+    }
     return false;
   };
   auto Create64bitNode = [&](unsigned Opcode, ArrayRef<SDValue> Ops) {
@@ -14933,9 +15072,11 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     return DAG.getNode(ARMISD::VADDVs, dl, ResVT, A);
   if (SDValue A = IsVADDV(MVT::i32, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v16i8}))
     return DAG.getNode(ARMISD::VADDVu, dl, ResVT, A);
-  if (SDValue A = IsVADDV(MVT::i64, ISD::SIGN_EXTEND, {MVT::v4i32}))
+  if (SDValue A = IsVADDV(MVT::i64, ISD::SIGN_EXTEND,
+                          {MVT::v4i8, MVT::v4i16, MVT::v4i32}))
     return Create64bitNode(ARMISD::VADDLVs, {A});
-  if (SDValue A = IsVADDV(MVT::i64, ISD::ZERO_EXTEND, {MVT::v4i32}))
+  if (SDValue A = IsVADDV(MVT::i64, ISD::ZERO_EXTEND,
+                          {MVT::v4i8, MVT::v4i16, MVT::v4i32}))
     return Create64bitNode(ARMISD::VADDLVu, {A});
   if (SDValue A = IsVADDV(MVT::i16, ISD::SIGN_EXTEND, {MVT::v16i8}))
     return DAG.getNode(ISD::TRUNCATE, dl, ResVT,
@@ -14949,9 +15090,11 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     return DAG.getNode(ARMISD::VADDVps, dl, ResVT, A, Mask);
   if (SDValue A = IsPredVADDV(MVT::i32, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v16i8}, Mask))
     return DAG.getNode(ARMISD::VADDVpu, dl, ResVT, A, Mask);
-  if (SDValue A = IsPredVADDV(MVT::i64, ISD::SIGN_EXTEND, {MVT::v4i32}, Mask))
+  if (SDValue A = IsPredVADDV(MVT::i64, ISD::SIGN_EXTEND,
+                              {MVT::v4i8, MVT::v4i16, MVT::v4i32}, Mask))
     return Create64bitNode(ARMISD::VADDLVps, {A, Mask});
-  if (SDValue A = IsPredVADDV(MVT::i64, ISD::ZERO_EXTEND, {MVT::v4i32}, Mask))
+  if (SDValue A = IsPredVADDV(MVT::i64, ISD::ZERO_EXTEND,
+                              {MVT::v4i8, MVT::v4i16, MVT::v4i32}, Mask))
     return Create64bitNode(ARMISD::VADDLVpu, {A, Mask});
   if (SDValue A = IsPredVADDV(MVT::i16, ISD::SIGN_EXTEND, {MVT::v16i8}, Mask))
     return DAG.getNode(ISD::TRUNCATE, dl, ResVT,
@@ -14965,9 +15108,11 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     return DAG.getNode(ARMISD::VMLAVs, dl, ResVT, A, B);
   if (IsVMLAV(MVT::i32, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v16i8}, A, B))
     return DAG.getNode(ARMISD::VMLAVu, dl, ResVT, A, B);
-  if (IsVMLAV(MVT::i64, ISD::SIGN_EXTEND, {MVT::v8i16, MVT::v4i32}, A, B))
+  if (IsVMLAV(MVT::i64, ISD::SIGN_EXTEND,
+              {MVT::v8i8, MVT::v8i16, MVT::v4i8, MVT::v4i16, MVT::v4i32}, A, B))
     return Create64bitNode(ARMISD::VMLALVs, {A, B});
-  if (IsVMLAV(MVT::i64, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v4i32}, A, B))
+  if (IsVMLAV(MVT::i64, ISD::ZERO_EXTEND,
+              {MVT::v8i8, MVT::v8i16, MVT::v4i8, MVT::v4i16, MVT::v4i32}, A, B))
     return Create64bitNode(ARMISD::VMLALVu, {A, B});
   if (IsVMLAV(MVT::i16, ISD::SIGN_EXTEND, {MVT::v16i8}, A, B))
     return DAG.getNode(ISD::TRUNCATE, dl, ResVT,
@@ -14980,9 +15125,13 @@ static SDValue PerformVECREDUCE_ADDCombine(SDNode *N, SelectionDAG &DAG,
     return DAG.getNode(ARMISD::VMLAVps, dl, ResVT, A, B, Mask);
   if (IsPredVMLAV(MVT::i32, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v16i8}, A, B, Mask))
     return DAG.getNode(ARMISD::VMLAVpu, dl, ResVT, A, B, Mask);
-  if (IsPredVMLAV(MVT::i64, ISD::SIGN_EXTEND, {MVT::v8i16, MVT::v4i32}, A, B, Mask))
+  if (IsPredVMLAV(MVT::i64, ISD::SIGN_EXTEND,
+                  {MVT::v8i8, MVT::v8i16, MVT::v4i8, MVT::v4i16, MVT::v4i32}, A,
+                  B, Mask))
     return Create64bitNode(ARMISD::VMLALVps, {A, B, Mask});
-  if (IsPredVMLAV(MVT::i64, ISD::ZERO_EXTEND, {MVT::v8i16, MVT::v4i32}, A, B, Mask))
+  if (IsPredVMLAV(MVT::i64, ISD::ZERO_EXTEND,
+                  {MVT::v8i8, MVT::v8i16, MVT::v4i8, MVT::v4i16, MVT::v4i32}, A,
+                  B, Mask))
     return Create64bitNode(ARMISD::VMLALVpu, {A, B, Mask});
   if (IsPredVMLAV(MVT::i16, ISD::SIGN_EXTEND, {MVT::v16i8}, A, B, Mask))
     return DAG.getNode(ISD::TRUNCATE, dl, ResVT,
@@ -15554,6 +15703,9 @@ static SDValue PerformMinMaxCombine(SDNode *N, SelectionDAG &DAG,
   SDValue N0 = N->getOperand(0);
   if (!ST->hasMVEIntegerOps())
     return SDValue();
+
+  if (SDValue V = PerformVQDMULHCombine(N, DAG))
+    return V;
 
   if (VT != MVT::v4i32 && VT != MVT::v8i16)
     return SDValue();
@@ -17321,8 +17473,7 @@ void ARMTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
       return;
 
     KnownBits KnownRHS = DAG.computeKnownBits(Op.getOperand(1), Depth+1);
-    Known.Zero &= KnownRHS.Zero;
-    Known.One  &= KnownRHS.One;
+    Known = KnownBits::commonBits(Known, KnownRHS);
     return;
   }
   case ISD::INTRINSIC_W_CHAIN: {

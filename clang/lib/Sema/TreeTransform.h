@@ -731,10 +731,11 @@ public:
 #define ABSTRACT_STMT(Stmt)
 #include "clang/AST/StmtNodes.inc"
 
-#define OMP_CLAUSE_CLASS(Enum, Str, Class)                                           \
-  LLVM_ATTRIBUTE_NOINLINE \
-  OMPClause *Transform ## Class(Class *S);
-#include "llvm/Frontend/OpenMP/OMPKinds.def"
+#define GEN_CLANG_CLAUSE_CLASS
+#define CLAUSE_CLASS(Enum, Str, Class)                                         \
+  LLVM_ATTRIBUTE_NOINLINE                                                      \
+  OMPClause *Transform##Class(Class *S);
+#include "llvm/Frontend/OpenMP/OMP.inc"
 
   /// Build a new qualified type given its unqualified type and type location.
   ///
@@ -1305,7 +1306,7 @@ public:
     return SemaRef.ActOnLabelStmt(IdentLoc, L, ColonLoc, SubStmt);
   }
 
-  /// Build a new label statement.
+  /// Build a new attributed statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
@@ -3691,10 +3692,11 @@ OMPClause *TreeTransform<Derived>::TransformOMPClause(OMPClause *S) {
   switch (S->getClauseKind()) {
   default: break;
   // Transform individual clause nodes
-#define OMP_CLAUSE_CLASS(Enum, Str, Class) \
+#define GEN_CLANG_CLAUSE_CLASS
+#define CLAUSE_CLASS(Enum, Str, Class)                                         \
   case Enum:                                                                   \
-    return getDerived().Transform ## Class(cast<Class>(S));
-#include "llvm/Frontend/OpenMP/OMPKinds.def"
+    return getDerived().Transform##Class(cast<Class>(S));
+#include "llvm/Frontend/OpenMP/OMP.inc"
   }
 
   return S;
@@ -12745,12 +12747,12 @@ TreeTransform<Derived>::TransformCXXUnresolvedConstructExpr(
 
   bool ArgumentChanged = false;
   SmallVector<Expr*, 8> Args;
-  Args.reserve(E->arg_size());
+  Args.reserve(E->getNumArgs());
   {
     EnterExpressionEvaluationContext Context(
         getSema(), EnterExpressionEvaluationContext::InitList,
         E->isListInitialization());
-    if (getDerived().TransformExprs(E->arg_begin(), E->arg_size(), true, Args,
+    if (getDerived().TransformExprs(E->arg_begin(), E->getNumArgs(), true, Args,
                                     &ArgumentChanged))
       return ExprError();
   }

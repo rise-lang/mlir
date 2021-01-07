@@ -12,7 +12,6 @@
 
 #include "llvm/Transforms/Utils/LoopRotationUtils.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CodeMetrics.h"
@@ -499,12 +498,13 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
       Updates.push_back({DominatorTree::Insert, OrigPreheader, Exit});
       Updates.push_back({DominatorTree::Insert, OrigPreheader, NewHeader});
       Updates.push_back({DominatorTree::Delete, OrigPreheader, OrigHeader});
-      DT->applyUpdates(Updates);
 
       if (MSSAU) {
-        MSSAU->applyUpdates(Updates, *DT);
+        MSSAU->applyUpdates(Updates, *DT, /*UpdateDT=*/true);
         if (VerifyMemorySSA)
           MSSAU->getMemorySSA()->verifyMemorySSA();
+      } else {
+        DT->applyUpdates(Updates);
       }
     }
 
@@ -578,7 +578,10 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     // connected by an unconditional branch.  This is just a cleanup so the
     // emitted code isn't too gross in this common case.
     DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
-    MergeBlockIntoPredecessor(OrigHeader, &DTU, LI, MSSAU);
+    BasicBlock *PredBB = OrigHeader->getUniquePredecessor();
+    bool DidMerge = MergeBlockIntoPredecessor(OrigHeader, &DTU, LI, MSSAU);
+    if (DidMerge)
+      RemoveRedundantDbgInstrs(PredBB);
 
     if (MSSAU && VerifyMemorySSA)
       MSSAU->getMemorySSA()->verifyMemorySSA();

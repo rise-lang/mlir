@@ -1,16 +1,20 @@
 set(files
+  __availability
   __bit_reference
   __bsd_locale_defaults.h
   __bsd_locale_fallbacks.h
-  __config
-  __errc
   __debug
+  __errc
   __functional_03
   __functional_base
   __functional_base_03
   __hash_table
   __libcpp_version
   __locale
+  __memory/allocator_traits.h
+  __memory/base.h
+  __memory/pointer_traits.h
+  __memory/utilities.h
   __mutex_base
   __node_handle
   __nullptr
@@ -145,6 +149,24 @@ set(files
   string.h
   string_view
   strstream
+  support/android/locale_bionic.h
+  support/fuchsia/xlocale.h
+  support/ibm/limits.h
+  support/ibm/locale_mgmt_aix.h
+  support/ibm/nanosleep.h
+  support/ibm/support.h
+  support/ibm/xlocale.h
+  support/musl/xlocale.h
+  support/newlib/xlocale.h
+  support/nuttx/xlocale.h
+  support/solaris/floatingpoint.h
+  support/solaris/wchar.h
+  support/solaris/xlocale.h
+  support/win32/limits_msvc_win32.h
+  support/win32/locale_win32.h
+  support/xlocale/__nop_locale_mgmt.h
+  support/xlocale/__posix_l_fallback.h
+  support/xlocale/__strtonum_fallback.h
   system_error
   tgmath.h
   thread
@@ -163,50 +185,62 @@ set(files
   wctype.h
   )
 
-if(LIBCXX_INSTALL_SUPPORT_HEADERS)
-  set(files
-    ${files}
-    support/android/locale_bionic.h
-    support/fuchsia/xlocale.h
-    support/ibm/limits.h
-    support/ibm/locale_mgmt_aix.h
-    support/ibm/support.h
-    support/ibm/xlocale.h
-    support/musl/xlocale.h
-    support/newlib/xlocale.h
-    support/solaris/floatingpoint.h
-    support/solaris/wchar.h
-    support/solaris/xlocale.h
-    support/win32/limits_msvc_win32.h
-    support/win32/locale_win32.h
-    support/xlocale/__nop_locale_mgmt.h
-    support/xlocale/__posix_l_fallback.h
-    support/xlocale/__strtonum_fallback.h
-    )
-endif()
+configure_file("__config_site.in"
+               "${LIBCXX_BINARY_DIR}/__config_site"
+               @ONLY)
+
+# Generate a custom __config header. The new header is created
+# by prepending __config_site to the current __config header.
+add_custom_command(OUTPUT ${LIBCXX_BINARY_DIR}/__generated_config
+  COMMAND ${Python3_EXECUTABLE} ${LIBCXX_SOURCE_DIR}/utils/cat_files.py
+    ${LIBCXX_BINARY_DIR}/__config_site
+    ${LIBCXX_SOURCE_DIR}/include/__config
+    -o ${LIBCXX_BINARY_DIR}/__generated_config
+  DEPENDS ${LIBCXX_SOURCE_DIR}/include/__config
+          ${LIBCXX_BINARY_DIR}/__config_site
+)
+# Add a target that executes the generation commands.
+add_custom_target(cxx-generated-config ALL
+  DEPENDS ${LIBCXX_BINARY_DIR}/__generated_config)
 
 if(LIBCXX_HEADER_DIR)
-  configure_file("__config_site.in" "${LIBCXX_GENERATED_INCLUDE_DIR}/__config_site" @ONLY)
+  set(output_dir ${LIBCXX_HEADER_DIR}/include/c++/v1)
 
-  set(_all_includes "${LIBCXX_GENERATED_INCLUDE_DIR}/__config_site")
+  set(out_files)
   foreach(f ${files})
-    set(src "${CMAKE_CURRENT_SOURCE_DIR}/${f}")
-    set(dst "${LIBCXX_GENERATED_INCLUDE_DIR}/${f}")
+    set(src ${CMAKE_CURRENT_SOURCE_DIR}/${f})
+    set(dst ${output_dir}/${f})
     add_custom_command(OUTPUT ${dst}
       DEPENDS ${src}
       COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
       COMMENT "Copying CXX header ${f}")
-    list(APPEND _all_includes "${dst}")
+    list(APPEND out_files ${dst})
   endforeach()
-  add_custom_target(generate-cxx-headers DEPENDS ${_all_includes})
+
+  # Copy the generated header as __config into build directory.
+  set(src ${LIBCXX_BINARY_DIR}/__generated_config)
+  set(dst ${output_dir}/__config)
+  add_custom_command(OUTPUT ${dst}
+      DEPENDS ${src} cxx-generated-config
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
+      COMMENT "Copying CXX __config")
+  list(APPEND out_files ${dst})
+  add_custom_target(generate-cxx-headers ALL DEPENDS ${out_files})
 
   add_library(cxx-headers INTERFACE)
   add_dependencies(cxx-headers generate-cxx-headers ${LIBCXX_CXX_ABI_HEADER_TARGET})
   # TODO: Use target_include_directories once we figure out why that breaks the runtimes build
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" OR "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
-    target_compile_options(cxx-headers INTERFACE /I "${LIBCXX_GENERATED_INCLUDE_DIR}")
+    target_compile_options(cxx-headers INTERFACE /I "${output_dir}")
   else()
-    target_compile_options(cxx-headers INTERFACE -I "${LIBCXX_GENERATED_INCLUDE_DIR}")
+    target_compile_options(cxx-headers INTERFACE -I "${output_dir}")
+  endif()
+
+  # Make sure the generated __config_site header is included when we build the library.
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" OR "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+    target_compile_options(cxx-headers INTERFACE /FI "${LIBCXX_BINARY_DIR}/__config_site")
+  else()
+    target_compile_options(cxx-headers INTERFACE -include "${LIBCXX_BINARY_DIR}/__config_site")
   endif()
 else()
   add_library(cxx-headers INTERFACE)
@@ -222,10 +256,11 @@ if (LIBCXX_INSTALL_HEADERS)
     )
   endforeach()
 
-  # Install the generated __config_site.
-  install(FILES ${LIBCXX_BINARY_DIR}/__config_site
+  # Install the generated header as __config.
+  install(FILES ${LIBCXX_BINARY_DIR}/__generated_config
     DESTINATION ${LIBCXX_INSTALL_HEADER_PREFIX}include/c++/v1
     PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    RENAME __config
     COMPONENT cxx-headers)
 
   if (NOT CMAKE_CONFIGURATION_TYPES)

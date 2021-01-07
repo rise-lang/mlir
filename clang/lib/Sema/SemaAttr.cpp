@@ -481,9 +481,8 @@ void Sema::ActOnPragmaMSVtorDisp(PragmaMsStackAction Action,
   VtorDispStack.Act(PragmaLoc, Action, StringRef(), Mode);
 }
 
-bool Sema::UnifySection(StringRef SectionName,
-                        int SectionFlags,
-                        DeclaratorDecl *Decl) {
+bool Sema::UnifySection(StringRef SectionName, int SectionFlags,
+                        NamedDecl *Decl) {
   SourceLocation PragmaLocation;
   if (auto A = Decl->getAttr<SectionAttr>())
     if (A->isImplicit())
@@ -966,6 +965,8 @@ void Sema::ActOnPragmaFPContract(SourceLocation Loc,
   case LangOptions::FPM_Off:
     NewFPFeatures.setDisallowFPContract();
     break;
+  case LangOptions::FPM_FastHonorPragmas:
+    llvm_unreachable("Should not happen");
   }
   FpPragmaStack.Act(Loc, Sema::PSK_Set, StringRef(), NewFPFeatures);
   CurFPFeatures = NewFPFeatures.applyOverrides(getLangOpts());
@@ -1002,6 +1003,7 @@ void Sema::setExceptionMode(SourceLocation Loc,
 
 void Sema::ActOnPragmaFEnvAccess(SourceLocation Loc, bool IsEnabled) {
   FPOptionsOverride NewFPFeatures = CurFPFeatureOverrides();
+  auto LO = getLangOpts();
   if (IsEnabled) {
     // Verify Microsoft restriction:
     // You can't enable fenv_access unless precise semantics are enabled.
@@ -1010,10 +1012,20 @@ void Sema::ActOnPragmaFEnvAccess(SourceLocation Loc, bool IsEnabled) {
     if (!isPreciseFPEnabled())
       Diag(Loc, diag::err_pragma_fenv_requires_precise);
     NewFPFeatures.setAllowFEnvAccessOverride(true);
-  } else
+    // Enabling FENV access sets the RoundingMode to Dynamic.
+    // and ExceptionBehavior to Strict
+    NewFPFeatures.setRoundingModeOverride(llvm::RoundingMode::Dynamic);
+    NewFPFeatures.setFPExceptionModeOverride(LangOptions::FPE_Strict);
+  } else {
     NewFPFeatures.setAllowFEnvAccessOverride(false);
+  }
   FpPragmaStack.Act(Loc, PSK_Set, StringRef(), NewFPFeatures);
-  CurFPFeatures = NewFPFeatures.applyOverrides(getLangOpts());
+  CurFPFeatures = NewFPFeatures.applyOverrides(LO);
+}
+
+void Sema::ActOnPragmaFPExceptions(SourceLocation Loc,
+                                   LangOptions::FPExceptionModeKind FPE) {
+  setExceptionMode(Loc, FPE);
 }
 
 void Sema::PushNamespaceVisibilityAttr(const VisibilityAttr *Attr,
