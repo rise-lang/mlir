@@ -101,6 +101,7 @@ add_subdirectory(tools/mlir-tblgen)
 
 add_subdirectory(include/mlir)
 add_subdirectory(lib)
+add_subdirectory(../../lib build)
 # C API needs all dialects for registration, but should be built before tests.
 add_subdirectory(lib/CAPI)
 if (MLIR_INCLUDE_TESTS)

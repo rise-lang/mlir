@@ -21,6 +21,7 @@ if(MLIR_INCLUDE_TESTS)
     MLIRTestReducer
     MLIRTestRewrite
     MLIRTestTransforms
+    MLIRTestMLOpt
     )
 endif()
 
