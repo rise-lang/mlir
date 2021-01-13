@@ -86,10 +86,8 @@ RewriteResult mlir::elevate::BetaReductionRewritePattern::impl(Operation *op, Pa
 auto mlir::elevate::betaReduction() -> BetaReductionRewritePattern { return BetaReductionRewritePattern(); }
 
 RewriteResult mlir::elevate::AddIdAfterRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
-  llvm::dbgs() << "ja main!";
   if (!isa<ApplyOp>(op)) return Failure();
   auto apply = cast<ApplyOp>(op);
-  llvm::dbgs() << "ja main2 !";
 
   // successful match
   ScopedContext scope(rewriter, op->getLoc());
