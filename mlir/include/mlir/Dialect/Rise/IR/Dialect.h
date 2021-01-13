@@ -34,7 +34,6 @@ class Builder;
 
 namespace rise {
 
-
 /// This is the definition of the Rise dialect.
 class RiseDialect : public mlir::Dialect {
 public:
@@ -47,7 +46,8 @@ public:
 
   /// Hook for custom printing of types
   void printType(mlir::Type type, DialectAsmPrinter &) const override;
-  void printTypeInternal(mlir::Type type, raw_ostream &stream, DialectAsmPrinter &printer) const;
+  void printTypeInternal(mlir::Type type, raw_ostream &stream,
+                         DialectAsmPrinter &printer) const;
 
   /// Hook for custom parsing of Attributes
   mlir::Attribute parseAttribute(DialectAsmParser &parser,
@@ -56,8 +56,8 @@ public:
   /// Hook for custom printing of Attributes
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
 
-  static void dumpRiseExpression(Operation *op);
-  static void dumpRiseExpression2(LoweringUnitOp* op);
+  static void dumpRiseExpression(Operation *op, bool omitApplyNode = true,
+                                 bool printBinderTypes = true);
   static DataType getAsDataType(Type type);
   static DataType getFunTypeOutput(FunType funType);
   void initialize();

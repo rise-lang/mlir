@@ -1066,7 +1066,7 @@ void ByteCodeExecutor::execute(
 
       LLVM_DEBUG(llvm::dbgs() << "  * Operation: " << *op << "\n"
                               << "  * Index: " << index << "\n"
-                              << "  * Result: " << operand << "\n\n");
+                              << "  * Result: " << "operand" << "\n\n");
       memory[memIndex] = operand.getAsOpaquePointer();
       break;
     }

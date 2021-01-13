@@ -225,40 +225,10 @@ void RiseDialect::printAttribute(Attribute attribute,
   }
   return;
 }
-void RiseDialect::dumpRiseExpression2(LoweringUnitOp* op) {
-  SmallVector<BlockArgument, 4> args;
-  op->walk([&](Operation *op){
-    if (isa<LambdaOp>(op)) {
-      for (auto arg : op->getRegion(0).front().getArguments())
-        args.push_back(arg);
-      return;
-    } else if (isa<ApplyOp>(op)) {
-      ApplyOp apply = cast<ApplyOp>(op);
-      llvm::dbgs() << "App(";
-      for (auto operand : apply.getOperands()) {
-        if (operand.isa<OpResult>()) {
-          llvm::dbgs() << operand.getDefiningOp()->getName().stripDialect() << ", ";
-        } else {
-          for (int i = 0; i < args.size()-1; i++) {
-            if (args[i] == operand) llvm::dbgs() << "x" << i;
-          }
-        }
-
-
-      }
-
-      llvm::dbgs() << ")";
-      return;
-    }
-
-    llvm::dbgs() << op->getName().stripDialect();
-  });
-  llvm::dbgs() << "\n";
-}
 
 void dumpRiseExpression_value(Value val, SmallVector<BlockArgument, 4> &args) {
 //  llvm::dbgs() << "valsize:" << args.size();
-  for (int i = 0; i < args.size()-1; i++) {
+  for (int i = 0; i < args.size(); i++) {
     if (args[i] == val) {
       llvm::dbgs() << "x" << i;
       return;
@@ -268,7 +238,7 @@ void dumpRiseExpression_value(Value val, SmallVector<BlockArgument, 4> &args) {
   emitWarning(val.getLoc()) << "Possible out of scope Value!";
 }
 
-void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, int indentLevel = 0) {
+void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, bool omitApplyNodes, bool printBinderTypes, int indentLevel = 0) {
   auto indent = [&]() -> void {
     llvm::dbgs() << "\n";
     for (int i = 0; i < indentLevel * 4; i++) {
@@ -299,9 +269,15 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     return i;
   };
   auto dumpOperands = [&](Operation *op) -> void {
-    for (int i = 0; i < op->getNumOperands(); i++) {
+    int firstOpToDump = 0;
+    if (omitApplyNodes && isa<ApplyOp>(op)) {
+      dumpRiseExpression_recurse(op->getOperand(0).getDefiningOp(), args, omitApplyNodes, printBinderTypes, indentLevel);
+      llvm::dbgs() << "(";
+      firstOpToDump++;
+    }
+    for (int i = firstOpToDump; i < op->getNumOperands(); i++) {
       if (op->getOperand(i).isa<OpResult>()) {
-        dumpRiseExpression_recurse(op->getOperand(i).getDefiningOp(), args, indentLevel);
+        dumpRiseExpression_recurse(op->getOperand(i).getDefiningOp(), args, omitApplyNodes, printBinderTypes, indentLevel);
       } else {
         dumpRiseExpression_value(op->getOperand(i), args);
       }
@@ -311,13 +287,13 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
   if (op == nullptr) return;
   if (auto out = dyn_cast<OutOp>(op)) {
     llvm::dbgs() << "out = (\n";
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(out.getOperand(1)), args, indentLevel);
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(out.getOperand(1)), args, omitApplyNodes, printBinderTypes, indentLevel);
     llvm::dbgs() << ")\n";
 
     return;
   }
   if (auto apply = dyn_cast<ApplyOp>(op)) {
-    llvm::dbgs() << "App(";
+    if (!omitApplyNodes) llvm::dbgs() << "App(";
     dumpOperands(apply);
     llvm::dbgs() << ")";
     return;
@@ -328,15 +304,19 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     for (auto arg : lambda.region().front().getArguments()) {
       args.push_back(arg);
       llvm::dbgs() << "x" << args.size()-1;
+      if (printBinderTypes) {
+        llvm::dbgs() << " : ";
+        arg.getType().print(llvm::dbgs());
+      }
       if (arg != lambda.region().front().getArguments().back()) llvm::dbgs() << ",";
     }
-    llvm::dbgs() << "=>";
+    llvm::dbgs() << " =>";
     indentLevel++;
     indent();
 //    for (int i = 0; i < nestingLevel; i++) {
 //      llvm::dbgs() << "  ";
 //    }
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)), args, indentLevel);
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)), args, omitApplyNodes, printBinderTypes, indentLevel);
     llvm::dbgs() << ")";
     indentLevel--;
     indent();
@@ -347,12 +327,16 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     for (auto arg : embed.region().front().getArguments()) {
       args.push_back(arg);
       llvm::dbgs() << "e" << args.size()-1;
+      if (printBinderTypes) {
+        llvm::dbgs() << " : ";
+        arg.getType().print(llvm::dbgs());
+      }
       if (arg != embed.region().front().getArguments().back()) llvm::dbgs() << ",";
     }
-    llvm::dbgs() << "=> {";
+    llvm::dbgs() << " => {";
     indentLevel++;
     indent();
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)), args, indentLevel);
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)), args, omitApplyNodes, printBinderTypes, indentLevel);
     indent();
     llvm::dbgs() << "}, ";
     dumpOperands(embed);
@@ -360,18 +344,17 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     indentLevel--;
     return;
   }
-  if (auto mapSeq = dyn_cast<MapSeqOp>(op)) {
-    llvm::dbgs() << "mapSeq()";
-    return;
-  }
   if (auto split = dyn_cast<SplitOp>(op)) {
-    llvm::dbgs() << "split(" << split.n().getIntValue() << ")";
+    llvm::dbgs() << "split" << split.n().getIntValue() << ")";
     return;
   }
-
+  if (auto literal = dyn_cast<LiteralOp>(op)) {
+    llvm::dbgs() << "l(" << literal.literal() << ")";
+    return;
+  }
   // not first class printable op from RISE
   if (isa<RiseDialect>(op->getDialect())) {
-    llvm::dbgs() << op->getName().getStringRef().drop_front(5);
+    llvm::dbgs() << op->getName().getStringRef().drop_front(5) << "";
 //    dumpOperands(op);
     return;
   }
@@ -384,14 +367,28 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     });
     return;
   }
+  if (ModuleOp moduleOp = dyn_cast<ModuleOp>(op)) {
+    moduleOp.walk([&](Operation* op){
+      if (isa<OutOp>(op)) {
+        RiseDialect::dumpRiseExpression(op);
+        llvm::dbgs() << "\n";
+      }
+    });
+    return;
+  }
   // not first class printable op from another Dialect
   llvm::dbgs() << op->getName();
+  if (op->getNumOperands() > 0) {
+    llvm::dbgs() << "(";
+    dumpOperands(op);
+    llvm::dbgs() << ")";
+  }
 
 }
 
-void RiseDialect::dumpRiseExpression(Operation *op) {
+void RiseDialect::dumpRiseExpression(Operation *op, bool omitApplyNodes, bool printBinderTypes) {
   SmallVector<BlockArgument, 4> args;
-  dumpRiseExpression_recurse(op, args);
+  dumpRiseExpression_recurse(op, args, omitApplyNodes, printBinderTypes);
 }
 
 DataType RiseDialect::getAsDataType(Type type) {
