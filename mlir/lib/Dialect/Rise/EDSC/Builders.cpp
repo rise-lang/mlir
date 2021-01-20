@@ -262,6 +262,20 @@ Value mlir::edsc::abstraction::mapSeq2D(
 }
 
 Value mlir::edsc::abstraction::mapSeq2D(
+    Value lambda,
+    Value array2D) {
+  ArrayType arrayT = array2D.getType().dyn_cast<ArrayType>();
+  ArrayType nestedArrayT = arrayT.getElementType().dyn_cast<ArrayType>();
+  DataType outputElemType = RiseDialect::getFunTypeOutput(lambda.getType().dyn_cast<FunType>());
+  return mapSeq(
+      "scf", arrayType(nestedArrayT.getSize(), outputElemType),
+      [&](Value array) {
+        return mapSeq("scf", outputElemType, lambda, array);
+      },
+      array2D);
+}
+
+Value mlir::edsc::abstraction::mapSeq2D(
     DataType resultElemType, Value lambda,
     Value array2D) {
   ArrayType arrayT = array2D.getType().dyn_cast<ArrayType>();

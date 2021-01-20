@@ -48,6 +48,7 @@ ScalarType scalarF64Type();
 namespace abstraction {
 Value mapSeq2D(DataType resultElemType,
                function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
+Value mapSeq2D(Value lambda, Value array2D);
 Value mapSeq2D(DataType resultElemType, Value lambda, Value array2D);
 Value mapSeq2D(StringRef lowerTo, DataType resultElemType,
                function_ref<Value(BlockArgument)> bodyBuilder, Value array2D);
