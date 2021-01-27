@@ -235,7 +235,7 @@ void dumpRiseExpression_value(Value val, SmallVector<BlockArgument, 4> &args) {
     }
   }
   llvm::dbgs() << "x?";
-  emitWarning(val.getLoc()) << "Possible out of scope Value!";
+//  emitWarning(val.getLoc()) << "Possible out of scope Value!";
 }
 
 void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, bool omitApplyNodes, bool printBinderTypes, int indentLevel = 0) {

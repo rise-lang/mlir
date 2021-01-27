@@ -398,10 +398,12 @@ void PatternLowering::generateRecordMatch(Block *currentBlock, Block *nextBlock,
     rootKindAttr = builder.getStringAttr(*rootKind);
 
   builder.setInsertionPointToEnd(currentBlock);
-  builder.create<pdl_interp::RecordMatchOp>(
+  pdl_interp::RecordMatchOp recordMatchOp = builder.create<pdl_interp::RecordMatchOp>(
       pattern.getLoc(), mappedMatchValues, locOps.getArrayRef(),
       rewriterFuncRef, rootKindAttr, generatedOpsAttr, pattern.benefitAttr(),
       nextBlock);
+  if (Optional<StringRef> name = pattern.getName())
+    recordMatchOp->setAttr("name", builder.getStringAttr(*name));
 }
 
 SymbolRefAttr PatternLowering::generateRewriter(

@@ -40,11 +40,15 @@ PDLByteCodePattern PDLByteCodePattern::create(pdl_interp::RecordMatchOp matchOp,
   PatternBenefit benefit = matchOp.benefit();
   MLIRContext *ctx = matchOp.getContext();
 
+  StringRef name = "defaultName";
+  if (StringAttr nameAttr = matchOp->getAttrOfType<StringAttr>("name"))
+    name = nameAttr.getValue();
+
   // Check to see if this is pattern matches a specific operation type.
   if (Optional<StringRef> rootKind = matchOp.rootKind())
-    return PDLByteCodePattern(rewriterAddr, *rootKind, generatedOps, benefit,
+    return PDLByteCodePattern(rewriterAddr, name, *rootKind, generatedOps, benefit,
                               ctx);
-  return PDLByteCodePattern(rewriterAddr, generatedOps, benefit, ctx,
+  return PDLByteCodePattern(rewriterAddr, name, generatedOps, benefit, ctx,
                             MatchAnyOpTypeTag());
 }
 
@@ -1041,8 +1045,8 @@ void ByteCodeExecutor::execute(
       Value value = read<Value>();
       Operation *op = value ? value.getDefiningOp() : nullptr;
 
-      LLVM_DEBUG(llvm::dbgs() << "  * Value: " << value << "\n"
-                              << "  * Result: " << *op << "\n\n");
+      LLVM_DEBUG(llvm::dbgs() << "  * Value: " << "value" << "\n"
+                              << "  * Result: " << "*op" << "\n\n");
       memory[memIndex] = op;
       break;
     }
@@ -1084,13 +1088,14 @@ void ByteCodeExecutor::execute(
       unsigned index =
           opCode == GetResultN ? read<uint32_t>() : (opCode - GetResult0);
       Operation *op = read<Operation *>();
+
       unsigned memIndex = read();
       OpResult result =
           index < op->getNumResults() ? op->getResult(index) : OpResult();
 
-      LLVM_DEBUG(llvm::dbgs() << "  * Operation: " << *op << "\n"
+      LLVM_DEBUG(llvm::dbgs() << "  * Operation: " << "*op" << "\n"
                               << "  * Index: " << index << "\n"
-                              << "  * Result: " << result << "\n\n");
+                              << "  * Result: " << "result" << "\n\n");
       memory[memIndex] = result.getAsOpaquePointer();
       break;
     }

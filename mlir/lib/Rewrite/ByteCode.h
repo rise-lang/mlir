@@ -42,15 +42,17 @@ public:
 
   /// Return the bytecode address of the rewriter for this pattern.
   ByteCodeAddr getRewriterAddr() const { return rewriterAddr; }
+  StringRef getName() const { return name; }
 
 private:
   template <typename... Args>
-  PDLByteCodePattern(ByteCodeAddr rewriterAddr, Args &&...patternArgs)
+  PDLByteCodePattern(ByteCodeAddr rewriterAddr, StringRef name, Args &&...patternArgs)
       : Pattern(std::forward<Args>(patternArgs)...),
-        rewriterAddr(rewriterAddr) {}
+        rewriterAddr(rewriterAddr), name(name) {}
 
   /// The address of the rewriter for this pattern.
   ByteCodeAddr rewriterAddr;
+  StringRef name;
 };
 
 //===----------------------------------------------------------------------===//
