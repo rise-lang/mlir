@@ -39,6 +39,8 @@ using llvm::Twine;
 namespace mlir {
 namespace rise {
 
+#define DEBUG_TYPE "rise"
+
 /// Dialect creation
 RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx, TypeID::get<RiseDialect>()) {
   addOperations<
@@ -383,12 +385,53 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     dumpOperands(op);
     llvm::dbgs() << ")";
   }
-
 }
 
 void RiseDialect::dumpRiseExpression(Operation *op, bool omitApplyNodes, bool printBinderTypes) {
   SmallVector<BlockArgument, 4> args;
   dumpRiseExpression_recurse(op, args, omitApplyNodes, printBinderTypes);
+}
+
+int RiseDialect::getCostForSubexpression(Operation *op) {
+  if (!op) return -1;
+  auto setCost = [&](int cost) -> int {
+    op->setAttr("ksc.cost", IntegerAttr::get(IntegerType::get(op->getContext(), 32), cost));
+    return cost;
+  };
+  // cost of rise operations with a region i.e lambda, embed, loweringUnit
+  if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace() && op->getNumRegions() == 1) {
+    int riseRegionCost = 0;
+    op->getRegion(0).walk_shallow([&](Operation *nestedOp) {
+      LLVM_DEBUG({llvm::dbgs() << "Getting nested cost of op: " << nestedOp->getName() << " for region op:" << op->getName() << "\n";});
+      riseRegionCost += RiseDialect::getCostForSubexpression(nestedOp);
+    });
+    return setCost(riseRegionCost);
+  }
+  if (ApplyOp apply = dyn_cast<ApplyOp>(op)) {
+    if (MapSeqOp mapSeqOp = dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
+      int lambdaCost = RiseDialect::getCostForSubexpression(
+          apply->getOperand(1).getDefiningOp<LambdaOp>());
+      return setCost(mapSeqOp.n().getIntValue() * lambdaCost);
+    } else if (ReduceSeqOp reduceSeqOp =
+                   dyn_cast<ReduceSeqOp>(apply.fun().getDefiningOp())) {
+      int lambdaCost = RiseDialect::getCostForSubexpression(
+          apply->getOperand(1).getDefiningOp<LambdaOp>());
+      return setCost(reduceSeqOp.n().getIntValue() * lambdaCost);
+    } else if (JoinOp join = dyn_cast<JoinOp>(apply.fun().getDefiningOp())) {
+      return setCost(4);
+    } else if (SplitOp split = dyn_cast<SplitOp>(apply.fun().getDefiningOp())) {
+      return setCost(4);
+    } else if (SlideOp slide = dyn_cast<SlideOp>(apply.fun().getDefiningOp())) {
+      return setCost(2);
+    } else if (PadOp pad = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
+      return setCost(3);
+    }
+  }
+  // only applied rise operations have a cost
+  if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace())
+    return setCost(0);
+
+  return setCost(1);
 }
 
 DataType RiseDialect::getAsDataType(Type type) {

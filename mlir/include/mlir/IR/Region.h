@@ -264,6 +264,15 @@ public:
     return WalkResult::advance();
   }
 
+  /// Walk the operations in this region in postorder, calling the callback for
+  /// each operation without entering the regions of nested ops.
+  template <typename FnT, typename RetT = detail::walkResultType<FnT>>
+  typename std::enable_if<std::is_same<RetT, void>::value, RetT>::type
+  walk_shallow(FnT &&callback) {
+    for (auto &block : *this)
+      block.walk_shallow(callback);
+  }
+
   //===--------------------------------------------------------------------===//
   // CFG view utilities
   //===--------------------------------------------------------------------===//

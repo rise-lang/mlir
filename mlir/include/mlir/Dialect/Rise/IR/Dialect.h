@@ -58,6 +58,7 @@ public:
 
   static void dumpRiseExpression(Operation *op, bool omitApplyNode = true,
                                  bool printBinderTypes = true);
+  static int getCostForSubexpression(Operation *op);
   static DataType getAsDataType(Type type);
   static DataType getFunTypeOutput(FunType funType);
   void initialize();
