@@ -32,6 +32,8 @@ using namespace mlir;
 using namespace mlir::rise;
 using namespace mlir::edsc;
 
+#define DEBUG_TYPE "rise_lowering"
+
 namespace {
 struct ConvertRiseToImperativePass
     : public RiseToImperativeBase<ConvertRiseToImperativePass> {
@@ -185,9 +187,9 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
       return;
     if (isa<ApplyOp>(inst) || isa<LambdaOp>(inst) || isa<MapSeqOp>(inst) ||
         isa<MapParOp>(inst) || isa<MapOp>(inst) || isa<ReduceSeqOp>(inst) ||
-        isa<OutOp>(inst) || isa<LiteralOp>(inst) || isa<mlir::rise::TransposeOp>(inst) ||
-        isa<SplitOp>(inst) || isa<JoinOp>(inst) || isa<SlideOp>(inst) ||
-        isa<PadOp>(inst)) {
+        isa<OutOp>(inst) || isa<LiteralOp>(inst) ||
+        isa<mlir::rise::TransposeOp>(inst) || isa<SplitOp>(inst) ||
+        isa<JoinOp>(inst) || isa<SlideOp>(inst) || isa<PadOp>(inst)) {
       if (!inst->getParentOfType<LambdaOp>()) {
         leftoverOps.push_back(inst);
       }
@@ -202,8 +204,10 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     rewriter.eraseOp(op);
   }
 
-  emitRemark(funcOp.getLoc())
-      << "lowerAndStore finished. Starting resolving indicees.";
+  LLVM_DEBUG({
+    llvm::dbgs() << funcOp.getLoc()
+                 << "lowerAndStore finished. Starting resolving indicees.";
+  });
 
   SmallVector<rise::AssignOp, 10> assignOps;
   block.walk([&assignOps](Operation *inst) {
@@ -220,8 +224,10 @@ void RiseToImperativePattern::rewrite(FuncOp funcOp,
     for (rise::AssignOp assign : assignOps) {
       lowerAssign(assign, rewriter);
     }
-    emitRemark(funcOp.getLoc())
-        << "Resolving indicees finished. Starting Cleanup.";
+    LLVM_DEBUG({
+      llvm::dbgs() << funcOp.getLoc()
+                   << "Resolving indicees finished. Starting Cleanup.";
+    });
   }
 
   //   cleanup:
@@ -286,54 +292,61 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
 
     // Dispatch to the correct lowerAndStore
     if (ReduceSeqOp reduceSeqOp = dyn_cast<ReduceSeqOp>(appliedFun)) {
-      emitRemark(reduceSeqOp.getLoc()) << "lowerAndStore of ReduceSeq";
+      LLVM_DEBUG({
+        llvm::dbgs() << reduceSeqOp.getLoc() << "lowerAndStore of ReduceSeq";
+      });
       lowerAndStoreReduceSeq(reduceSeqOp.nAttr(), reduceSeqOp.sAttr(),
                              reduceSeqOp.tAttr(), apply.getOperand(1),
                              apply.getOperand(2), apply.getOperand(3), out,
                              reduceSeqOp.getLoc(), rewriter, loweringTarget);
       return;
     } else if (MapSeqOp mapSeqOp = dyn_cast<MapSeqOp>(appliedFun)) {
-      emitRemark(mapSeqOp.getLoc()) << "lowerAndStore of MapSeq";
+      LLVM_DEBUG(
+          { llvm::dbgs() << mapSeqOp.getLoc() << "lowerAndStore of MapSeq"; });
       lowerAndStoreMapSeq(mapSeqOp.nAttr(), mapSeqOp.sAttr(), mapSeqOp.tAttr(),
                           apply.getOperand(1), apply.getOperand(2), out,
                           mapSeqOp.getLoc(), rewriter, loweringTarget);
       return;
     } else if (MapParOp mapParOp = dyn_cast<MapParOp>(appliedFun)) {
-      emitRemark(mapParOp.getLoc())
-          << "lowerAndStore of MapPar, currently not generating parallel code!";
+      LLVM_DEBUG({
+        llvm::dbgs() << mapParOp.getLoc()
+                     << "lowerAndStore of MapPar, currently not generating "
+                        "parallel code!";
+      });
       lowerAndStoreMapSeq(mapParOp.nAttr(), mapParOp.sAttr(), mapParOp.tAttr(),
                           apply.getOperand(1), apply.getOperand(2), out,
                           mapParOp.getLoc(), rewriter, loweringTarget);
       return;
     } else if (MapOp mapOp = dyn_cast<MapOp>(appliedFun)) {
-      emitError(appliedFun->getLoc()) << "lowerAndStore of Map unsupported!";
+      LLVM_DEBUG({llvm::dbgs() << appliedFun->getLoc() << "lowerAndStore of Map unsupported!\n";});
       return;
     } else if (FstOp fstOp = dyn_cast<FstOp>(appliedFun)) {
-      emitRemark(fstOp.getLoc()) << "lowerAndStore of Fst";
+      LLVM_DEBUG({llvm::dbgs() << fstOp.getLoc() << "lowerAndStore of Fst\n";});
       lowerAndStoreFst(apply.getOperand(1), out, fstOp.getLoc(), rewriter);
       return;
     } else if (SndOp sndOp = dyn_cast<SndOp>(appliedFun)) {
-      emitRemark(sndOp.getLoc()) << "lowerAndStore of Snd";
+      LLVM_DEBUG({llvm::dbgs() << sndOp.getLoc() << "lowerAndStore of Snd\n";});
       lowerAndStoreSnd(apply.getOperand(1), out, sndOp.getLoc(), rewriter);
       return;
     } else if (SplitOp splitOp = dyn_cast<SplitOp>(appliedFun)) {
-      emitRemark(splitOp.getLoc()) << "lowerAndStore of Split";
+      LLVM_DEBUG({llvm::dbgs() << splitOp.getLoc() << "lowerAndStore of Split\n";});
       lowerAndStoreSplit(splitOp.nAttr(), splitOp.mAttr(), splitOp.tAttr(),
                          apply.getOperand(1), out, splitOp.getLoc(), rewriter);
       return;
     } else if (JoinOp joinOp = dyn_cast<JoinOp>(appliedFun)) {
-      emitRemark(joinOp.getLoc()) << "lowerAndStore of Join";
+      LLVM_DEBUG({llvm::dbgs() << joinOp.getLoc() << "lowerAndStore of Join\n";});
       lowerAndStoreJoin(joinOp.nAttr(), joinOp.mAttr(), joinOp.tAttr(),
                         apply.getOperand(1), out, joinOp.getLoc(), rewriter);
       return;
-    } else if (mlir::rise::TransposeOp transposeOp = dyn_cast<mlir::rise::TransposeOp>(appliedFun)) {
-      emitRemark(transposeOp.getLoc()) << "lowerAndStore of Transpose";
+    } else if (mlir::rise::TransposeOp transposeOp =
+                   dyn_cast<mlir::rise::TransposeOp>(appliedFun)) {
+      LLVM_DEBUG({llvm::dbgs() << transposeOp.getLoc() << "lowerAndStore of Transpose\n";});
       lowerAndStoreTranspose(transposeOp.nAttr(), transposeOp.mAttr(),
                              transposeOp.tAttr(), apply.getOperand(1), out,
                              transposeOp.getLoc(), rewriter);
       return;
     } else if (LambdaOp lambdaOp = dyn_cast<LambdaOp>(appliedFun)) {
-      emitRemark(appliedFun->getLoc()) << "lowerAndStore of Lambda";
+      LLVM_DEBUG({llvm::dbgs() << appliedFun->getLoc() << "lowerAndStore of Lambda\n";});
       SmallVector<Value, 10> args = SmallVector<Value, 10>();
       for (int i = apply.getNumOperands() - 1; i > 0; i--) {
         args.push_back(apply.getOperand(i));
@@ -346,8 +359,8 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
       lowerAndStore(returnOp.getOperand(0), out, rewriter);
       return;
     }
-    emitRemark(appliedFun->getLoc())
-        << "Can't lower the application of op: " << appliedFun->getName();
+    LLVM_DEBUG({llvm::dbgs() << appliedFun->getLoc()
+        << "Can't lower the application of op: " << appliedFun->getName();});
     return;
   }
 
@@ -363,7 +376,7 @@ void lowerAndStore(Value expr, Value out, PatternRewriter &rewriter) {
     return;
   }
   if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
-    emitRemark(expr.getLoc()) << "lowerAndStore of EmbedOp.";
+    LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lowerAndStore of EmbedOp.\n";});
     assert(
         embedOp.getNumOperands() ==
             embedOp.region().front().getNumArguments() &&
@@ -389,35 +402,35 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
   auto oldInsertPoint = rewriter.saveInsertionPoint();
 
   if (!expr.isa<OpResult>()) {
-    emitRemark(expr.getLoc())
-        << "cannot perform continuation for BlockArg, leaving as is.";
+    LLVM_DEBUG({llvm::dbgs() << expr.getLoc()
+        << "cannot perform continuation for BlockArg, leaving as is.\n";});
     return expr;
   }
   if (LiteralOp literalOp = dyn_cast<LiteralOp>(expr.getDefiningOp())) {
-    emitRemark(literalOp.getLoc()) << "lower of Literal";
+    LLVM_DEBUG({llvm::dbgs() << literalOp.getLoc() << "lower of Literal\n";});
     Value lowered =
         lowerLiteral(literalOp.getResult(), literalOp.getLoc(), rewriter);
     rewriter.restoreInsertionPoint(oldInsertPoint);
     return lowered;
   } else if (ApplyOp apply = dyn_cast<ApplyOp>(expr.getDefiningOp())) {
     if (ZipOp zipOp = dyn_cast<ZipOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Zip";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Zip\n";});
       return lowerZip(apply.getOperand(1), apply.getOperand(2), zipOp.getLoc(),
                       rewriter);
     } else if (FstOp fst = dyn_cast<FstOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Fst";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Fst\n";});
       return lowerFst(apply.getOperand(1), fst.getLoc(), rewriter);
     } else if (SndOp snd = dyn_cast<SndOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Snd";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Snd\n";});
       return lowerSnd(apply.getOperand(1), snd.getLoc(), rewriter);
     } else if (SplitOp splitOp =
                    dyn_cast<SplitOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied split";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied split\n";});
       return lowerSplit(splitOp.nAttr(), splitOp.mAttr(), splitOp.tAttr(),
                         apply.getType(), apply.getOperand(1), splitOp.getLoc(),
                         rewriter);
     } else if (JoinOp joinOp = dyn_cast<JoinOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "ConT of Applied join";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "ConT of Applied join\n";});
       auto arrayCont =
           lower(apply.getOperand(1), rewriter.getInsertionPoint(), rewriter);
       auto joinInterm = rewriter.create<JoinIntermediateOp>(
@@ -425,62 +438,66 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
           joinOp.mAttr(), joinOp.tAttr());
       return joinInterm;
     } else if (mlir::rise::TransposeOp transposeOp =
-                   dyn_cast<mlir::rise::TransposeOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied transpose";
+                   dyn_cast<mlir::rise::TransposeOp>(
+                       apply.fun().getDefiningOp())) {
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied transpose\n";});
       return lowerTranspose(
           transposeOp.nAttr(), transposeOp.mAttr(), transposeOp.tAttr(),
           apply.getType(), apply.getOperand(1), transposeOp.getLoc(), rewriter);
     } else if (SlideOp slideOp =
                    dyn_cast<SlideOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Slide";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Slide\n";});
       return lowerSlide(slideOp.nAttr(), slideOp.szAttr(), slideOp.spAttr(),
                         slideOp.tAttr(), apply.getType(), apply.getOperand(1),
                         slideOp.getLoc(), rewriter);
     } else if (PadOp padOp = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Pad";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Pad\n";});
       return lowerPad(padOp.nAttr(), padOp.lAttr(), padOp.rAttr(),
                       padOp.tAttr(), apply.getType(), apply.getOperand(1),
                       padOp.getLoc(), rewriter);
     } else if (MapSeqOp mapSeqOp =
                    dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied MapSeq";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied MapSeq\n";});
       return lowerMapSeq(mapSeqOp.nAttr(), mapSeqOp.sAttr(), mapSeqOp.tAttr(),
                          apply.getResult(), mapSeqOp.getLoc(), rewriter);
     } else if (MapParOp mapParOp =
                    dyn_cast<MapParOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc())
-          << "lower of Applied MapPar, currently not generating parallel code!";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc()
+          << "lower of Applied MapPar, currently not generating parallel code!\n";});
       return lowerMapSeq(mapParOp.nAttr(), mapParOp.sAttr(), mapParOp.tAttr(),
                          apply.getResult(), mapParOp.getLoc(), rewriter);
     } else if (MapOp mapOp = dyn_cast<MapOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Map";
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Applied Map\n";});
       return lowerMap(mapOp.nAttr(), mapOp.sAttr(), mapOp.tAttr(),
                       dyn_cast<LambdaOp>(apply.getOperand(1).getDefiningOp()),
                       apply.getOperand(2), apply.getType(), mapOp.getLoc(),
                       rewriter);
-    } else if (LambdaOp lambdaOp = dyn_cast<LambdaOp>(apply.fun().getDefiningOp())) {
-      emitRemark(expr.getLoc()) << "lower of Applied Lambda, performing on the fly beta reduction!";
+    } else if (LambdaOp lambdaOp =
+                   dyn_cast<LambdaOp>(apply.fun().getDefiningOp())) {
+      LLVM_DEBUG({llvm::dbgs() << expr.getLoc()
+          << "lower of Applied Lambda, performing on the fly beta reduction!\n";});
       SmallVector<Value, 10> args = SmallVector<Value, 10>();
       for (int i = apply.getNumOperands() - 1; i > 0; i--) {
         args.push_back(apply.getOperand(i));
       }
       Substitute(lambdaOp, args);
-      Value lambdaResult = lambdaOp.getRegion().front().getTerminator()->getOperand(0);
+      Value lambdaResult =
+          lambdaOp.getRegion().front().getTerminator()->getOperand(0);
       apply.getOperation()->getBlock()->getOperations().splice(
-          Block::iterator(apply),
-          lambdaOp.getRegion().front().getOperations(),
-          lambdaOp.getRegion().front().begin(), Block::iterator(lambdaOp.getRegion().front().getTerminator()));
+          Block::iterator(apply), lambdaOp.getRegion().front().getOperations(),
+          lambdaOp.getRegion().front().begin(),
+          Block::iterator(lambdaOp.getRegion().front().getTerminator()));
       // remove both apply and lambda
       apply.replaceAllUsesWith(lambdaResult);
 
       rewriter.eraseOp(apply);
-//      rewriter.eraseOp(lambdaOp);
+      //      rewriter.eraseOp(lambdaOp);
       return lower(lambdaResult, rewriter.getInsertionPoint(), rewriter);
     }
     emitError(apply.getLoc()) << "Cannot perform lowering for this apply!";
     return expr;
   } else if (EmbedOp embedOp = dyn_cast<EmbedOp>(expr.getDefiningOp())) {
-    emitRemark(expr.getLoc()) << "lower of Embed";
+    LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of Embed\n";});
 
     // Translating all operands
     for (int i = 0; i < embedOp.getOperands().size(); i++) {
@@ -496,17 +513,17 @@ mlir::Value lower(mlir::Value expr, Block::iterator contLocation,
     // This the embedded operations will be inlined later
     return embedOp.getResult();
   } else if (InOp inOp = dyn_cast<InOp>(expr.getDefiningOp())) {
-    emitRemark(expr.getLoc()) << "lower of In";
+    LLVM_DEBUG({llvm::dbgs() << expr.getLoc() << "lower of In\n";});
 
     // we dont return the lowered of this to stay in our type system. This will
     // be resolved in the codeGen stage of the translation.
     return expr;
   }
 
-  emitRemark(expr.getLoc())
+  LLVM_DEBUG({llvm::dbgs() << expr.getLoc()
       << "cannot perform lowering of "
       << expr.getDefiningOp()->getName().getStringRef().str()
-      << " leaving Value as is.";
+      << " leaving Value as is."; });
 
   rewriter.restoreInsertionPoint(oldInsertPoint);
 
@@ -903,7 +920,7 @@ mlir::Value lowerPad(NatAttr n, NatAttr l, NatAttr r, DataTypeAttr t, Type type,
 
 void lowerAssign(AssignOp assignOp, PatternRewriter &rewriter) {
   Location loc = assignOp.getLoc();
-  emitRemark(loc) << "Lowering Assignment";
+  LLVM_DEBUG({llvm::dbgs() << loc << "Lowering Assignment\n";});
   if (assignOp.value().isa<OpResult>()) {
     rewriter.setInsertionPoint(assignOp);
   } else {
@@ -924,22 +941,22 @@ resolveStoreIndexing(Value storeLocation, Value val,
                      SmallVector<OutputPathType, 10> path,
                      PatternRewriter &rewriter) {
   if (!storeLocation.isa<OpResult>()) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for BlockArg";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for BlockArg\n";});
     generateReadAccess(path, val, storeLocation, rewriter);
     return path;
   }
 
   if (IdxOp idx = dyn_cast<IdxOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for idx";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for idx\n";});
 
     path.push_back(idx.iv());
     return resolveStoreIndexing(idx.array(), val, path, rewriter);
   } else if (CastOp castOp = dyn_cast<CastOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for cast";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for cast\n";});
     return resolveStoreIndexing(castOp.getOperand(), val, path, rewriter);
   } else if (JoinAccIntermediateOp joinAccOp = dyn_cast<JoinAccIntermediateOp>(
                  storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for joinAcc";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for joinAcc\n";});
     auto i = mpark::get<Value>(path.pop_back_val());
     auto j = mpark::get<Value>(path.pop_back_val());
 
@@ -957,7 +974,7 @@ resolveStoreIndexing(Value storeLocation, Value val,
   } else if (SplitAccIntermediateOp splitAccOp =
                  dyn_cast<SplitAccIntermediateOp>(
                      storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for splitAcc";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for splitAcc\n";});
     auto loc = splitAccOp.getLoc();
     auto lhs = mpark::get<Value>(path.pop_back_val());
     auto rhs =
@@ -980,7 +997,7 @@ resolveStoreIndexing(Value storeLocation, Value val,
   } else if (TransposeAccIntermediateOp transposeAccIntermediateOp =
                  dyn_cast<TransposeAccIntermediateOp>(
                      storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for transposeAcc";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for transposeAcc\n";});
     auto i = mpark::get<Value>(path.pop_back_val());
     auto j = mpark::get<Value>(path.pop_back_val());
     path.push_back(i);
@@ -990,7 +1007,7 @@ resolveStoreIndexing(Value storeLocation, Value val,
                                 path, rewriter);
   } else if (EmbedOp embedOp =
                  dyn_cast<EmbedOp>(storeLocation.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveStoreIndexing for embed";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveStoreIndexing for embed\n";});
     assert(embedOp.getNumOperands() == 0 &&
            "codegenstore for embed with operands not handled yet.");
 
@@ -1024,10 +1041,10 @@ resolveStoreIndexing(Value storeLocation, Value val,
     return path;
   }
 
-  emitRemark(storeLocation.getLoc())
+  LLVM_DEBUG({llvm::dbgs() << storeLocation.getLoc()
       << "resolveStoreIndexing for "
       << storeLocation.getDefiningOp()->getName().getStringRef().str()
-      << " generating read access.";
+      << " generating read access.\n";});
 
   generateReadAccess(path, val, storeLocation, rewriter);
   return path;
@@ -1037,12 +1054,12 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
                       PatternRewriter &rewriter) {
 
   if (!val.isa<OpResult>()) {
-    emitRemark(val.getLoc())
-        << "reached a blockArg in resolveIndexing, reversing";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc()
+        << "reached a blockArg in resolveIndexing, reversing\n";});
     return generateWriteAccess(path, val, rewriter);
   }
   if (EmbedOp embedOp = dyn_cast<EmbedOp>(val.getDefiningOp())) {
-    emitRemark(embedOp.getLoc()) << "resolveIndexing for Embed";
+    LLVM_DEBUG({llvm::dbgs() << embedOp.getLoc() << "resolveIndexing for Embed\n";});
     auto oldInsertPoint = rewriter.saveInsertionPoint();
     rewriter.setInsertionPointAfter(embedOp);
 
@@ -1080,20 +1097,20 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return embedReturn.getOperand(0);
 
   } else if (IdxOp idx = dyn_cast<IdxOp>(val.getDefiningOp())) {
-    emitRemark(idx.getLoc()) << "resolveIndexing for idx";
+    LLVM_DEBUG({llvm::dbgs() << idx.getLoc() << "resolveIndexing for idx\n";});
 
     Value iv = idx.iv();
     path.push_back(iv);
     return resolveIndexing(idx.array(), path, rewriter);
   } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
-    emitRemark(alloc.getLoc()) << "resolveIndexing for alloc";
+    LLVM_DEBUG({llvm::dbgs() << alloc.getLoc() << "resolveIndexing for alloc\n";});
 
     // call to reverse here.
     return generateWriteAccess(path, alloc.getResult(), rewriter);
   } else if (MapReadIntermediateOp mapReadOp =
                  dyn_cast<MapReadIntermediateOp>(val.getDefiningOp())) {
 
-    emitRemark(mapReadOp.getLoc()) << "resolveIndexing for MapRead";
+    LLVM_DEBUG({llvm::dbgs() << mapReadOp.getLoc() << "resolveIndexing for MapRead\n";});
 
     auto i = mpark::get<Value>(path.pop_back_val());
     auto idx = rewriter.create<IdxOp>(
@@ -1105,7 +1122,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(mapReadOp.f(), path, rewriter);
   } else if (ZipIntermediateOp zipIntermOp =
                  dyn_cast<ZipIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(zipIntermOp.getLoc()) << "resolveIndexing for zip";
+    LLVM_DEBUG({llvm::dbgs() << zipIntermOp.getLoc() << "resolveIndexing for zip\n";});
     OutputPathType sndLastElem = path[path.size() - 2];
     int *fst = mpark::get_if<int>(&sndLastElem);
 
@@ -1122,7 +1139,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
   } else if (FstIntermediateOp fstIntermOp =
                  dyn_cast<FstIntermediateOp>(val.getDefiningOp())) {
     // printPath(path, "fst");
-    emitRemark(fstIntermOp.getLoc()) << "resolveIndexing for fst";
+    LLVM_DEBUG({llvm::dbgs() << fstIntermOp.getLoc() << "resolveIndexing for fst\n";});
 
     path.push_back(true);
     return resolveIndexing(fstIntermOp.value(), path, rewriter);
@@ -1130,18 +1147,18 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
   } else if (SndIntermediateOp sndIntermOp =
                  dyn_cast<SndIntermediateOp>(val.getDefiningOp())) {
     // printPath(path, "snd");
-    emitRemark(sndIntermOp.getLoc()) << "resolveIndexing for snd";
+    LLVM_DEBUG({llvm::dbgs() << sndIntermOp.getLoc() << "resolveIndexing for snd\n";});
 
     path.push_back(false);
     return resolveIndexing(sndIntermOp.value(), path, rewriter);
 
   } else if (isa<LoadOp>(val.getDefiningOp()) ||
              isa<AffineLoadOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Load";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Load\n";});
     return val;
   } else if (SplitIntermediateOp splitIntermediateOp =
                  dyn_cast<SplitIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Split";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Split\n";});
 
     auto i = mpark::get<Value>(path.pop_back_val());
     auto j = mpark::get<Value>(path.pop_back_val());
@@ -1162,7 +1179,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(splitIntermediateOp.value(), path, rewriter);
   } else if (JoinIntermediateOp joinIntermediateOp =
                  dyn_cast<JoinIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Join";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Join\n";});
 
     auto loc = joinIntermediateOp.getLoc();
     auto lhs = mpark::get<Value>(path.pop_back_val());
@@ -1187,7 +1204,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(joinIntermediateOp.value(), path, rewriter);
   } else if (TransposeIntermediateOp transposeIntermediateOp =
                  dyn_cast<TransposeIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Transpose";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Transpose\n";});
     auto n = path.pop_back_val();
     auto m = path.pop_back_val();
 
@@ -1198,7 +1215,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
                            rewriter);
   } else if (SlideIntermediateOp slideIntermediateOp =
                  dyn_cast<SlideIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Slide";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Slide\n";});
 
     Value i = mpark::get<Value>(path.pop_back_val());
     Value j = mpark::get<Value>(path.pop_back_val());
@@ -1226,7 +1243,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     return resolveIndexing(slideIntermediateOp.value(), path, rewriter);
   } else if (PadIntermediateOp padIntermediateOp =
                  dyn_cast<PadIntermediateOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Pad";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Pad\n";});
     Location loc = padIntermediateOp.getLoc();
 
     Value i = mpark::get<Value>(path.pop_back_val());
@@ -1271,20 +1288,20 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
 
     return resolveIndexing(padIntermediateOp.array(), path, rewriter);
   } else if (InOp inOp = dyn_cast<InOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc())
-        << "resolveIndexing for In, generating read operation for operand";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc()
+        << "resolveIndexing for In, generating read operation for operand\n";});
     return generateWriteAccess(path, inOp.input(), rewriter);
   } else if (CastOp castOp = dyn_cast<CastOp>(val.getDefiningOp())) {
-    emitRemark(val.getLoc()) << "resolveIndexing for Cast, reversing";
+    LLVM_DEBUG({llvm::dbgs() << val.getLoc() << "resolveIndexing for Cast, reversing\n";});
     return generateWriteAccess(path, castOp.getOperand(), rewriter);
   }
 
-  emitRemark(val.getLoc())
+  LLVM_DEBUG({llvm::dbgs() << val.getLoc()
       << "I don't know how to do resolveIndexing for: "
       << val.getDefiningOp()->getName().getStringRef().str()
       << " this is prob. an operation from another dialect. We walk "
          "recursively through the operands until we hit something we can "
-         "do resolveIndexing for.";
+         "do resolveIndexing for.\n";});
 
   int i = 0;
   for (auto operand : (val.getDefiningOp()->getOperands())) {
@@ -1431,7 +1448,7 @@ void ConvertRiseToImperativePass::runOnFunction() {
   bool erased;
 
   applyOpPatternsAndFold(module, std::move(patterns), &erased);
-//  applyFullConversion(module, target, patterns);
+  //  applyFullConversion(module, target, patterns);
   return;
 }
 
