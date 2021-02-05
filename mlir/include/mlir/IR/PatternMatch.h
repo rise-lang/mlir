@@ -42,7 +42,7 @@ public:
   /// If the corresponding pattern can match, return its benefit.  If the
   // corresponding pattern isImpossibleToMatch() then this aborts.
   unsigned short getBenefit() const;
-
+  int benefit;
   bool operator==(const PatternBenefit &rhs) const {
     return representation == rhs.representation;
   }
