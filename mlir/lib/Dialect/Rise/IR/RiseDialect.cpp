@@ -286,6 +286,24 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
       if (i < op->getNumOperands()-1) llvm::dbgs() << ",";
     }
   };
+  auto changeColor = [&](Operation *op) -> void {
+    Operation *opColored = op;
+    // for rise patterns the color is only in its apply operation
+    if (!op->getUsers().empty() && !isa<EmbedOp>(op) && !isa<ApplyOp>(op) && op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace()) {
+      opColored = *op->getUsers().begin();
+    }
+
+    if (auto embeddingAttr = opColored->getAttrOfType<ArrayAttr>("ksc.color")) {
+      // interpreting first three components of color as rgb
+      int r = embeddingAttr.getValue()[0].dyn_cast<FloatAttr>().getValue().convertToFloat() * 255;
+      int g = embeddingAttr.getValue()[1].dyn_cast<FloatAttr>().getValue().convertToFloat() * 255;
+      int b = embeddingAttr.getValue()[1].dyn_cast<FloatAttr>().getValue().convertToFloat() * 255;
+      llvm::dbgs() << "\x1b[38;2;" << r << ";" << g << ";" << b << "m";
+    }
+  };
+  auto resetColor = [&]() -> void {
+    llvm::dbgs() << "\x1b[0m";
+  };
   if (op == nullptr) return;
   if (auto out = dyn_cast<OutOp>(op)) {
     llvm::dbgs() << "out = (\n";
@@ -295,7 +313,9 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     return;
   }
   if (auto apply = dyn_cast<ApplyOp>(op)) {
+    changeColor(op);
     if (!omitApplyNodes) llvm::dbgs() << "App(";
+    resetColor();
     dumpOperands(apply);
     llvm::dbgs() << ")";
     return;
@@ -325,7 +345,9 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     return;
   }
   if (auto embed = dyn_cast<EmbedOp>(op)) {
+    changeColor(embed);
     llvm::dbgs() << "embed(";
+    resetColor();
     for (auto arg : embed.region().front().getArguments()) {
       args.push_back(arg);
       llvm::dbgs() << "e" << args.size()-1;
@@ -347,16 +369,22 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     return;
   }
   if (auto split = dyn_cast<SplitOp>(op)) {
+    changeColor(split);
     llvm::dbgs() << "split" << split.n().getIntValue() << ")";
+    resetColor();
     return;
   }
   if (auto literal = dyn_cast<LiteralOp>(op)) {
+    changeColor(literal);
     llvm::dbgs() << "l(" << literal.literal() << ")";
+    resetColor();
     return;
   }
   // not first class printable op from RISE
   if (isa<RiseDialect>(op->getDialect())) {
+    changeColor(op);
     llvm::dbgs() << op->getName().getStringRef().drop_front(5) << "";
+    resetColor();
 //    dumpOperands(op);
     return;
   }
@@ -379,7 +407,9 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     return;
   }
   // not first class printable op from another Dialect
+  changeColor(op);
   llvm::dbgs() << op->getName();
+  resetColor();
   if (op->getNumOperands() > 0) {
     llvm::dbgs() << "(";
     dumpOperands(op);
@@ -392,12 +422,25 @@ void RiseDialect::dumpRiseExpression(Operation *op, bool omitApplyNodes, bool pr
   dumpRiseExpression_recurse(op, args, omitApplyNodes, printBinderTypes);
 }
 
-int RiseDialect::getCostForSubexpression(Operation *op) {
+int RiseDialect::getCostForSubexpression(Operation *op, bool propagateUp) {
   if (!op) return -1;
-  auto setCost = [&](int cost) -> int {
-    op->setAttr("ksc.cost", IntegerAttr::get(IntegerType::get(op->getContext(), 32), cost));
+  std::function<int(Operation*, int)> setCost = [&](Operation *op, int cost) -> int {
+    if (propagateUp) {
+      Operation *parentOp = op;
+      int oldOpCost = 0;
+      if (op->getAttrOfType<IntegerAttr>("rise.cost"))
+        oldOpCost = op->getAttrOfType<IntegerAttr>("rise.cost").getInt();
+      while(parentOp = parentOp->getParentOp()) {
+        if (!parentOp->getAttrOfType<IntegerAttr>("rise.cost"))
+          break;
+        int oldParentCost = parentOp->getAttrOfType<IntegerAttr>("rise.cost").getInt();
+        setCost(parentOp, oldParentCost - oldOpCost + cost);
+      }
+    }
+    op->setAttr("rise.cost", IntegerAttr::get(IntegerType::get(op->getContext(), 32), cost));
     return cost;
   };
+
   // cost of rise operations with a region i.e lambda, embed, loweringUnit
   if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace() && op->getNumRegions() == 1) {
     int riseRegionCost = 0;
@@ -405,33 +448,35 @@ int RiseDialect::getCostForSubexpression(Operation *op) {
       LLVM_DEBUG({llvm::dbgs() << "Getting nested cost of op: " << nestedOp->getName() << " for region op:" << op->getName() << "\n";});
       riseRegionCost += RiseDialect::getCostForSubexpression(nestedOp);
     });
-    return setCost(riseRegionCost);
+    return setCost(op, riseRegionCost);
   }
   if (ApplyOp apply = dyn_cast<ApplyOp>(op)) {
     if (MapSeqOp mapSeqOp = dyn_cast<MapSeqOp>(apply.fun().getDefiningOp())) {
       int lambdaCost = RiseDialect::getCostForSubexpression(
           apply->getOperand(1).getDefiningOp<LambdaOp>());
-      return setCost(mapSeqOp.n().getIntValue() * lambdaCost);
+      return setCost(op, 1 + mapSeqOp.n().getIntValue() * lambdaCost);
     } else if (ReduceSeqOp reduceSeqOp =
                    dyn_cast<ReduceSeqOp>(apply.fun().getDefiningOp())) {
       int lambdaCost = RiseDialect::getCostForSubexpression(
           apply->getOperand(1).getDefiningOp<LambdaOp>());
-      return setCost(reduceSeqOp.n().getIntValue() * lambdaCost);
+      return setCost(op, 2 + reduceSeqOp.n().getIntValue() * lambdaCost);
+    } else if (LambdaOp lambda = dyn_cast<LambdaOp>(apply.fun().getDefiningOp())) {
+      return setCost(op, RiseDialect::getCostForSubexpression(lambda));
     } else if (JoinOp join = dyn_cast<JoinOp>(apply.fun().getDefiningOp())) {
-      return setCost(4);
+      return setCost(op, 4);
     } else if (SplitOp split = dyn_cast<SplitOp>(apply.fun().getDefiningOp())) {
-      return setCost(4);
+      return setCost(op, 4);
     } else if (SlideOp slide = dyn_cast<SlideOp>(apply.fun().getDefiningOp())) {
-      return setCost(2);
+      return setCost(op, 2);
     } else if (PadOp pad = dyn_cast<PadOp>(apply.fun().getDefiningOp())) {
-      return setCost(3);
+      return setCost(op, 3);
     }
   }
   // only applied rise operations have a cost
   if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace())
-    return setCost(0);
+    return setCost(op, 0);
 
-  return setCost(1);
+  return setCost(op, 1);
 }
 
 DataType RiseDialect::getAsDataType(Type type) {
