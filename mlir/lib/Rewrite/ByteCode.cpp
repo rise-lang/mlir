@@ -1122,8 +1122,11 @@ void ByteCodeExecutor::execute(
       assert(matches &&
              "expected matches to be provided when executing the matcher");
       unsigned patternIndex = read();
+//      llvm::dbgs() << "patternIndex:" << patternIndex << "\n";
       PatternBenefit benefit = currentPatternBenefits[patternIndex];
-      const ByteCodeField *dest = &code[read<ByteCodeAddr>()];
+      auto tmp = read<ByteCodeAddr>();
+      const ByteCodeField *dest = &code[tmp];
+//      llvm::dbgs() << "dest:" << tmp << "\n";
 
       // If the benefit of the pattern is impossible, skip the processing of the
       // rest of the pattern.
@@ -1138,6 +1141,7 @@ void ByteCodeExecutor::execute(
       // created operations during the rewrite that don't already have an
       // explicit location set.
       unsigned numMatchLocs = read();
+//      llvm::dbgs() << "numMatchLocs:" << numMatchLocs << "\n";
       SmallVector<Location, 4> matchLocs;
       matchLocs.reserve(numMatchLocs);
       for (unsigned i = 0; i != numMatchLocs; ++i)
@@ -1261,8 +1265,13 @@ void PDLByteCode::rewrite(PatternRewriter &rewriter, const MatchResult &match,
                           PDLByteCodeMutableState &state) const {
   // The arguments of the rewrite function are stored at the start of the
   // memory buffer.
-  llvm::copy(match.values, state.memory.begin());
 
+  llvm::copy(match.values, state.memory.begin());
+//  for (auto value : match.values) {
+//    llvm::dbgs() << value << "\n";
+//  }
+//  llvm::dbgs() << "memory size: " << state.memory.size();
+//  llvm::dbgs() << "-----------------" << "\n";
   ByteCodeExecutor executor(
       &rewriterByteCode[match.pattern->getRewriterAddr()], state.memory,
       uniquedData, rewriterByteCode, state.currentPatternBenefits, patterns,
