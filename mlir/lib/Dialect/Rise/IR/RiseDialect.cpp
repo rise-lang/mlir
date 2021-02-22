@@ -428,12 +428,12 @@ int RiseDialect::getCostForSubexpression(Operation *op, bool propagateUp) {
     if (propagateUp) {
       Operation *parentOp = op;
       int oldOpCost = 0;
-      if (op->getAttrOfType<IntegerAttr>("rise.cost"))
-        oldOpCost = op->getAttrOfType<IntegerAttr>("rise.cost").getInt();
+      if (op->getAttrOfType<IntegerAttr>("rlo.cost"))
+        oldOpCost = op->getAttrOfType<IntegerAttr>("rlo.cost").getInt();
       while(parentOp = parentOp->getParentOp()) {
-        if (!parentOp->getAttrOfType<IntegerAttr>("rise.cost"))
+        if (!parentOp->getAttrOfType<IntegerAttr>("rlo.cost"))
           break;
-        int oldParentCost = parentOp->getAttrOfType<IntegerAttr>("rise.cost").getInt();
+        int oldParentCost = parentOp->getAttrOfType<IntegerAttr>("rlo.cost").getInt();
         setCost(parentOp, oldParentCost - oldOpCost + cost);
       }
     }
@@ -442,7 +442,8 @@ int RiseDialect::getCostForSubexpression(Operation *op, bool propagateUp) {
   };
 
   // cost of rise operations with a region i.e lambda, embed, loweringUnit
-  if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace() && op->getNumRegions() == 1) {
+  if (op->getDialect()->getNamespace() == RiseDialect::getDialectNamespace() &&
+      op->getNumRegions() == 1) {
     int riseRegionCost = 0;
     op->getRegion(0).walk_shallow([&](Operation *nestedOp) {
       LLVM_DEBUG({llvm::dbgs() << "Getting nested cost of op: " << nestedOp->getName() << " for region op:" << op->getName() << "\n";});
