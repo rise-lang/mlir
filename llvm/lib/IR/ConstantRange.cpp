@@ -181,6 +181,11 @@ bool ConstantRange::getEquivalentICmp(CmpInst::Predicate &Pred,
   return Success;
 }
 
+bool ConstantRange::icmp(CmpInst::Predicate Pred,
+                         const ConstantRange &Other) const {
+  return makeSatisfyingICmpRegion(Pred, Other).contains(*this);
+}
+
 /// Exact mul nuw region for single element RHS.
 static ConstantRange makeExactMulNUWRegion(const APInt &V) {
   unsigned BitWidth = V.getBitWidth();
@@ -411,6 +416,21 @@ bool ConstantRange::contains(const ConstantRange &Other) const {
            Lower.ule(Other.getLower());
 
   return Other.getUpper().ule(Upper) && Lower.ule(Other.getLower());
+}
+
+unsigned ConstantRange::getActiveBits() const {
+  if (isEmptySet())
+    return 0;
+
+  return getUnsignedMax().getActiveBits();
+}
+
+unsigned ConstantRange::getMinSignedBits() const {
+  if (isEmptySet())
+    return 0;
+
+  return std::max(getSignedMin().getMinSignedBits(),
+                  getSignedMax().getMinSignedBits());
 }
 
 ConstantRange ConstantRange::subtract(const APInt &Val) const {
@@ -1043,7 +1063,10 @@ ConstantRange::smax(const ConstantRange &Other) const {
     return getEmpty();
   APInt NewL = APIntOps::smax(getSignedMin(), Other.getSignedMin());
   APInt NewU = APIntOps::smax(getSignedMax(), Other.getSignedMax()) + 1;
-  return getNonEmpty(std::move(NewL), std::move(NewU));
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isSignWrappedSet() || Other.isSignWrappedSet())
+    return Res.intersectWith(unionWith(Other, Signed), Signed);
+  return Res;
 }
 
 ConstantRange
@@ -1054,7 +1077,10 @@ ConstantRange::umax(const ConstantRange &Other) const {
     return getEmpty();
   APInt NewL = APIntOps::umax(getUnsignedMin(), Other.getUnsignedMin());
   APInt NewU = APIntOps::umax(getUnsignedMax(), Other.getUnsignedMax()) + 1;
-  return getNonEmpty(std::move(NewL), std::move(NewU));
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isWrappedSet() || Other.isWrappedSet())
+    return Res.intersectWith(unionWith(Other, Unsigned), Unsigned);
+  return Res;
 }
 
 ConstantRange
@@ -1065,7 +1091,10 @@ ConstantRange::smin(const ConstantRange &Other) const {
     return getEmpty();
   APInt NewL = APIntOps::smin(getSignedMin(), Other.getSignedMin());
   APInt NewU = APIntOps::smin(getSignedMax(), Other.getSignedMax()) + 1;
-  return getNonEmpty(std::move(NewL), std::move(NewU));
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isSignWrappedSet() || Other.isSignWrappedSet())
+    return Res.intersectWith(unionWith(Other, Signed), Signed);
+  return Res;
 }
 
 ConstantRange
@@ -1076,7 +1105,10 @@ ConstantRange::umin(const ConstantRange &Other) const {
     return getEmpty();
   APInt NewL = APIntOps::umin(getUnsignedMin(), Other.getUnsignedMin());
   APInt NewU = APIntOps::umin(getUnsignedMax(), Other.getUnsignedMax()) + 1;
-  return getNonEmpty(std::move(NewL), std::move(NewU));
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isWrappedSet() || Other.isWrappedSet())
+    return Res.intersectWith(unionWith(Other, Unsigned), Unsigned);
+  return Res;
 }
 
 ConstantRange
@@ -1240,6 +1272,10 @@ ConstantRange ConstantRange::srem(const ConstantRange &RHS) const {
   return ConstantRange(std::move(Lower), std::move(Upper));
 }
 
+ConstantRange ConstantRange::binaryNot() const {
+  return ConstantRange(APInt::getAllOnesValue(getBitWidth())).sub(*this);
+}
+
 ConstantRange
 ConstantRange::binaryAnd(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
@@ -1277,6 +1313,12 @@ ConstantRange ConstantRange::binaryXor(const ConstantRange &Other) const {
   // Use APInt's implementation of XOR for single element ranges.
   if (isSingleElement() && Other.isSingleElement())
     return {*getSingleElement() ^ *Other.getSingleElement()};
+
+  // Special-case binary complement, since we can give a precise answer.
+  if (Other.isSingleElement() && Other.getSingleElement()->isAllOnesValue())
+    return binaryNot();
+  if (isSingleElement() && getSingleElement()->isAllOnesValue())
+    return Other.binaryNot();
 
   // TODO: replace this with something less conservative
   return getFull();

@@ -47,7 +47,6 @@ public:
   // Unneeded sections are omitted entirely (header and body).
   virtual bool isNeeded() const { return true; }
 
-  // Specifically finalizes addresses and section size, not content.
   virtual void finalize() {
     // TODO investigate refactoring synthetic section finalization logic into
     // overrides of this function.
@@ -63,6 +62,8 @@ public:
   uint64_t fileOff = 0;
   uint32_t align = 1;
   uint32_t flags = 0;
+  uint32_t reserved1 = 0;
+  uint32_t reserved2 = 0;
 
 private:
   Kind sectionKind;

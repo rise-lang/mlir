@@ -27,9 +27,10 @@ template class llvm::DomTreeNodeBase<Block>;
 /// Return true if the region with the given index inside the operation
 /// has SSA dominance.
 static bool hasSSADominance(Operation *op, unsigned index) {
+  if (!op->isRegistered()) return false;
+
   auto kindInterface = dyn_cast<RegionKindInterface>(op);
-  return op->isRegistered() &&
-         (!kindInterface || kindInterface.hasSSADominance(index));
+  return !kindInterface || kindInterface.hasSSADominance(index);
 }
 
 //===----------------------------------------------------------------------===//
@@ -180,10 +181,9 @@ bool DominanceInfoBase<IsPostDom>::properlyDominates(Block *a, Block *b) const {
     b = traverseAncestors(
         b, [&](Block *block) { return block->getParent() == regionA; });
 
-    // If we could not find a valid block b then it is either a not a dominator
-    // or a post dominator.
+    // If we could not find a valid block b then it is a not a dominator.
     if (!b)
-      return IsPostDom;
+      return false;
 
     // Check to see if the ancestor of 'b' is the same block as 'a'.
     if (a == b)

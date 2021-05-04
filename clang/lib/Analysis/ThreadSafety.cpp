@@ -105,32 +105,37 @@ class FactSet;
 ///
 /// FIXME: this analysis does not currently support re-entrant locking.
 class FactEntry : public CapabilityExpr {
+public:
+  /// Where a fact comes from.
+  enum SourceKind {
+    Acquired, ///< The fact has been directly acquired.
+    Asserted, ///< The fact has been asserted to be held.
+    Declared, ///< The fact is assumed to be held by callers.
+    Managed,  ///< The fact has been acquired through a scoped capability.
+  };
+
 private:
   /// Exclusive or shared.
-  LockKind LKind;
+  LockKind LKind : 8;
+
+  // How it was acquired.
+  SourceKind Source : 8;
 
   /// Where it was acquired.
   SourceLocation AcquireLoc;
 
-  /// True if the lock was asserted.
-  bool Asserted;
-
-  /// True if the lock was declared.
-  bool Declared;
-
 public:
   FactEntry(const CapabilityExpr &CE, LockKind LK, SourceLocation Loc,
-            bool Asrt, bool Declrd = false)
-      : CapabilityExpr(CE), LKind(LK), AcquireLoc(Loc), Asserted(Asrt),
-        Declared(Declrd) {}
+            SourceKind Src)
+      : CapabilityExpr(CE), LKind(LK), Source(Src), AcquireLoc(Loc) {}
   virtual ~FactEntry() = default;
 
   LockKind kind() const { return LKind;      }
   SourceLocation loc() const { return AcquireLoc; }
-  bool asserted() const { return Asserted; }
-  bool declared() const { return Declared; }
 
-  void setDeclared(bool D) { Declared = D; }
+  bool asserted() const { return Source == Asserted; }
+  bool declared() const { return Source == Declared; }
+  bool managed() const { return Source == Managed; }
 
   virtual void
   handleRemovalFromIntersection(const FactSet &FSet, FactManager &FactMan,
@@ -851,20 +856,16 @@ static void findBlockLocations(CFG *CFGraph,
 namespace {
 
 class LockableFactEntry : public FactEntry {
-private:
-  /// managed by ScopedLockable object
-  bool Managed;
-
 public:
   LockableFactEntry(const CapabilityExpr &CE, LockKind LK, SourceLocation Loc,
-                    bool Mng = false, bool Asrt = false)
-      : FactEntry(CE, LK, Loc, Asrt), Managed(Mng) {}
+                    SourceKind Src = Acquired)
+      : FactEntry(CE, LK, Loc, Src) {}
 
   void
   handleRemovalFromIntersection(const FactSet &FSet, FactManager &FactMan,
                                 SourceLocation JoinLoc, LockErrorKind LEK,
                                 ThreadSafetyHandler &Handler) const override {
-    if (!Managed && !asserted() && !negative() && !isUniversal()) {
+    if (!managed() && !asserted() && !negative() && !isUniversal()) {
       Handler.handleMutexHeldEndOfScope("mutex", toString(), loc(), JoinLoc,
                                         LEK);
     }
@@ -903,7 +904,7 @@ private:
 
 public:
   ScopedLockableFactEntry(const CapabilityExpr &CE, SourceLocation Loc)
-      : FactEntry(CE, LK_Exclusive, Loc, false) {}
+      : FactEntry(CE, LK_Exclusive, Loc, Acquired) {}
 
   void addLock(const CapabilityExpr &M) {
     UnderlyingMutexes.emplace_back(M.sexpr(), UCK_Acquired);
@@ -983,7 +984,7 @@ private:
     } else {
       FSet.removeLock(FactMan, !Cp);
       FSet.addLock(FactMan,
-                   std::make_unique<LockableFactEntry>(Cp, kind, loc));
+                   std::make_unique<LockableFactEntry>(Cp, kind, loc, Managed));
     }
   }
 
@@ -1266,13 +1267,29 @@ ClassifyDiagnostic(const AttrTy *A) {
 }
 
 bool ThreadSafetyAnalyzer::inCurrentScope(const CapabilityExpr &CapE) {
-  if (!CurrentMethod)
+  const threadSafety::til::SExpr *SExp = CapE.sexpr();
+  assert(SExp && "Null expressions should be ignored");
+
+  if (const auto *LP = dyn_cast<til::LiteralPtr>(SExp)) {
+    const ValueDecl *VD = LP->clangDecl();
+    // Variables defined in a function are always inaccessible.
+    if (!VD->isDefinedOutsideFunctionOrMethod())
       return false;
-  if (const auto *P = dyn_cast_or_null<til::Project>(CapE.sexpr())) {
-    const auto *VD = P->clangDecl();
-    if (VD)
-      return VD->getDeclContext() == CurrentMethod->getDeclContext();
+    // For now we consider static class members to be inaccessible.
+    if (isa<CXXRecordDecl>(VD->getDeclContext()))
+      return false;
+    // Global variables are always in scope.
+    return true;
   }
+
+  // Members are in scope from methods of the same class.
+  if (const auto *P = dyn_cast<til::Project>(SExp)) {
+    if (!CurrentMethod)
+      return false;
+    const ValueDecl *VD = P->clangDecl();
+    return VD->getDeclContext() == CurrentMethod->getDeclContext();
+  }
+
   return false;
 }
 
@@ -1838,10 +1855,11 @@ void BuildLockset::handleCall(const Expr *Exp, const NamedDecl *D,
         CapExprSet AssertLocks;
         Analyzer->getMutexIDs(AssertLocks, A, Exp, D, VD);
         for (const auto &AssertLock : AssertLocks)
-          Analyzer->addLock(FSet,
-                            std::make_unique<LockableFactEntry>(
-                                AssertLock, LK_Exclusive, Loc, false, true),
-                            ClassifyDiagnostic(A));
+          Analyzer->addLock(
+              FSet,
+              std::make_unique<LockableFactEntry>(AssertLock, LK_Exclusive, Loc,
+                                                  FactEntry::Asserted),
+              ClassifyDiagnostic(A));
         break;
       }
       case attr::AssertSharedLock: {
@@ -1850,10 +1868,11 @@ void BuildLockset::handleCall(const Expr *Exp, const NamedDecl *D,
         CapExprSet AssertLocks;
         Analyzer->getMutexIDs(AssertLocks, A, Exp, D, VD);
         for (const auto &AssertLock : AssertLocks)
-          Analyzer->addLock(FSet,
-                            std::make_unique<LockableFactEntry>(
-                                AssertLock, LK_Shared, Loc, false, true),
-                            ClassifyDiagnostic(A));
+          Analyzer->addLock(
+              FSet,
+              std::make_unique<LockableFactEntry>(AssertLock, LK_Shared, Loc,
+                                                  FactEntry::Asserted),
+              ClassifyDiagnostic(A));
         break;
       }
 
@@ -1866,7 +1885,7 @@ void BuildLockset::handleCall(const Expr *Exp, const NamedDecl *D,
                             std::make_unique<LockableFactEntry>(
                                 AssertLock,
                                 A->isShared() ? LK_Shared : LK_Exclusive, Loc,
-                                false, true),
+                                FactEntry::Asserted),
                             ClassifyDiagnostic(A));
         break;
       }
@@ -1927,14 +1946,16 @@ void BuildLockset::handleCall(const Expr *Exp, const NamedDecl *D,
     Analyzer->removeLock(FSet, M, Loc, Dtor, LK_Generic, CapDiagKind);
 
   // Add locks.
+  FactEntry::SourceKind Source =
+      isScopedVar ? FactEntry::Managed : FactEntry::Acquired;
   for (const auto &M : ExclusiveLocksToAdd)
-    Analyzer->addLock(FSet, std::make_unique<LockableFactEntry>(
-                                M, LK_Exclusive, Loc, isScopedVar),
-                      CapDiagKind);
+    Analyzer->addLock(
+        FSet, std::make_unique<LockableFactEntry>(M, LK_Exclusive, Loc, Source),
+        CapDiagKind);
   for (const auto &M : SharedLocksToAdd)
-    Analyzer->addLock(FSet, std::make_unique<LockableFactEntry>(
-                                M, LK_Shared, Loc, isScopedVar),
-                      CapDiagKind);
+    Analyzer->addLock(
+        FSet, std::make_unique<LockableFactEntry>(M, LK_Shared, Loc, Source),
+        CapDiagKind);
 
   if (isScopedVar) {
     // Add the managing object as a dummy mutex, mapped to the underlying mutex.
@@ -2035,15 +2056,11 @@ void BuildLockset::VisitCallExpr(const CallExpr *Exp) {
 
     if (ME && MD) {
       if (ME->isArrow()) {
-        if (MD->isConst())
-          checkPtAccess(CE->getImplicitObjectArgument(), AK_Read);
-        else // FIXME -- should be AK_Written
-          checkPtAccess(CE->getImplicitObjectArgument(), AK_Read);
+        // Should perhaps be AK_Written if !MD->isConst().
+        checkPtAccess(CE->getImplicitObjectArgument(), AK_Read);
       } else {
-        if (MD->isConst())
-          checkAccess(CE->getImplicitObjectArgument(), AK_Read);
-        else     // FIXME -- should be AK_Written
-          checkAccess(CE->getImplicitObjectArgument(), AK_Read);
+        // Should perhaps be AK_Written if !MD->isConst().
+        checkAccess(CE->getImplicitObjectArgument(), AK_Read);
       }
     }
 
@@ -2195,27 +2212,25 @@ void ThreadSafetyAnalyzer::intersectAndWarn(FactSet &FSet1,
 
   // Find locks in FSet2 that conflict or are not in FSet1, and warn.
   for (const auto &Fact : FSet2) {
-    const FactEntry *LDat1 = nullptr;
-    const FactEntry *LDat2 = &FactMan[Fact];
-    FactSet::iterator Iter1  = FSet1.findLockIter(FactMan, *LDat2);
-    if (Iter1 != FSet1.end()) LDat1 = &FactMan[*Iter1];
+    const FactEntry &LDat2 = FactMan[Fact];
 
-    if (LDat1) {
-      if (LDat1->kind() != LDat2->kind()) {
-        Handler.handleExclusiveAndShared("mutex", LDat2->toString(),
-                                         LDat2->loc(), LDat1->loc());
-        if (Modify && LDat1->kind() != LK_Exclusive) {
+    FactSet::iterator Iter1 = FSet1.findLockIter(FactMan, LDat2);
+    if (Iter1 != FSet1.end()) {
+      const FactEntry &LDat1 = FactMan[*Iter1];
+      if (LDat1.kind() != LDat2.kind()) {
+        Handler.handleExclusiveAndShared("mutex", LDat2.toString(), LDat2.loc(),
+                                         LDat1.loc());
+        if (Modify && LDat1.kind() != LK_Exclusive) {
           // Take the exclusive lock, which is the one in FSet2.
           *Iter1 = Fact;
         }
-      }
-      else if (Modify && LDat1->asserted() && !LDat2->asserted()) {
+      } else if (Modify && LDat1.asserted() && !LDat2.asserted()) {
         // The non-asserted lock in FSet2 is the one we want to track.
         *Iter1 = Fact;
       }
     } else {
-      LDat2->handleRemovalFromIntersection(FSet2, FactMan, JoinLoc, LEK1,
-                                           Handler);
+      LDat2.handleRemovalFromIntersection(FSet2, FactMan, JoinLoc, LEK1,
+                                          Handler);
     }
   }
 
@@ -2352,13 +2367,13 @@ void ThreadSafetyAnalyzer::runAnalysis(AnalysisDeclContext &AC) {
 
     // FIXME -- Loc can be wrong here.
     for (const auto &Mu : ExclusiveLocksToAdd) {
-      auto Entry = std::make_unique<LockableFactEntry>(Mu, LK_Exclusive, Loc);
-      Entry->setDeclared(true);
+      auto Entry = std::make_unique<LockableFactEntry>(Mu, LK_Exclusive, Loc,
+                                                       FactEntry::Declared);
       addLock(InitialLockset, std::move(Entry), CapDiagKind, true);
     }
     for (const auto &Mu : SharedLocksToAdd) {
-      auto Entry = std::make_unique<LockableFactEntry>(Mu, LK_Shared, Loc);
-      Entry->setDeclared(true);
+      auto Entry = std::make_unique<LockableFactEntry>(Mu, LK_Shared, Loc,
+                                                       FactEntry::Declared);
       addLock(InitialLockset, std::move(Entry), CapDiagKind, true);
     }
   }
@@ -2452,11 +2467,10 @@ void ThreadSafetyAnalyzer::runAnalysis(AnalysisDeclContext &AC) {
                        PrevBlock, CurrBlock);
 
         // Do not update EntrySet.
-        intersectAndWarn(CurrBlockInfo->EntrySet, PrevLockset,
-                         PrevBlockInfo->ExitLoc,
-                         IsLoop ? LEK_LockedSomeLoopIterations
-                                : LEK_LockedSomePredecessors,
-                         false);
+        intersectAndWarn(
+            CurrBlockInfo->EntrySet, PrevLockset, PrevBlockInfo->ExitLoc,
+            IsLoop ? LEK_LockedSomeLoopIterations : LEK_LockedSomePredecessors,
+            !IsLoop);
       }
     }
 

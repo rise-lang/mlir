@@ -10,7 +10,9 @@
 #include "InputFiles.h"
 #include "OutputSegment.h"
 #include "Symbols.h"
+#include "SyntheticSections.h"
 #include "Target.h"
+#include "Writer.h"
 #include "lld/Common/Memory.h"
 #include "llvm/Support/Endian.h"
 
@@ -26,7 +28,27 @@ uint64_t InputSection::getFileOffset() const {
   return parent->fileOff + outSecFileOff;
 }
 
+uint64_t InputSection::getFileSize() const {
+  return isZeroFill(flags) ? 0 : getSize();
+}
+
 uint64_t InputSection::getVA() const { return parent->addr + outSecOff; }
+
+static uint64_t resolveSymbolVA(uint8_t *loc, const Symbol &sym, uint8_t type) {
+  const RelocAttrs &relocAttrs = target->getRelocAttrs(type);
+  if (relocAttrs.hasAttr(RelocAttrBits::BRANCH)) {
+    if (sym.isInStubs())
+      return in.stubs->addr + sym.stubsIndex * target->stubSize;
+  } else if (relocAttrs.hasAttr(RelocAttrBits::GOT)) {
+    if (sym.isInGot())
+      return in.got->addr + sym.gotIndex * target->wordSize;
+  } else if (relocAttrs.hasAttr(RelocAttrBits::TLV)) {
+    if (sym.isInGot())
+      return in.tlvPointers->addr + sym.gotIndex * target->wordSize;
+    assert(isa<Defined>(&sym));
+  }
+  return sym.getVA();
+}
 
 void InputSection::writeTo(uint8_t *buf) {
   if (getFileSize() == 0)
@@ -34,27 +56,55 @@ void InputSection::writeTo(uint8_t *buf) {
 
   memcpy(buf, data.data(), data.size());
 
-  for (Reloc &r : relocs) {
-    uint64_t va = 0;
-    if (auto *s = r.target.dyn_cast<Symbol *>()) {
-      va = target->resolveSymbolVA(buf + r.offset, *s, r.type);
+  for (size_t i = 0; i < relocs.size(); i++) {
+    const Reloc &r = relocs[i];
+    uint8_t *loc = buf + r.offset;
+    uint64_t referentVA = 0;
+    if (target->hasAttr(r.type, RelocAttrBits::SUBTRAHEND)) {
+      const Symbol *fromSym = r.referent.get<Symbol *>();
+      const Reloc &minuend = relocs[++i];
+      uint64_t minuendVA;
+      if (const Symbol *toSym = minuend.referent.dyn_cast<Symbol *>())
+        minuendVA = toSym->getVA();
+      else
+        minuendVA = minuend.referent.get<InputSection *>()->getVA();
+      referentVA = minuendVA - fromSym->getVA() + minuend.addend;
+    } else if (auto *referentSym = r.referent.dyn_cast<Symbol *>()) {
+      if (target->hasAttr(r.type, RelocAttrBits::LOAD) &&
+          !referentSym->isInGot())
+        target->relaxGotLoad(loc, r.type);
+      referentVA = resolveSymbolVA(loc, *referentSym, r.type);
 
       if (isThreadLocalVariables(flags)) {
-        // References from thread-local variable sections are treated as
-        // offsets relative to the start of the target section, instead of as
-        // absolute addresses.
-        if (auto *defined = dyn_cast<Defined>(s))
-          va -= defined->isec->parent->addr;
+        // References from thread-local variable sections are treated as offsets
+        // relative to the start of the thread-local data memory area, which
+        // is initialized via copying all the TLV data sections (which are all
+        // contiguous).
+        if (isa<Defined>(referentSym))
+          referentVA -= firstTLVDataSection->addr;
       }
-    } else if (auto *isec = r.target.dyn_cast<InputSection *>()) {
-      va = isec->getVA();
+    } else if (auto *referentIsec = r.referent.dyn_cast<InputSection *>()) {
+      referentVA = referentIsec->getVA();
     }
-
-    uint64_t val = va + r.addend;
-    if (r.pcrel)
-      val -= getVA() + r.offset;
-    target->relocateOne(buf + r.offset, r, val);
+    target->relocateOne(loc, r, referentVA + r.addend, getVA() + r.offset);
   }
+}
+
+bool macho::isCodeSection(InputSection *isec) {
+  uint32_t type = isec->flags & SECTION_TYPE;
+  if (type != S_REGULAR && type != S_COALESCED)
+    return false;
+
+  uint32_t attr = isec->flags & SECTION_ATTRIBUTES_USR;
+  if (attr == S_ATTR_PURE_INSTRUCTIONS)
+    return true;
+
+  if (isec->segname == segment_names::text)
+    return StringSwitch<bool>(isec->name)
+        .Cases(section_names::textCoalNt, section_names::staticInit, true)
+        .Default(false);
+
+  return false;
 }
 
 std::string lld::toString(const InputSection *isec) {

@@ -59,6 +59,8 @@ class LLVM_LIBRARY_VISIBILITY PPCTargetInfo : public TargetInfo {
   // Target cpu features.
   bool HasAltivec = false;
   bool HasMMA = false;
+  bool HasROPProtect = false;
+  bool HasPrivileged = false;
   bool HasVSX = false;
   bool HasP8Vector = false;
   bool HasP8Crypto = false;
@@ -355,6 +357,8 @@ public:
       : PPCTargetInfo(Triple, Opts) {
     if (Triple.isOSAIX())
       resetDataLayout("E-m:a-p:32:32-i64:64-n32");
+    else if (Triple.getArch() == llvm::Triple::ppcle)
+      resetDataLayout("e-m:e-p:32:32-i64:64-n32");
     else
       resetDataLayout("E-m:e-p:32:32-i64:64-n32");
 
@@ -370,7 +374,6 @@ public:
       SizeType = UnsignedLong;
       PtrDiffType = SignedLong;
       IntPtrType = SignedLong;
-      SuitableAlign = 64;
       LongDoubleWidth = 64;
       LongDoubleAlign = DoubleAlign = 32;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
@@ -404,19 +407,19 @@ public:
     LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
     IntMaxType = SignedLong;
     Int64Type = SignedLong;
+    std::string DataLayout = "";
 
     if (Triple.isOSAIX()) {
       // TODO: Set appropriate ABI for AIX platform.
-      resetDataLayout("E-m:a-i64:64-n32:64");
-      SuitableAlign = 64;
+      DataLayout = "E-m:a-i64:64-n32:64";
       LongDoubleWidth = 64;
       LongDoubleAlign = DoubleAlign = 32;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
     } else if ((Triple.getArch() == llvm::Triple::ppc64le)) {
-      resetDataLayout("e-m:e-i64:64-n32:64");
+      DataLayout = "e-m:e-i64:64-n32:64";
       ABI = "elfv2";
     } else {
-      resetDataLayout("E-m:e-i64:64-n32:64");
+      DataLayout = "E-m:e-i64:64-n32:64";
       ABI = "elfv1";
     }
 
@@ -424,6 +427,10 @@ public:
       LongDoubleWidth = LongDoubleAlign = 64;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
     }
+
+    if (Triple.isOSAIX() || Triple.isOSLinux())
+      DataLayout += "-S128-v256:256:256-v512:512:512";
+    resetDataLayout(DataLayout);
 
     // PPC64 supports atomics up to 8 bytes.
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
@@ -435,7 +442,7 @@ public:
 
   // PPC64 Linux-specific ABI options.
   bool setABI(const std::string &Name) override {
-    if (Name == "elfv1" || Name == "elfv1-qpx" || Name == "elfv2") {
+    if (Name == "elfv1" || Name == "elfv2") {
       ABI = Name;
       return true;
     }
@@ -461,7 +468,7 @@ public:
     BoolWidth = BoolAlign = 32; // XXX support -mone-byte-bool?
     PtrDiffType = SignedInt; // for http://llvm.org/bugs/show_bug.cgi?id=15726
     LongLongAlign = 32;
-    resetDataLayout("E-m:o-p:32:32-f64:32:64-n32");
+    resetDataLayout("E-m:o-p:32:32-f64:32:64-n32", "_");
   }
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
@@ -475,7 +482,7 @@ public:
   DarwinPPC64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : DarwinTargetInfo<PPC64TargetInfo>(Triple, Opts) {
     HasAlignMac68kSupport = true;
-    resetDataLayout("E-m:o-i64:64-n32:64");
+    resetDataLayout("E-m:o-i64:64-n32:64", "_");
   }
 };
 

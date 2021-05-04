@@ -64,9 +64,7 @@ def parseScript(test, preamble):
 
     # Get the default substitutions
     tmpDir, tmpBase = _getTempPaths(test)
-    useExternalSh = True
-    substitutions = lit.TestRunner.getDefaultSubstitutions(test, tmpDir, tmpBase,
-                                                           normalize_slashes=useExternalSh)
+    substitutions = lit.TestRunner.getDefaultSubstitutions(test, tmpDir, tmpBase)
 
     # Check base substitutions and add the %{build} and %{run} convenience substitutions
     _checkBaseSubstitutions(substitutions)
@@ -122,7 +120,6 @@ class CxxStandardLibraryTest(lit.formats.TestFormat):
 
     FOO.pass.cpp            - Compiles, links and runs successfully
     FOO.pass.mm             - Same as .pass.cpp, but for Objective-C++
-    FOO.run.fail.cpp        - Compiles and links successfully, but fails at runtime
 
     FOO.compile.pass.cpp    - Compiles successfully, link and run not attempted
     FOO.compile.fail.cpp    - Does not compile successfully
@@ -196,7 +193,7 @@ class CxxStandardLibraryTest(lit.formats.TestFormat):
             in conjunction with the %{build} substitution.
     """
     def getTestsInDirectory(self, testSuite, pathInSuite, litConfig, localConfig):
-        SUPPORTED_SUFFIXES = ['[.]pass[.]cpp$', '[.]pass[.]mm$', '[.]run[.]fail[.]cpp$',
+        SUPPORTED_SUFFIXES = ['[.]pass[.]cpp$', '[.]pass[.]mm$',
                               '[.]compile[.]pass[.]cpp$', '[.]compile[.]fail[.]cpp$',
                               '[.]link[.]pass[.]cpp$', '[.]link[.]fail[.]cpp$',
                               '[.]sh[.][^.]+$',
@@ -255,12 +252,6 @@ class CxxStandardLibraryTest(lit.formats.TestFormat):
                 "%dbg(LINKED WITH) ! %{cxx} %t.o %{flags} %{link_flags} -o %t.exe"
             ]
             return self._executeShTest(test, litConfig, steps)
-        elif filename.endswith('.run.fail.cpp'):
-            steps = [
-                "%dbg(COMPILED WITH) %{cxx} %s %{flags} %{compile_flags} %{link_flags} -o %t.exe",
-                "%dbg(EXECUTED AS) %{exec} ! %t.exe"
-            ]
-            return self._executeShTest(test, litConfig, steps)
         elif filename.endswith('.verify.cpp'):
             if not supportsVerify:
                 return lit.Test.Result(lit.Test.UNSUPPORTED,
@@ -312,5 +303,5 @@ class CxxStandardLibraryTest(lit.formats.TestFormat):
             return lit.Test.Result(lit.Test.XFAIL if test.isExpectedToFail() else lit.Test.PASS)
         else:
             _, tmpBase = _getTempPaths(test)
-            useExternalSh = True
+            useExternalSh = False
             return lit.TestRunner._runShTest(test, litConfig, useExternalSh, script, tmpBase)

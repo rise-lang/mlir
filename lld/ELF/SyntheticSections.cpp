@@ -646,11 +646,7 @@ void EhFrameSection::writeTo(uint8_t *buf) {
 GotSection::GotSection()
     : SyntheticSection(SHF_ALLOC | SHF_WRITE, SHT_PROGBITS, config->wordsize,
                        ".got") {
-  // If ElfSym::globalOffsetTable is relative to .got and is referenced,
-  // increase numEntries by the number of entries used to emit
-  // ElfSym::globalOffsetTable.
-  if (ElfSym::globalOffsetTable && !target->gotBaseSymInGotPlt)
-    numEntries += target->gotHeaderEntriesNum;
+  numEntries = target->gotHeaderEntriesNum;
 }
 
 void GotSection::addEntry(Symbol &sym) {
@@ -686,13 +682,17 @@ uint64_t GotSection::getGlobalDynOffset(const Symbol &b) const {
 }
 
 void GotSection::finalizeContents() {
-  size = numEntries * config->wordsize;
+  if (config->emachine == EM_PPC64 &&
+      numEntries <= target->gotHeaderEntriesNum && !ElfSym::globalOffsetTable)
+    size = 0;
+  else
+    size = numEntries * config->wordsize;
 }
 
 bool GotSection::isNeeded() const {
-  // We need to emit a GOT even if it's empty if there's a relocation that is
-  // relative to GOT(such as GOTOFFREL).
-  return numEntries || hasGotOffRel;
+  // Needed if the GOT symbol is used or the number of entries is more than just
+  // the header. A GOT with just the header may not be needed.
+  return hasGotOffRel || numEntries > target->gotHeaderEntriesNum;
 }
 
 void GotSection::writeTo(uint8_t *buf) {
@@ -985,14 +985,17 @@ void MipsGotSection::build() {
     for (std::pair<Symbol *, size_t> &p : got.tls) {
       Symbol *s = p.first;
       uint64_t offset = p.second * config->wordsize;
-      if (s->isPreemptible)
+      // When building a shared library we still need a dynamic relocation
+      // for the TP-relative offset as we don't know how much other data will
+      // be allocated before us in the static TLS block.
+      if (s->isPreemptible || config->shared)
         mainPart->relaDyn->addReloc(target->tlsGotRel, this, offset, s);
     }
     for (std::pair<Symbol *, size_t> &p : got.dynTlsSymbols) {
       Symbol *s = p.first;
       uint64_t offset = p.second * config->wordsize;
       if (s == nullptr) {
-        if (!config->isPic)
+        if (!config->shared)
           continue;
         mainPart->relaDyn->addReloc(target->tlsModuleIndexRel, this, offset, s);
       } else {
@@ -1000,7 +1003,7 @@ void MipsGotSection::build() {
         // for the module index. Therefore only checking for
         // S->isPreemptible is not sufficient (this happens e.g. for
         // thread-locals that have been marked as local through a linker script)
-        if (!s->isPreemptible && !config->isPic)
+        if (!s->isPreemptible && !config->shared)
           continue;
         mainPart->relaDyn->addReloc(target->tlsModuleIndexRel, this, offset, s);
         // However, we can skip writing the TLS offset reloc for non-preemptible
@@ -1093,7 +1096,7 @@ void MipsGotSection::writeTo(uint8_t *buf) {
     // If TLS entry has a corresponding dynamic relocations, leave it
     // initialized by zero. Write down adjusted TLS symbol's values otherwise.
     // To calculate the adjustments use offsets for thread-local storage.
-    // https://www.linux-mips.org/wiki/NPTL
+    // http://web.archive.org/web/20190324223224/https://www.linux-mips.org/wiki/NPTL
     for (const std::pair<GotEntry, size_t> &p : g.local16)
       write(p.second, p.first.first, p.first.second);
     // Write VA to the primary GOT only. For secondary GOTs that
@@ -1104,15 +1107,16 @@ void MipsGotSection::writeTo(uint8_t *buf) {
     for (const std::pair<Symbol *, size_t> &p : g.relocs)
       write(p.second, p.first, 0);
     for (const std::pair<Symbol *, size_t> &p : g.tls)
-      write(p.second, p.first, p.first->isPreemptible ? 0 : -0x7000);
+      write(p.second, p.first,
+            p.first->isPreemptible || config->shared ? 0 : -0x7000);
     for (const std::pair<Symbol *, size_t> &p : g.dynTlsSymbols) {
-      if (p.first == nullptr && !config->isPic)
+      if (p.first == nullptr && !config->shared)
         write(p.second, nullptr, 1);
       else if (p.first && !p.first->isPreemptible) {
-        // If we are emitting PIC code with relocations we mustn't write
+        // If we are emitting a shared libary with relocations we mustn't write
         // anything to the GOT here. When using Elf_Rel relocations the value
         // one will be treated as an addend and will cause crashes at runtime
-        if (!config->isPic)
+        if (!config->shared)
           write(p.second, nullptr, 1);
         write(p.second + 1, p.first, -0x8000);
       }
@@ -1436,6 +1440,13 @@ template <class ELFT> void DynamicSection<ELFT>::finalizeContents() {
     case EM_SPARCV9:
       addInSec(DT_PLTGOT, in.plt);
       break;
+    case EM_AARCH64:
+      if (llvm::find_if(in.relaPlt->relocs, [](const DynamicReloc &r) {
+           return r.type == target->pltRel &&
+                  r.sym->stOther & STO_AARCH64_VARIANT_PCS;
+          }) != in.relaPlt->relocs.end())
+        addInt(DT_AARCH64_VARIANT_PCS, 0);
+      LLVM_FALLTHROUGH;
     default:
       addInSec(DT_PLTGOT, in.gotPlt);
       break;
@@ -1610,10 +1621,14 @@ void RelocationBaseSection::finalizeContents() {
   else
     getParent()->link = 0;
 
-  if (in.relaPlt == this)
+  if (in.relaPlt == this) {
+    getParent()->flags |= ELF::SHF_INFO_LINK;
     getParent()->info = in.gotPlt->getParent()->sectionIndex;
-  if (in.relaIplt == this)
+  }
+  if (in.relaIplt == this) {
+    getParent()->flags |= ELF::SHF_INFO_LINK;
     getParent()->info = in.igotPlt->getParent()->sectionIndex;
+  }
 }
 
 RelrBaseSection::RelrBaseSection()
@@ -2177,6 +2192,10 @@ template <class ELFT> void SymbolTableSection<ELFT>::writeTo(uint8_t *buf) {
     // See getPPC64GlobalEntryToLocalEntryOffset() for more details.
     if (config->emachine == EM_PPC64)
       eSym->st_other |= sym->stOther & 0xe0;
+    // The most significant bit of st_other is used by AArch64 ABI for the
+    // variant PCS.
+    else if (config->emachine == EM_AARCH64)
+      eSym->st_other |= sym->stOther & STO_AARCH64_VARIANT_PCS;
 
     eSym->st_name = ent.strTabOffset;
     if (isDefinedHere)
@@ -2194,9 +2213,8 @@ template <class ELFT> void SymbolTableSection<ELFT>::writeTo(uint8_t *buf) {
     else
       eSym->st_size = sym->getSize();
 
-    // st_value is usually an address of a symbol, but that has a
-    // special meaning for uninstantiated common symbols (this can
-    // occur if -r is given).
+    // st_value is usually an address of a symbol, but that has a special
+    // meaning for uninstantiated common symbols (--no-define-common).
     if (BssSection *commonSec = getCommonSec(ent.sym))
       eSym->st_value = commonSec->alignment;
     else if (isDefinedHere)
@@ -2865,6 +2883,13 @@ template <class ELFT> GdbIndexSection *GdbIndexSection::create() {
     else if (isec->name == ".debug_info")
       files.insert(isec->file);
   }
+  // Drop .rel[a].debug_gnu_pub{names,types} for --emit-relocs.
+  llvm::erase_if(inputSections, [](InputSectionBase *s) {
+    if (auto *isec = dyn_cast<InputSection>(s))
+      if (InputSectionBase *rel = isec->getRelocatedSection())
+        return !rel->isLive();
+    return !s->isLive();
+  });
 
   std::vector<GdbChunk> chunks(files.size());
   std::vector<std::vector<NameAttrEntry>> nameAttrs(files.size());
@@ -2914,7 +2939,8 @@ void GdbIndexSection::writeTo(uint8_t *buf) {
   uint32_t cuOff = 0;
   for (GdbChunk &chunk : chunks) {
     for (AddressEntry &e : chunk.addressAreas) {
-      uint64_t baseAddr = e.section->getVA(0);
+      // In the case of ICF there may be duplicate address range entries.
+      const uint64_t baseAddr = e.section->repl->getVA(0);
       write64le(buf, baseAddr + e.lowAddress);
       write64le(buf + 8, baseAddr + e.highAddress);
       write32le(buf + 16, e.cuIndex + cuOff);
@@ -3088,7 +3114,10 @@ size_t VersionTableSection::getSize() const {
 void VersionTableSection::writeTo(uint8_t *buf) {
   buf += 2;
   for (const SymbolTableEntry &s : getPartition().dynSymTab->getSymbols()) {
-    write16(buf, s.sym->versionId);
+    // Use the original versionId for an unfetched lazy symbol (undefined weak),
+    // which must be VER_NDX_GLOBAL (an undefined versioned symbol is an error).
+    write16(buf, s.sym->isLazy() ? static_cast<uint16_t>(VER_NDX_GLOBAL)
+                                 : s.sym->versionId);
     buf += 2;
   }
 }

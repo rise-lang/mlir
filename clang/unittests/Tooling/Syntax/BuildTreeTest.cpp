@@ -23,11 +23,9 @@ protected:
     SCOPED_TRACE(llvm::join(GetParam().getCommandLineArgs(), " "));
 
     auto *Root = buildTree(Code, GetParam());
-    if (Diags->getClient()->getNumErrors() != 0) {
-      return ::testing::AssertionFailure()
-             << "Source file has syntax errors, they were printed to the test "
-                "log";
-    }
+    auto ErrorOK = errorOK(Code);
+    if (!ErrorOK)
+      return ErrorOK;
     auto Actual = StringRef(Root->dump(Arena->getSourceManager())).trim().str();
     // EXPECT_EQ shows the diff between the two strings if they are different.
     EXPECT_EQ(Tree.trim().str(), Actual);
@@ -45,11 +43,9 @@ protected:
     auto AnnotatedCode = llvm::Annotations(CodeWithAnnotations);
     auto *Root = buildTree(AnnotatedCode.code(), GetParam());
 
-    if (Diags->getClient()->getNumErrors() != 0) {
-      return ::testing::AssertionFailure()
-             << "Source file has syntax errors, they were printed to the test "
-                "log";
-    }
+    auto ErrorOK = errorOK(AnnotatedCode.code());
+    if (!ErrorOK)
+      return ErrorOK;
 
     auto AnnotatedRanges = AnnotatedCode.ranges();
     if (AnnotatedRanges.size() != TreeDumps.size()) {
@@ -77,6 +73,19 @@ protected:
     return Failed ? ::testing::AssertionFailure()
                   : ::testing::AssertionSuccess();
   }
+
+private:
+  ::testing::AssertionResult errorOK(StringRef RawCode) {
+    if (!RawCode.contains("error-ok")) {
+      if (Diags->getClient()->getNumErrors() != 0) {
+        return ::testing::AssertionFailure()
+               << "Source file has syntax errors (suppress with /*error-ok*/), "
+                  "they were printed to the "
+                  "test log";
+      }
+    }
+    return ::testing::AssertionSuccess();
+  }
 };
 
 INSTANTIATE_TEST_CASE_P(SyntaxTreeTests, BuildSyntaxTreeTest,
@@ -92,21 +101,23 @@ void foo() {}
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'main'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'main'
+| |   `-ParametersAndQualifiers
+| |     |-'(' OpenParen
+| |     `-')' CloseParen
 | `-CompoundStatement
 |   |-'{' OpenParen
 |   `-'}' CloseParen
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'foo'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'foo'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     `-'}' CloseParen
@@ -123,16 +134,18 @@ int b = 42;
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | `-'a'
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   `-'a'
 | `-';'
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'b'
-  | |-'='
-  | `-IntegerLiteralExpression
-  |   `-'42' LiteralToken
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'b'
+  |   |-'='
+  |   `-IntegerLiteralExpression
+  |     `-'42' LiteralToken
   `-';'
 )txt"));
 }
@@ -146,21 +159,24 @@ void foo(int a, int b) {}
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'foo'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'int'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'a'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'int'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     `-'b'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'foo'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'int'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     `-'a'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'int'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       `-'b'
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     `-'}' CloseParen
@@ -178,8 +194,9 @@ TranslationUnit Detached
 `-SimpleDeclaration
   |-'in\
 t'
-  |-SimpleDeclarator Declarator
-  | `-'a'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   `-'a'
   `-';'
 )txt"));
 }
@@ -196,8 +213,9 @@ void test() {
 IfStatement Statement
 |-'if' IntroducerKeyword
 |-'('
-|-IntegerLiteralExpression
-| `-'1' LiteralToken
+|-ExpressionStatement Condition
+| `-IntegerLiteralExpression Expression
+|   `-'1' LiteralToken
 |-')'
 `-CompoundStatement ThenStatement
   |-'{' OpenParen
@@ -207,8 +225,9 @@ IfStatement Statement
 IfStatement Statement
 |-'if' IntroducerKeyword
 |-'('
-|-IntegerLiteralExpression
-| `-'1' LiteralToken
+|-ExpressionStatement Condition
+| `-IntegerLiteralExpression Expression
+|   `-'1' LiteralToken
 |-')'
 |-CompoundStatement ThenStatement
 | |-'{' OpenParen
@@ -217,12 +236,68 @@ IfStatement Statement
 `-IfStatement ElseStatement
   |-'if' IntroducerKeyword
   |-'('
-  |-IntegerLiteralExpression
-  | `-'0' LiteralToken
+  |-ExpressionStatement Condition
+  | `-IntegerLiteralExpression Expression
+  |   `-'0' LiteralToken
   |-')'
   `-CompoundStatement ThenStatement
     |-'{' OpenParen
     `-'}' CloseParen
+)txt"}));
+}
+
+TEST_P(BuildSyntaxTreeTest, IfDecl) {
+  if (!GetParam().isCXX17OrLater()) {
+    return;
+  }
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+void test() {
+  [[if (int a = 5) {}]]
+  [[if (int a; a == 5) {}]]
+}
+)cpp",
+      {R"txt(
+IfStatement Statement
+|-'if' IntroducerKeyword
+|-'('
+|-DeclarationStatement Condition
+| `-SimpleDeclaration
+|   |-'int'
+|   `-DeclaratorList Declarators
+|     `-SimpleDeclarator ListElement
+|       |-'a'
+|       |-'='
+|       `-IntegerLiteralExpression
+|         `-'5' LiteralToken
+|-')'
+`-CompoundStatement ThenStatement
+  |-'{' OpenParen
+  `-'}' CloseParen
+      )txt",
+       R"txt(
+IfStatement Statement
+|-'if' IntroducerKeyword
+|-'('
+|-DeclarationStatement
+| |-SimpleDeclaration
+| | |-'int'
+| | `-DeclaratorList Declarators
+| |   `-SimpleDeclarator ListElement
+| |     `-'a'
+| `-';'
+|-ExpressionStatement Condition
+| `-BinaryOperatorExpression Expression
+|   |-IdExpression LeftHandSide
+|   | `-UnqualifiedId UnqualifiedId
+|   |   `-'a'
+|   |-'==' OperatorToken
+|   `-IntegerLiteralExpression RightHandSide
+|     `-'5' LiteralToken
+|-')'
+`-CompoundStatement ThenStatement
+  |-'{' OpenParen
+  `-'}' CloseParen
 )txt"}));
 }
 
@@ -264,8 +339,9 @@ RangeBasedForStatement Statement
 |-'('
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | `-'x'
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   `-'x'
 | `-':'
 |-IdExpression
 | `-UnqualifiedId UnqualifiedId
@@ -287,11 +363,12 @@ void test() {
 DeclarationStatement Statement
 |-SimpleDeclaration
 | |-'int'
-| `-SimpleDeclarator Declarator
-|   |-'a'
-|   |-'='
-|   `-IntegerLiteralExpression
-|     `-'10' LiteralToken
+| `-DeclaratorList Declarators
+|   `-SimpleDeclarator ListElement
+|     |-'a'
+|     |-'='
+|     `-IntegerLiteralExpression
+|       `-'10' LiteralToken
 `-';'
 )txt"}));
 }
@@ -391,11 +468,12 @@ void test() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-ExpressionStatement Statement
@@ -409,8 +487,9 @@ TranslationUnit Detached
     |-IfStatement Statement
     | |-'if' IntroducerKeyword
     | |-'('
-    | |-IntegerLiteralExpression
-    | | `-'1' LiteralToken
+    | |-ExpressionStatement Condition
+    | | `-IntegerLiteralExpression Expression
+    | |   `-'1' LiteralToken
     | |-')'
     | |-ExpressionStatement ThenStatement
     | | |-CallExpression Expression
@@ -431,6 +510,25 @@ TranslationUnit Detached
     |   `-';'
     `-'}' CloseParen
 )txt"));
+}
+
+TEST_P(BuildSyntaxTreeTest, ConditionalOperator) {
+  // FIXME: conditional expression is not modeled yet.
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
+      R"cpp(
+void test() {
+  [[1?:2]];
+}
+)cpp",
+      {R"txt(
+UnknownExpression Expression
+|-IntegerLiteralExpression
+| `-'1' LiteralToken
+|-'?'
+|-':'
+`-IntegerLiteralExpression
+  `-'2' LiteralToken
+)txt"}));
 }
 
 TEST_P(BuildSyntaxTreeTest, UnqualifiedId_Identifier) {
@@ -642,8 +740,9 @@ SimpleDeclaration
 | | `-'n'
 | `-'::' ListDelimiter
 |-'S'
-`-SimpleDeclarator Declarator
-  `-'s1'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-'s1'
 )txt",
        R"txt(
 SimpleDeclaration
@@ -652,8 +751,9 @@ SimpleDeclaration
 | | `-'n'
 | `-'::' ListDelimiter
 |-'S'
-`-SimpleDeclarator Declarator
-  `-'s2'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-'s2'
 )txt"}));
 }
 
@@ -684,8 +784,9 @@ SimpleDeclaration
 | | `-'>'
 | `-'::' ListDelimiter
 |-'S'
-`-SimpleDeclarator Declarator
-  `-'s1'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-'s1'
 )txt",
        R"txt(
 SimpleDeclaration
@@ -698,8 +799,9 @@ SimpleDeclaration
 | | `-'>'
 | `-'::' ListDelimiter
 |-'S'
-`-SimpleDeclarator Declarator
-  `-'s2'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-'s2'
 )txt"}));
 }
 
@@ -1363,11 +1465,12 @@ TEST_P(BuildSyntaxTreeTest, StringLiteral_Raw) {
       "TranslationUnit Detached\n"
       "`-SimpleDeclaration\n"
       "  |-'void'\n"
-      "  |-SimpleDeclarator Declarator\n"
-      "  | |-'test'\n"
-      "  | `-ParametersAndQualifiers\n"
-      "  |   |-'(' OpenParen\n"
-      "  |   `-')' CloseParen\n"
+      "  |-DeclaratorList Declarators\n"
+      "  | `-SimpleDeclarator ListElement\n"
+      "  |   |-'test'\n"
+      "  |   `-ParametersAndQualifiers\n"
+      "  |     |-'(' OpenParen\n"
+      "  |     `-')' CloseParen\n"
       "  `-CompoundStatement\n"
       "    |-'{' OpenParen\n"
       "    |-ExpressionStatement Statement\n"
@@ -2875,21 +2978,23 @@ int *c, d;
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'*'
-| | `-'a'
-| |-','
-| |-SimpleDeclarator Declarator
-| | `-'b'
+| |-DeclaratorList Declarators
+| | |-SimpleDeclarator ListElement
+| | | |-'*'
+| | | `-'a'
+| | |-',' ListDelimiter
+| | `-SimpleDeclarator ListElement
+| |   `-'b'
 | `-';'
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'*'
-  | `-'c'
-  |-','
-  |-SimpleDeclarator Declarator
-  | `-'d'
+  |-DeclaratorList Declarators
+  | |-SimpleDeclarator ListElement
+  | | |-'*'
+  | | `-'c'
+  | |-',' ListDelimiter
+  | `-SimpleDeclarator ListElement
+  |   `-'d'
   `-';'
 )txt"));
 }
@@ -2904,12 +3009,13 @@ TranslationUnit Detached
 `-SimpleDeclaration
   |-'typedef'
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'*'
-  | `-'a'
-  |-','
-  |-SimpleDeclarator Declarator
-  | `-'b'
+  |-DeclaratorList Declarators
+  | |-SimpleDeclarator ListElement
+  | | |-'*'
+  | | `-'a'
+  | |-',' ListDelimiter
+  | `-SimpleDeclarator ListElement
+  |   `-'b'
   `-';'
 )txt"));
 }
@@ -2926,33 +3032,36 @@ void foo() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'foo'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'foo'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-DeclarationStatement Statement
     | |-SimpleDeclaration
     | | |-'int'
-    | | |-SimpleDeclarator Declarator
-    | | | |-'*'
-    | | | `-'a'
-    | | |-','
-    | | `-SimpleDeclarator Declarator
-    | |   `-'b'
+    | | `-DeclaratorList Declarators
+    | |   |-SimpleDeclarator ListElement
+    | |   | |-'*'
+    | |   | `-'a'
+    | |   |-',' ListDelimiter
+    | |   `-SimpleDeclarator ListElement
+    | |     `-'b'
     | `-';'
     |-DeclarationStatement Statement
     | |-SimpleDeclaration
     | | |-'typedef'
     | | |-'int'
-    | | |-SimpleDeclarator Declarator
-    | | | |-'*'
-    | | | `-'ta'
-    | | |-','
-    | | `-SimpleDeclarator Declarator
-    | |   `-'tb'
+    | | `-DeclaratorList Declarators
+    | |   |-SimpleDeclarator ListElement
+    | |   | |-'*'
+    | |   | `-'ta'
+    | |   |-',' ListDelimiter
+    | |   `-SimpleDeclarator ListElement
+    | |     `-'tb'
     | `-';'
     `-'}' CloseParen
 )txt"));
@@ -2979,8 +3088,9 @@ TranslationUnit Detached
   | |-'*'
   | `-')'
   |-')'
-  |-SimpleDeclarator Declarator
-  | `-'size_t'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   `-'size_t'
   `-';'
 )txt"));
 }
@@ -3174,9 +3284,10 @@ SimpleDeclaration
 SimpleDeclaration
 |-'struct'
 |-'Y'
-|-SimpleDeclarator Declarator
-| |-'*'
-| `-'y1'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'*'
+|   `-'y1'
 `-';'
 )txt"}));
 }
@@ -3202,9 +3313,10 @@ SimpleDeclaration
 |-'Y'
 |-'{'
 |-'}'
-|-SimpleDeclarator Declarator
-| |-'*'
-| `-'y2'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'*'
+|   `-'y2'
 `-';'
 )txt",
        R"txt(
@@ -3212,9 +3324,10 @@ SimpleDeclaration
 |-'struct'
 |-'{'
 |-'}'
-|-SimpleDeclarator Declarator
-| |-'*'
-| `-'a1'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'*'
+|   `-'a1'
 `-';'
 )txt"}));
 }
@@ -3233,11 +3346,12 @@ struct S {
 SimpleDeclaration
 |-'static'
 |-'void'
-|-SimpleDeclarator Declarator
-| |-'f'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'f'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     `-')' CloseParen
 `-CompoundStatement
   |-'{' OpenParen
   `-'}' CloseParen
@@ -3258,15 +3372,16 @@ struct S {
       {R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-NestedNameSpecifier
-| | |-IdentifierNameSpecifier ListElement
-| | | `-'S'
-| | `-'::' ListDelimiter
-| |-'f'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-NestedNameSpecifier
+|   | |-IdentifierNameSpecifier ListElement
+|   | | `-'S'
+|   | `-'::' ListDelimiter
+|   |-'f'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     `-')' CloseParen
 `-CompoundStatement
   |-'{' OpenParen
   `-'}' CloseParen
@@ -3285,12 +3400,13 @@ struct X {
 )cpp",
       {R"txt(
 SimpleDeclaration
-|-SimpleDeclarator Declarator
-| |-'operator'
-| |-'int'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'operator'
+|   |-'int'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     `-')' CloseParen
 `-';'
 )txt"}));
 }
@@ -3307,16 +3423,17 @@ unsigned operator "" _c(char);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'unsigned'
-  |-SimpleDeclarator Declarator
-  | |-'operator'
-  | |-'""'
-  | |-'_c'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | `-SimpleDeclaration ListElement
-  |   |   `-'char'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'operator'
+  |   |-'""'
+  |   |-'_c'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | `-SimpleDeclaration ListElement
+  |     |   `-'char'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -3341,13 +3458,14 @@ TranslationUnit Detached
   |-'>'
   `-SimpleDeclaration
     |-'unsigned'
-    |-SimpleDeclarator Declarator
-    | |-'operator'
-    | |-'""'
-    | |-'_t'
-    | `-ParametersAndQualifiers
-    |   |-'(' OpenParen
-    |   `-')' CloseParen
+    |-DeclaratorList Declarators
+    | `-SimpleDeclarator ListElement
+    |   |-'operator'
+    |   |-'""'
+    |   |-'_t'
+    |   `-ParametersAndQualifiers
+    |     |-'(' OpenParen
+    |     `-')' CloseParen
     `-';'
 )txt"));
 }
@@ -3365,19 +3483,21 @@ struct X {
       {R"txt(
 SimpleDeclaration
 |-'X'
-|-SimpleDeclarator Declarator
-| |-'&'
-| |-'operator'
-| |-'='
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-ParameterDeclarationList Parameters
-|   | `-SimpleDeclaration ListElement
-|   |   |-'const'
-|   |   |-'X'
-|   |   `-SimpleDeclarator Declarator
-|   |     `-'&'
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'&'
+|   |-'operator'
+|   |-'='
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-ParameterDeclarationList Parameters
+|     | `-SimpleDeclaration ListElement
+|     |   |-'const'
+|     |   |-'X'
+|     |   `-DeclaratorList Declarators
+|     |     `-SimpleDeclarator ListElement
+|     |       `-'&'
+|     `-')' CloseParen
 `-';'
 )txt"}));
 }
@@ -3397,21 +3517,23 @@ UnknownDeclaration
 `-SimpleDeclaration
   |-'friend'
   |-'X'
-  |-SimpleDeclarator Declarator
-  | |-'operator'
-  | |-'+'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | `-'X'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'const'
-  |   |   |-'X'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     `-'&'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'operator'
+  |   |-'+'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | `-'X'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'const'
+  |     |   |-'X'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       `-'&'
+  |     `-')' CloseParen
   `-';'
 )txt"}));
 }
@@ -3463,11 +3585,12 @@ TranslationUnit Detached
   |-'>'
   `-SimpleDeclaration
     |-'T'
-    |-SimpleDeclarator Declarator
-    | |-'f'
-    | `-ParametersAndQualifiers
-    |   |-'(' OpenParen
-    |   `-')' CloseParen
+    |-DeclaratorList Declarators
+    | `-SimpleDeclarator ListElement
+    |   |-'f'
+    |   `-ParametersAndQualifiers
+    |     |-'(' OpenParen
+    |     `-')' CloseParen
     `-';'
 )txt"));
 }
@@ -3491,11 +3614,12 @@ TranslationUnit Detached
   |-'>'
   `-SimpleDeclaration
     |-'T'
-    |-SimpleDeclarator Declarator
-    | |-'var'
-    | |-'='
-    | `-IntegerLiteralExpression
-    |   `-'10' LiteralToken
+    |-DeclaratorList Declarators
+    | `-SimpleDeclarator ListElement
+    |   |-'var'
+    |   |-'='
+    |   `-IntegerLiteralExpression
+    |     `-'10' LiteralToken
     `-';'
 )txt"));
 }
@@ -3522,11 +3646,12 @@ TemplateDeclaration Declaration
 `-SimpleDeclaration
   |-'static'
   |-'U'
-  |-SimpleDeclarator Declarator
-  | |-'f'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'f'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-';'
 )txt"}));
 }
@@ -3565,11 +3690,12 @@ TranslationUnit Detached
     | |-'>'
     | `-SimpleDeclaration
     |   |-'U'
-    |   |-SimpleDeclarator Declarator
-    |   | |-'foo'
-    |   | `-ParametersAndQualifiers
-    |   |   |-'(' OpenParen
-    |   |   `-')' CloseParen
+    |   |-DeclaratorList Declarators
+    |   | `-SimpleDeclarator ListElement
+    |   |   |-'foo'
+    |   |   `-ParametersAndQualifiers
+    |   |     |-'(' OpenParen
+    |   |     `-')' CloseParen
     |   `-';'
     |-'}'
     `-';'
@@ -3617,11 +3743,12 @@ TranslationUnit Detached
   |   | `-SimpleDeclaration
   |   |   |-'static'
   |   |   |-'U'
-  |   |   |-SimpleDeclarator Declarator
-  |   |   | |-'f'
-  |   |   | `-ParametersAndQualifiers
-  |   |   |   |-'(' OpenParen
-  |   |   |   `-')' CloseParen
+  |   |   |-DeclaratorList Declarators
+  |   |   | `-SimpleDeclarator ListElement
+  |   |   |   |-'f'
+  |   |   |   `-ParametersAndQualifiers
+  |   |   |     |-'(' OpenParen
+  |   |   |     `-')' CloseParen
   |   |   `-';'
   |   |-'}'
   |   `-';'
@@ -3662,7 +3789,7 @@ TemplateDeclaration Declaration
 )txt"}));
 }
 
-TEST_P(BuildSyntaxTreeTest, ExplicitClassTemplateInstantation_Definition) {
+TEST_P(BuildSyntaxTreeTest, ExplicitClassTemplateInstantiation_Definition) {
   if (!GetParam().isCXX()) {
     return;
   }
@@ -3684,7 +3811,7 @@ ExplicitTemplateInstantiation
 )txt"}));
 }
 
-TEST_P(BuildSyntaxTreeTest, ExplicitClassTemplateInstantation_Declaration) {
+TEST_P(BuildSyntaxTreeTest, ExplicitClassTemplateInstantiation_Declaration) {
   if (!GetParam().isCXX()) {
     return;
   }
@@ -3834,8 +3961,9 @@ TranslationUnit Detached
 | |-'"C"'
 | `-SimpleDeclaration
 |   |-'int'
-|   |-SimpleDeclarator Declarator
-|   | `-'a'
+|   |-DeclaratorList Declarators
+|   | `-SimpleDeclarator ListElement
+|   |   `-'a'
 |   `-';'
 `-LinkageSpecificationDeclaration
   |-'extern'
@@ -3843,13 +3971,15 @@ TranslationUnit Detached
   |-'{'
   |-SimpleDeclaration
   | |-'int'
-  | |-SimpleDeclarator Declarator
-  | | `-'b'
+  | |-DeclaratorList Declarators
+  | | `-SimpleDeclarator ListElement
+  | |   `-'b'
   | `-';'
   |-SimpleDeclaration
   | |-'int'
-  | |-SimpleDeclarator Declarator
-  | | `-'c'
+  | |-DeclaratorList Declarators
+  | | `-SimpleDeclarator ListElement
+  | |   `-'c'
   | `-';'
   `-'}'
 )txt"));
@@ -3876,11 +4006,12 @@ void test() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-CompoundStatement Statement
@@ -3913,11 +4044,12 @@ void test() BRACES
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen unmodifiable
     `-'}' CloseParen unmodifiable
@@ -3936,22 +4068,24 @@ void test() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-IfStatement Statement
     | |-'if' IntroducerKeyword unmodifiable
     | |-'(' unmodifiable
-    | |-BinaryOperatorExpression unmodifiable
-    | | |-IntegerLiteralExpression LeftHandSide unmodifiable
-    | | | `-'1' LiteralToken unmodifiable
-    | | |-'+' OperatorToken unmodifiable
-    | | `-IntegerLiteralExpression RightHandSide unmodifiable
-    | |   `-'1' LiteralToken unmodifiable
+    | |-ExpressionStatement Condition unmodifiable
+    | | `-BinaryOperatorExpression Expression unmodifiable
+    | |   |-IntegerLiteralExpression LeftHandSide unmodifiable
+    | |   | `-'1' LiteralToken unmodifiable
+    | |   |-'+' OperatorToken unmodifiable
+    | |   `-IntegerLiteralExpression RightHandSide unmodifiable
+    | |     `-'1' LiteralToken unmodifiable
     | |-')' unmodifiable
     | |-CompoundStatement ThenStatement unmodifiable
     | | |-'{' OpenParen unmodifiable
@@ -3980,11 +4114,12 @@ void test() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-ExpressionStatement Statement
@@ -4018,22 +4153,24 @@ void test() {
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-CompoundStatement
     |-'{' OpenParen
     |-IfStatement Statement
     | |-'if' IntroducerKeyword unmodifiable
     | |-'(' unmodifiable
-    | |-BinaryOperatorExpression unmodifiable
-    | | |-IntegerLiteralExpression LeftHandSide
-    | | | `-'1' LiteralToken
-    | | |-'&&' OperatorToken unmodifiable
-    | | `-IntegerLiteralExpression RightHandSide
-    | |   `-'0' LiteralToken
+    | |-ExpressionStatement Condition unmodifiable
+    | | `-BinaryOperatorExpression Expression unmodifiable
+    | |   |-IntegerLiteralExpression LeftHandSide
+    | |   | `-'1' LiteralToken
+    | |   |-'&&' OperatorToken unmodifiable
+    | |   `-IntegerLiteralExpression RightHandSide
+    | |     `-'0' LiteralToken
     | |-')' unmodifiable
     | |-CompoundStatement ThenStatement unmodifiable
     | | |-'{' OpenParen unmodifiable
@@ -4104,11 +4241,12 @@ void test() {
       {R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  |-'s'
-  |-'='
-  `-IntegerLiteralExpression
-    `-'1' LiteralToken
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    |-'s'
+    |-'='
+    `-IntegerLiteralExpression
+      `-'1' LiteralToken
 )txt"}));
 }
 
@@ -4133,36 +4271,39 @@ void test(){
       {R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  `-UnknownExpression
-    |-'s0'
-    |-'{'
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-UnknownExpression
+      |-'s0'
+      |-'{'
+      `-'}'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  `-UnknownExpression
-    |-'s1'
-    |-'{'
-    |-IntegerLiteralExpression
-    | `-'1' LiteralToken
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-UnknownExpression
+      |-'s1'
+      |-'{'
+      |-IntegerLiteralExpression
+      | `-'1' LiteralToken
+      `-'}'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  `-UnknownExpression
-    |-'s2'
-    |-'{'
-    |-IntegerLiteralExpression
-    | `-'1' LiteralToken
-    |-','
-    |-FloatingLiteralExpression
-    | `-'2.' LiteralToken
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    `-UnknownExpression
+      |-'s2'
+      |-'{'
+      |-IntegerLiteralExpression
+      | `-'1' LiteralToken
+      |-','
+      |-FloatingLiteralExpression
+      | `-'2.' LiteralToken
+      `-'}'
 )txt"}));
 }
 
@@ -4187,39 +4328,42 @@ void test() {
       {R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  |-'s0'
-  |-'='
-  `-UnknownExpression
-    |-'{'
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    |-'s0'
+    |-'='
+    `-UnknownExpression
+      |-'{'
+      `-'}'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  |-'s1'
-  |-'='
-  `-UnknownExpression
-    |-'{'
-    |-IntegerLiteralExpression
-    | `-'1' LiteralToken
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    |-'s1'
+    |-'='
+    `-UnknownExpression
+      |-'{'
+      |-IntegerLiteralExpression
+      | `-'1' LiteralToken
+      `-'}'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-`-SimpleDeclarator Declarator
-  |-'s2'
-  |-'='
-  `-UnknownExpression
-    |-'{'
-    |-IntegerLiteralExpression
-    | `-'1' LiteralToken
-    |-','
-    |-FloatingLiteralExpression
-    | `-'2.' LiteralToken
-    `-'}'
+`-DeclaratorList Declarators
+  `-SimpleDeclarator ListElement
+    |-'s2'
+    |-'='
+    `-UnknownExpression
+      |-'{'
+      |-IntegerLiteralExpression
+      | `-'1' LiteralToken
+      |-','
+      |-FloatingLiteralExpression
+      | `-'2.' LiteralToken
+      `-'}'
 )txt"}));
 }
 
@@ -4240,28 +4384,30 @@ struct S {
       {R"txt(
 SimpleDeclaration
 |-'S'
-|-SimpleDeclarator Declarator
-| `-UnknownExpression
-|   |-'s1'
-|   |-'('
-|   |-IntegerLiteralExpression
-|   | `-'1' LiteralToken
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   `-UnknownExpression
+|     |-'s1'
+|     |-'('
+|     |-IntegerLiteralExpression
+|     | `-'1' LiteralToken
+|     `-')'
 `-';'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-|-SimpleDeclarator Declarator
-| `-UnknownExpression
-|   |-'s2'
-|   |-'('
-|   |-IntegerLiteralExpression
-|   | `-'1' LiteralToken
-|   |-','
-|   |-FloatingLiteralExpression
-|   | `-'2.' LiteralToken
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   `-UnknownExpression
+|     |-'s2'
+|     |-'('
+|     |-IntegerLiteralExpression
+|     | `-'1' LiteralToken
+|     |-','
+|     |-FloatingLiteralExpression
+|     | `-'2.' LiteralToken
+|     `-')'
 `-';'
 )txt"}));
 }
@@ -4283,35 +4429,38 @@ struct S {
       {R"txt(
 SimpleDeclaration
 |-'S'
-|-SimpleDeclarator Declarator
-| `-'s0'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   `-'s0'
 `-';'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-|-SimpleDeclarator Declarator
-| `-UnknownExpression
-|   |-'s1'
-|   |-'('
-|   |-IntegerLiteralExpression
-|   | `-'1' LiteralToken
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   `-UnknownExpression
+|     |-'s1'
+|     |-'('
+|     |-IntegerLiteralExpression
+|     | `-'1' LiteralToken
+|     `-')'
 `-';'
   )txt",
        R"txt(
 SimpleDeclaration
 |-'S'
-|-SimpleDeclarator Declarator
-| `-UnknownExpression
-|   |-'s2'
-|   |-'('
-|   |-IntegerLiteralExpression
-|   | `-'1' LiteralToken
-|   |-','
-|   |-FloatingLiteralExpression
-|   | `-'2.' LiteralToken
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   `-UnknownExpression
+|     |-'s2'
+|     |-'('
+|     |-IntegerLiteralExpression
+|     | `-'1' LiteralToken
+|     |-','
+|     |-FloatingLiteralExpression
+|     | `-'2.' LiteralToken
+|     `-')'
 `-';'
 )txt"}));
 }
@@ -4518,13 +4667,14 @@ int a[10];
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'a'
-  | `-ArraySubscript
-  |   |-'[' OpenParen
-  |   |-IntegerLiteralExpression Size
-  |   | `-'10' LiteralToken
-  |   `-']' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'a'
+  |   `-ArraySubscript
+  |     |-'[' OpenParen
+  |     |-IntegerLiteralExpression Size
+  |     | `-'10' LiteralToken
+  |     `-']' CloseParen
   `-';'
 )txt"));
 }
@@ -4538,23 +4688,24 @@ int b[1][2][3];
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'b'
-  | |-ArraySubscript
-  | | |-'[' OpenParen
-  | | |-IntegerLiteralExpression Size
-  | | | `-'1' LiteralToken
-  | | `-']' CloseParen
-  | |-ArraySubscript
-  | | |-'[' OpenParen
-  | | |-IntegerLiteralExpression Size
-  | | | `-'2' LiteralToken
-  | | `-']' CloseParen
-  | `-ArraySubscript
-  |   |-'[' OpenParen
-  |   |-IntegerLiteralExpression Size
-  |   | `-'3' LiteralToken
-  |   `-']' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'b'
+  |   |-ArraySubscript
+  |   | |-'[' OpenParen
+  |   | |-IntegerLiteralExpression Size
+  |   | | `-'1' LiteralToken
+  |   | `-']' CloseParen
+  |   |-ArraySubscript
+  |   | |-'[' OpenParen
+  |   | |-IntegerLiteralExpression Size
+  |   | | `-'2' LiteralToken
+  |   | `-']' CloseParen
+  |   `-ArraySubscript
+  |     |-'[' OpenParen
+  |     |-IntegerLiteralExpression Size
+  |     | `-'3' LiteralToken
+  |     `-']' CloseParen
   `-';'
 )txt"));
 }
@@ -4568,24 +4719,25 @@ int c[] = {1,2,3};
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'c'
-  | |-ArraySubscript
-  | | |-'[' OpenParen
-  | | `-']' CloseParen
-  | |-'='
-  | `-UnknownExpression
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'c'
+  |   |-ArraySubscript
+  |   | |-'[' OpenParen
+  |   | `-']' CloseParen
+  |   |-'='
   |   `-UnknownExpression
-  |     |-'{'
-  |     |-IntegerLiteralExpression
-  |     | `-'1' LiteralToken
-  |     |-','
-  |     |-IntegerLiteralExpression
-  |     | `-'2' LiteralToken
-  |     |-','
-  |     |-IntegerLiteralExpression
-  |     | `-'3' LiteralToken
-  |     `-'}'
+  |     `-UnknownExpression
+  |       |-'{'
+  |       |-IntegerLiteralExpression
+  |       | `-'1' LiteralToken
+  |       |-','
+  |       |-IntegerLiteralExpression
+  |       | `-'2' LiteralToken
+  |       |-','
+  |       |-IntegerLiteralExpression
+  |       | `-'3' LiteralToken
+  |       `-'}'
   `-';'
 )txt"));
 }
@@ -4602,22 +4754,24 @@ void f(int xs[static 10]);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'f'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'int'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     |-'xs'
-  |   |     `-ArraySubscript
-  |   |       |-'[' OpenParen
-  |   |       |-'static'
-  |   |       |-IntegerLiteralExpression Size
-  |   |       | `-'10' LiteralToken
-  |   |       `-']' CloseParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'f'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'int'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       |-'xs'
+  |     |       `-ArraySubscript
+  |     |         |-'[' OpenParen
+  |     |         |-'static'
+  |     |         |-IntegerLiteralExpression Size
+  |     |         | `-'10' LiteralToken
+  |     |         `-']' CloseParen
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -4631,70 +4785,63 @@ int func();
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'func'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
 
 TEST_P(BuildSyntaxTreeTest, ParametersAndQualifiers_InFreeFunctions_Named) {
-  EXPECT_TRUE(treeDumpEqual(
+  EXPECT_TRUE(treeDumpEqualOnAnnotations(
       R"cpp(
-int func1(int a);
-int func2(int *ap);
-int func3(int a, float b);
-)cpp",
-      R"txt(
-TranslationUnit Detached
-|-SimpleDeclaration
-| |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'func1'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-ParameterDeclarationList Parameters
-| |   | `-SimpleDeclaration ListElement
-| |   |   |-'int'
-| |   |   `-SimpleDeclarator Declarator
-| |   |     `-'a'
-| |   `-')' CloseParen
-| `-';'
-|-SimpleDeclaration
-| |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'func2'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-ParameterDeclarationList Parameters
-| |   | `-SimpleDeclaration ListElement
-| |   |   |-'int'
-| |   |   `-SimpleDeclarator Declarator
-| |   |     |-'*'
-| |   |     `-'ap'
-| |   `-')' CloseParen
-| `-';'
-`-SimpleDeclaration
+     int func1([[int a]]);
+     int func2([[int *ap]]);
+     int func3([[int a, float b]]);
+     int func4([[undef a]]); // error-ok: no crash on invalid type
+   )cpp",
+      {R"txt(
+ParameterDeclarationList Parameters
+`-SimpleDeclaration ListElement
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func3'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'int'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'a'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'float'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     `-'b'
-  |   `-')' CloseParen
-  `-';'
-)txt"));
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      `-'a'
+)txt",
+       R"txt(
+ParameterDeclarationList Parameters
+`-SimpleDeclaration ListElement
+  |-'int'
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      |-'*'
+      `-'ap'
+)txt",
+       R"txt(
+ParameterDeclarationList Parameters
+|-SimpleDeclaration ListElement
+| |-'int'
+| `-DeclaratorList Declarators
+|   `-SimpleDeclarator ListElement
+|     `-'a'
+|-',' ListDelimiter
+`-SimpleDeclaration ListElement
+  |-'float'
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      `-'b'
+)txt",
+       R"txt(
+ParameterDeclarationList Parameters
+`-SimpleDeclaration ListElement
+  |-'undef'
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      `-'a'
+)txt"}));
 }
 
 TEST_P(BuildSyntaxTreeTest, ParametersAndQualifiers_InFreeFunctions_Unnamed) {
@@ -4708,41 +4855,45 @@ int func3(int, float);
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'func1'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-ParameterDeclarationList Parameters
-| |   | `-SimpleDeclaration ListElement
-| |   |   `-'int'
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'func1'
+| |   `-ParametersAndQualifiers
+| |     |-'(' OpenParen
+| |     |-ParameterDeclarationList Parameters
+| |     | `-SimpleDeclaration ListElement
+| |     |   `-'int'
+| |     `-')' CloseParen
 | `-';'
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'func2'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-ParameterDeclarationList Parameters
-| |   | `-SimpleDeclaration ListElement
-| |   |   |-'int'
-| |   |   `-SimpleDeclarator Declarator
-| |   |     `-'*'
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'func2'
+| |   `-ParametersAndQualifiers
+| |     |-'(' OpenParen
+| |     |-ParameterDeclarationList Parameters
+| |     | `-SimpleDeclaration ListElement
+| |     |   |-'int'
+| |     |   `-DeclaratorList Declarators
+| |     |     `-SimpleDeclarator ListElement
+| |     |       `-'*'
+| |     `-')' CloseParen
 | `-';'
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func3'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | `-'int'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   `-'float'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'func3'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | `-'int'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   `-'float'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -4760,11 +4911,12 @@ int func1([[int a = 1]]);
 ParameterDeclarationList Parameters
 `-SimpleDeclaration ListElement
   |-'int'
-  `-SimpleDeclarator Declarator
-    |-'a'
-    |-'='
-    `-IntegerLiteralExpression
-      `-'1' LiteralToken
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      |-'a'
+      |-'='
+      `-IntegerLiteralExpression
+        `-'1' LiteralToken
 )txt"}));
 }
 
@@ -4781,25 +4933,28 @@ int func2([[int *ap, int a = 1, char c = '2']]);
 ParameterDeclarationList Parameters
 |-SimpleDeclaration ListElement
 | |-'int'
-| `-SimpleDeclarator Declarator
-|   |-'*'
-|   `-'ap'
+| `-DeclaratorList Declarators
+|   `-SimpleDeclarator ListElement
+|     |-'*'
+|     `-'ap'
 |-',' ListDelimiter
 |-SimpleDeclaration ListElement
 | |-'int'
-| `-SimpleDeclarator Declarator
-|   |-'a'
-|   |-'='
-|   `-IntegerLiteralExpression
-|     `-'1' LiteralToken
+| `-DeclaratorList Declarators
+|   `-SimpleDeclarator ListElement
+|     |-'a'
+|     |-'='
+|     `-IntegerLiteralExpression
+|       `-'1' LiteralToken
 |-',' ListDelimiter
 `-SimpleDeclaration ListElement
   |-'char'
-  `-SimpleDeclarator Declarator
-    |-'c'
-    |-'='
-    `-CharacterLiteralExpression
-      `-''2'' LiteralToken
+  `-DeclaratorList Declarators
+    `-SimpleDeclarator ListElement
+      |-'c'
+      |-'='
+      `-CharacterLiteralExpression
+        `-''2'' LiteralToken
 )txt"}));
 }
 
@@ -4816,18 +4971,19 @@ template<typename T, typename... Args>
       {R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-'test'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-ParameterDeclarationList Parameters
-|   | |-SimpleDeclaration ListElement
-|   | | `-'T'
-|   | |-',' ListDelimiter
-|   | `-SimpleDeclaration ListElement
-|   |   |-'Args'
-|   |   `-'...'
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'test'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-ParameterDeclarationList Parameters
+|     | |-SimpleDeclaration ListElement
+|     | | `-'T'
+|     | |-',' ListDelimiter
+|     | `-SimpleDeclaration ListElement
+|     |   |-'Args'
+|     |   `-'...'
+|     `-')' CloseParen
 `-';'
 )txt"}));
 }
@@ -4845,22 +5001,25 @@ template<typename T, typename... Args>
       {R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-'test'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-ParameterDeclarationList Parameters
-|   | |-SimpleDeclaration ListElement
-|   | | |-'T'
-|   | | `-SimpleDeclarator Declarator
-|   | |   `-'t'
-|   | |-',' ListDelimiter
-|   | `-SimpleDeclaration ListElement
-|   |   |-'Args'
-|   |   |-'...'
-|   |   `-SimpleDeclarator Declarator
-|   |     `-'args'
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'test'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-ParameterDeclarationList Parameters
+|     | |-SimpleDeclaration ListElement
+|     | | |-'T'
+|     | | `-DeclaratorList Declarators
+|     | |   `-SimpleDeclarator ListElement
+|     | |     `-'t'
+|     | |-',' ListDelimiter
+|     | `-SimpleDeclaration ListElement
+|     |   |-'Args'
+|     |   |-'...'
+|     |   `-DeclaratorList Declarators
+|     |     `-SimpleDeclarator ListElement
+|     |       `-'args'
+|     `-')' CloseParen
 `-';'
 )txt"}));
 }
@@ -4878,18 +5037,19 @@ void test(int , char ...);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'test'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | `-'int'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   `-'char'
-  |   |-'...'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'test'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | `-'int'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   `-'char'
+  |     |-'...'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -4907,30 +5067,34 @@ int func(const int a, volatile int b, const volatile int c);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'const'
-  |   | | |-'int'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'a'
-  |   | |-',' ListDelimiter
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'volatile'
-  |   | | |-'int'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'b'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'const'
-  |   |   |-'volatile'
-  |   |   |-'int'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     `-'c'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'func'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'const'
+  |     | | |-'int'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     `-'a'
+  |     | |-',' ListDelimiter
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'volatile'
+  |     | | |-'int'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     `-'b'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'const'
+  |     |   |-'volatile'
+  |     |   |-'int'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       `-'c'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -4947,17 +5111,19 @@ int func(int& a);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'int'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     |-'&'
-  |   |     `-'a'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'func'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'int'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       |-'&'
+  |     |       `-'a'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -4975,17 +5141,19 @@ int func(int&& a);
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'func'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'int'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     |-'&&'
-  |   |     `-'a'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'func'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'int'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       |-'&&'
+  |     |       `-'a'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -5008,11 +5176,12 @@ TranslationUnit Detached
   |-'{'
   |-SimpleDeclaration
   | |-'int'
-  | |-SimpleDeclarator Declarator
-  | | |-'a'
-  | | `-ParametersAndQualifiers
-  | |   |-'(' OpenParen
-  | |   `-')' CloseParen
+  | |-DeclaratorList Declarators
+  | | `-SimpleDeclarator ListElement
+  | |   |-'a'
+  | |   `-ParametersAndQualifiers
+  | |     |-'(' OpenParen
+  | |     `-')' CloseParen
   | `-';'
   |-'}'
   `-';'
@@ -5035,35 +5204,38 @@ struct Test {
       {R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'b'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   `-'const'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'b'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     `-'const'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'c'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   `-'volatile'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'c'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     `-'volatile'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'d'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   |-'const'
-|   `-'volatile'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'d'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     |-'const'
+|     `-'volatile'
 `-';'
 )txt"}));
 }
@@ -5081,12 +5253,13 @@ struct Test {
       {R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'e'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   `-'&'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'e'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     `-'&'
 `-';'
 )txt"}));
 }
@@ -5104,12 +5277,13 @@ struct Test {
       {R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'f'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   `-'&&'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'f'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     `-'&&'
 `-';'
 )txt"}));
 }
@@ -5126,14 +5300,15 @@ auto foo() -> int;
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'auto'
-  |-SimpleDeclarator Declarator
-  | |-'foo'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-')' CloseParen
-  |   `-TrailingReturnType TrailingReturn
-  |     |-'->' ArrowToken
-  |     `-'int'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'foo'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-')' CloseParen
+  |     `-TrailingReturnType TrailingReturn
+  |       |-'->' ArrowToken
+  |       `-'int'
   `-';'
 )txt"));
 }
@@ -5154,58 +5329,62 @@ struct MyException2 {};
       {R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'a'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   |-'throw'
-|   |-'('
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'a'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     |-'throw'
+|     |-'('
+|     `-')'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'b'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   |-'throw'
-|   |-'('
-|   |-'...'
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'b'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     |-'throw'
+|     |-'('
+|     |-'...'
+|     `-')'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'c'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   |-'throw'
-|   |-'('
-|   |-'MyException1'
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'c'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     |-'throw'
+|     |-'('
+|     |-'MyException1'
+|     `-')'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-'d'
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-')' CloseParen
-|   |-'throw'
-|   |-'('
-|   |-'MyException1'
-|   |-','
-|   |-'MyException2'
-|   `-')'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-'d'
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-')' CloseParen
+|     |-'throw'
+|     |-'('
+|     |-'MyException1'
+|     |-','
+|     |-'MyException2'
+|     `-')'
 `-';'
 )txt"}));
 }
@@ -5223,25 +5402,27 @@ int b() noexcept(true);
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'a'
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-')' CloseParen
-| |   `-'noexcept'
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'a'
+| |   `-ParametersAndQualifiers
+| |     |-'(' OpenParen
+| |     |-')' CloseParen
+| |     `-'noexcept'
 | `-';'
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'b'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-')' CloseParen
-  |   |-'noexcept'
-  |   |-'('
-  |   |-BoolLiteralExpression
-  |   | `-'true' LiteralToken
-  |   `-')'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'b'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-')' CloseParen
+  |     |-'noexcept'
+  |     |-'('
+  |     |-BoolLiteralExpression
+  |     | `-'true' LiteralToken
+  |     `-')'
   `-';'
 )txt"));
 }
@@ -5258,50 +5439,54 @@ int *(d)(int);
 TranslationUnit Detached
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | `-ParenDeclarator
-| |   |-'(' OpenParen
-| |   |-'a'
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   `-ParenDeclarator
+| |     |-'(' OpenParen
+| |     |-'a'
+| |     `-')' CloseParen
 | `-';'
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'*'
-| | `-ParenDeclarator
-| |   |-'(' OpenParen
-| |   |-'b'
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'*'
+| |   `-ParenDeclarator
+| |     |-'(' OpenParen
+| |     |-'b'
+| |     `-')' CloseParen
 | `-';'
 |-SimpleDeclaration
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-ParenDeclarator
-| | | |-'(' OpenParen
-| | | |-'*'
-| | | |-'c'
-| | | `-')' CloseParen
-| | `-ParametersAndQualifiers
-| |   |-'(' OpenParen
-| |   |-ParameterDeclarationList Parameters
-| |   | `-SimpleDeclaration ListElement
-| |   |   `-'int'
-| |   `-')' CloseParen
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-ParenDeclarator
+| |   | |-'(' OpenParen
+| |   | |-'*'
+| |   | |-'c'
+| |   | `-')' CloseParen
+| |   `-ParametersAndQualifiers
+| |     |-'(' OpenParen
+| |     |-ParameterDeclarationList Parameters
+| |     | `-SimpleDeclaration ListElement
+| |     |   `-'int'
+| |     `-')' CloseParen
 | `-';'
 `-SimpleDeclaration
   |-'int'
-  |-SimpleDeclarator Declarator
-  | |-'*'
-  | |-ParenDeclarator
-  | | |-'(' OpenParen
-  | | |-'d'
-  | | `-')' CloseParen
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | `-SimpleDeclaration ListElement
-  |   |   `-'int'
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'*'
+  |   |-ParenDeclarator
+  |   | |-'(' OpenParen
+  |   | |-'d'
+  |   | `-')' CloseParen
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | `-SimpleDeclaration ListElement
+  |     |   `-'int'
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -5317,22 +5502,24 @@ TranslationUnit Detached
 |-SimpleDeclaration
 | |-'const'
 | |-'int'
-| |-SimpleDeclarator Declarator
-| | |-'west'
-| | |-'='
-| | `-PrefixUnaryOperatorExpression
-| |   |-'-' OperatorToken
-| |   `-IntegerLiteralExpression Operand
-| |     `-'1' LiteralToken
+| |-DeclaratorList Declarators
+| | `-SimpleDeclarator ListElement
+| |   |-'west'
+| |   |-'='
+| |   `-PrefixUnaryOperatorExpression
+| |     |-'-' OperatorToken
+| |     `-IntegerLiteralExpression Operand
+| |       `-'1' LiteralToken
 | `-';'
 `-SimpleDeclaration
   |-'int'
   |-'const'
-  |-SimpleDeclarator Declarator
-  | |-'east'
-  | |-'='
-  | `-IntegerLiteralExpression
-  |   `-'1' LiteralToken
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'east'
+  |   |-'='
+  |   `-IntegerLiteralExpression
+  |     `-'1' LiteralToken
   `-';'
 )txt"));
 }
@@ -5348,11 +5535,12 @@ TranslationUnit Detached
   |-'const'
   |-'int'
   |-'const'
-  |-SimpleDeclarator Declarator
-  | |-'universal'
-  | |-'='
-  | `-IntegerLiteralExpression
-  |   `-'0' LiteralToken
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'universal'
+  |   |-'='
+  |   `-IntegerLiteralExpression
+  |     `-'0' LiteralToken
   `-';'
 )txt"));
 }
@@ -5369,12 +5557,13 @@ TranslationUnit Detached
   |-'const'
   |-'int'
   |-'const'
-  |-SimpleDeclarator Declarator
-  | |-'*'
-  | |-'const'
-  | |-'*'
-  | |-'volatile'
-  | `-'b'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'*'
+  |   |-'const'
+  |   |-'*'
+  |   |-'volatile'
+  |   `-'b'
   `-';'
 )txt"));
 }
@@ -5391,30 +5580,31 @@ auto foo() -> auto(*)(int) -> double*;
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'auto'
-  |-SimpleDeclarator Declarator
-  | |-'foo'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-')' CloseParen
-  |   `-TrailingReturnType TrailingReturn
-  |     |-'->' ArrowToken
-  |     |-'auto'
-  |     `-SimpleDeclarator Declarator
-  |       |-ParenDeclarator
-  |       | |-'(' OpenParen
-  |       | |-'*'
-  |       | `-')' CloseParen
-  |       `-ParametersAndQualifiers
-  |         |-'(' OpenParen
-  |         |-ParameterDeclarationList Parameters
-  |         | `-SimpleDeclaration ListElement
-  |         |   `-'int'
-  |         |-')' CloseParen
-  |         `-TrailingReturnType TrailingReturn
-  |           |-'->' ArrowToken
-  |           |-'double'
-  |           `-SimpleDeclarator Declarator
-  |             `-'*'
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'foo'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-')' CloseParen
+  |     `-TrailingReturnType TrailingReturn
+  |       |-'->' ArrowToken
+  |       |-'auto'
+  |       `-SimpleDeclarator Declarator
+  |         |-ParenDeclarator
+  |         | |-'(' OpenParen
+  |         | |-'*'
+  |         | `-')' CloseParen
+  |         `-ParametersAndQualifiers
+  |           |-'(' OpenParen
+  |           |-ParameterDeclarationList Parameters
+  |           | `-SimpleDeclaration ListElement
+  |           |   `-'int'
+  |           |-')' CloseParen
+  |           `-TrailingReturnType TrailingReturn
+  |             |-'->' ArrowToken
+  |             |-'double'
+  |             `-SimpleDeclarator Declarator
+  |               `-'*'
   `-';'
 )txt"));
 }
@@ -5432,24 +5622,26 @@ struct X {};
       {R"txt(
 SimpleDeclaration
 |-'int'
-|-SimpleDeclarator Declarator
-| |-MemberPointer
-| | |-'X'
-| | |-'::'
-| | `-'*'
-| `-'a'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-MemberPointer
+|   | |-'X'
+|   | |-'::'
+|   | `-'*'
+|   `-'a'
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'const'
 |-'int'
-|-SimpleDeclarator Declarator
-| |-MemberPointer
-| | |-'X'
-| | |-'::'
-| | `-'*'
-| `-'b'
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-MemberPointer
+|   | |-'X'
+|   | |-'::'
+|   | `-'*'
+|   `-'b'
 `-';'
 )txt"}));
 }
@@ -5472,70 +5664,75 @@ struct X {
       {R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-ParenDeclarator
-| | |-'(' OpenParen
-| | |-MemberPointer
-| | | |-'X'
-| | | |-'::'
-| | | `-'*'
-| | |-'xp'
-| | `-')' CloseParen
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-ParenDeclarator
+|   | |-'(' OpenParen
+|   | |-MemberPointer
+|   | | |-'X'
+|   | | |-'::'
+|   | | `-'*'
+|   | |-'xp'
+|   | `-')' CloseParen
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     `-')' CloseParen
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-ParenDeclarator
-| | |-'(' OpenParen
-| | |-MemberPointer
-| | | |-'X'
-| | | |-'::'
-| | | `-'*'
-| | |-'*'
-| | |-'xpp'
-| | `-')' CloseParen
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-ParameterDeclarationList Parameters
-|   | `-SimpleDeclaration ListElement
-|   |   |-'const'
-|   |   |-'int'
-|   |   `-SimpleDeclarator Declarator
-|   |     `-'*'
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-ParenDeclarator
+|   | |-'(' OpenParen
+|   | |-MemberPointer
+|   | | |-'X'
+|   | | |-'::'
+|   | | `-'*'
+|   | |-'*'
+|   | |-'xpp'
+|   | `-')' CloseParen
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-ParameterDeclarationList Parameters
+|     | `-SimpleDeclaration ListElement
+|     |   |-'const'
+|     |   |-'int'
+|     |   `-DeclaratorList Declarators
+|     |     `-SimpleDeclarator ListElement
+|     |       `-'*'
+|     `-')' CloseParen
 `-';'
 )txt",
        R"txt(
 SimpleDeclaration
 |-'void'
-|-SimpleDeclarator Declarator
-| |-ParenDeclarator
-| | |-'(' OpenParen
-| | |-'X'
-| | |-'::'
-| | |-MemberPointer
-| | | |-'Y'
-| | | |-'::'
-| | | `-'*'
-| | |-'xyp'
-| | `-')' CloseParen
-| `-ParametersAndQualifiers
-|   |-'(' OpenParen
-|   |-ParameterDeclarationList Parameters
-|   | |-SimpleDeclaration ListElement
-|   | | |-'const'
-|   | | |-'int'
-|   | | `-SimpleDeclarator Declarator
-|   | |   `-'*'
-|   | |-',' ListDelimiter
-|   | `-SimpleDeclaration ListElement
-|   |   `-'char'
-|   `-')' CloseParen
+|-DeclaratorList Declarators
+| `-SimpleDeclarator ListElement
+|   |-ParenDeclarator
+|   | |-'(' OpenParen
+|   | |-'X'
+|   | |-'::'
+|   | |-MemberPointer
+|   | | |-'Y'
+|   | | |-'::'
+|   | | `-'*'
+|   | |-'xyp'
+|   | `-')' CloseParen
+|   `-ParametersAndQualifiers
+|     |-'(' OpenParen
+|     |-ParameterDeclarationList Parameters
+|     | |-SimpleDeclaration ListElement
+|     | | |-'const'
+|     | | |-'int'
+|     | | `-DeclaratorList Declarators
+|     | |   `-SimpleDeclarator ListElement
+|     | |     `-'*'
+|     | |-',' ListDelimiter
+|     | `-SimpleDeclaration ListElement
+|     |   `-'char'
+|     `-')' CloseParen
 `-';'
 )txt"}));
 }
@@ -5549,31 +5746,34 @@ void x(char a, short (*b)(int));
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'x'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'char'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'a'
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'short'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     |-ParenDeclarator
-  |   |     | |-'(' OpenParen
-  |   |     | |-'*'
-  |   |     | |-'b'
-  |   |     | `-')' CloseParen
-  |   |     `-ParametersAndQualifiers
-  |   |       |-'(' OpenParen
-  |   |       |-ParameterDeclarationList Parameters
-  |   |       | `-SimpleDeclaration ListElement
-  |   |       |   `-'int'
-  |   |       `-')' CloseParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'x'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'char'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     `-'a'
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'short'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       |-ParenDeclarator
+  |     |       | |-'(' OpenParen
+  |     |       | |-'*'
+  |     |       | |-'b'
+  |     |       | `-')' CloseParen
+  |     |       `-ParametersAndQualifiers
+  |     |         |-'(' OpenParen
+  |     |         |-ParameterDeclarationList Parameters
+  |     |         | `-SimpleDeclaration ListElement
+  |     |         |   `-'int'
+  |     |         `-')' CloseParen
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }
@@ -5587,48 +5787,52 @@ void x(char a, short (*b)(int), long (**c)(long long));
 TranslationUnit Detached
 `-SimpleDeclaration
   |-'void'
-  |-SimpleDeclarator Declarator
-  | |-'x'
-  | `-ParametersAndQualifiers
-  |   |-'(' OpenParen
-  |   |-ParameterDeclarationList Parameters
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'char'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   `-'a'
-  |   | |-',' ListDelimiter
-  |   | |-SimpleDeclaration ListElement
-  |   | | |-'short'
-  |   | | `-SimpleDeclarator Declarator
-  |   | |   |-ParenDeclarator
-  |   | |   | |-'(' OpenParen
-  |   | |   | |-'*'
-  |   | |   | |-'b'
-  |   | |   | `-')' CloseParen
-  |   | |   `-ParametersAndQualifiers
-  |   | |     |-'(' OpenParen
-  |   | |     |-ParameterDeclarationList Parameters
-  |   | |     | `-SimpleDeclaration ListElement
-  |   | |     |   `-'int'
-  |   | |     `-')' CloseParen
-  |   | |-',' ListDelimiter
-  |   | `-SimpleDeclaration ListElement
-  |   |   |-'long'
-  |   |   `-SimpleDeclarator Declarator
-  |   |     |-ParenDeclarator
-  |   |     | |-'(' OpenParen
-  |   |     | |-'*'
-  |   |     | |-'*'
-  |   |     | |-'c'
-  |   |     | `-')' CloseParen
-  |   |     `-ParametersAndQualifiers
-  |   |       |-'(' OpenParen
-  |   |       |-ParameterDeclarationList Parameters
-  |   |       | `-SimpleDeclaration ListElement
-  |   |       |   |-'long'
-  |   |       |   `-'long'
-  |   |       `-')' CloseParen
-  |   `-')' CloseParen
+  |-DeclaratorList Declarators
+  | `-SimpleDeclarator ListElement
+  |   |-'x'
+  |   `-ParametersAndQualifiers
+  |     |-'(' OpenParen
+  |     |-ParameterDeclarationList Parameters
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'char'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     `-'a'
+  |     | |-',' ListDelimiter
+  |     | |-SimpleDeclaration ListElement
+  |     | | |-'short'
+  |     | | `-DeclaratorList Declarators
+  |     | |   `-SimpleDeclarator ListElement
+  |     | |     |-ParenDeclarator
+  |     | |     | |-'(' OpenParen
+  |     | |     | |-'*'
+  |     | |     | |-'b'
+  |     | |     | `-')' CloseParen
+  |     | |     `-ParametersAndQualifiers
+  |     | |       |-'(' OpenParen
+  |     | |       |-ParameterDeclarationList Parameters
+  |     | |       | `-SimpleDeclaration ListElement
+  |     | |       |   `-'int'
+  |     | |       `-')' CloseParen
+  |     | |-',' ListDelimiter
+  |     | `-SimpleDeclaration ListElement
+  |     |   |-'long'
+  |     |   `-DeclaratorList Declarators
+  |     |     `-SimpleDeclarator ListElement
+  |     |       |-ParenDeclarator
+  |     |       | |-'(' OpenParen
+  |     |       | |-'*'
+  |     |       | |-'*'
+  |     |       | |-'c'
+  |     |       | `-')' CloseParen
+  |     |       `-ParametersAndQualifiers
+  |     |         |-'(' OpenParen
+  |     |         |-ParameterDeclarationList Parameters
+  |     |         | `-SimpleDeclaration ListElement
+  |     |         |   |-'long'
+  |     |         |   `-'long'
+  |     |         `-')' CloseParen
+  |     `-')' CloseParen
   `-';'
 )txt"));
 }

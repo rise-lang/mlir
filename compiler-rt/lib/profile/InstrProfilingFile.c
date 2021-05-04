@@ -8,6 +8,7 @@
 
 #if !defined(__Fuchsia__)
 
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,7 @@ typedef struct lprofFilename {
   unsigned OwnsFilenamePat;
   const char *ProfilePathPrefix;
   char PidChars[MAX_PID_SIZE];
+  char *TmpDir;
   char Hostname[COMPILER_RT_MAX_HOSTLEN];
   unsigned NumPids;
   unsigned NumHosts;
@@ -86,8 +88,8 @@ typedef struct lprofFilename {
   ProfileNameSpecifier PNS;
 } lprofFilename;
 
-static lprofFilename lprofCurFilename = {0, 0, 0, {0},        {0},
-                                         0, 0, 0, PNS_unknown};
+static lprofFilename lprofCurFilename = {0,   0, 0, {0}, NULL,
+                                         {0}, 0, 0, 0,   PNS_unknown};
 
 static int ProfileMergeRequested = 0;
 static int isProfileMergeRequested() { return ProfileMergeRequested; }
@@ -263,7 +265,8 @@ static int doProfileMerging(FILE *ProfileFile, int *MergeDone) {
 
   // Truncate the file in case merging of value profile did not happend to
   // prevent from leaving garbage data at the end of the profile file.
-  COMPILER_RT_FTRUNCATE(ProfileFile, __llvm_profile_get_size_for_buffer());
+  (void)COMPILER_RT_FTRUNCATE(ProfileFile,
+                              __llvm_profile_get_size_for_buffer());
 
   (void)munmap(ProfileBuffer, ProfileFileSize);
   *MergeDone = 1;
@@ -419,14 +422,12 @@ static void truncateCurrentFile(void) {
   fclose(File);
 }
 
-#ifndef _MSC_VER
+#if !defined(__Fuchsia__) && !defined(_WIN32)
 static void assertIsZero(int *i) {
   if (*i)
     PROF_WARN("Expected flag to be 0, but got: %d\n", *i);
 }
-#endif
 
-#if !defined(__Fuchsia__) && !defined(_WIN32)
 /* Write a partial profile to \p Filename, which is required to be backed by
  * the open file object \p File. */
 static int writeProfileWithFileObject(const char *Filename, FILE *File) {
@@ -667,7 +668,8 @@ static void initializeProfileForContinuousMode(void) {
         FileOffsetToCounters);
   }
 
-  unlockProfile(&ProfileRequiresUnlock, File);
+  if (ProfileRequiresUnlock)
+    unlockProfile(&ProfileRequiresUnlock, File);
 #endif // defined(__Fuchsia__) || defined(_WIN32)
 }
 
@@ -699,6 +701,13 @@ static unsigned getMergePoolSize(const char *FilenamePat, int *I) {
   return 0;
 }
 
+/* Assert that Idx does index past a string null terminator. Return the
+ * result of the check. */
+static int checkBounds(int Idx, int Strlen) {
+  assert(Idx <= Strlen && "Indexing past string null terminator");
+  return Idx <= Strlen;
+}
+
 /* Parses the pattern string \p FilenamePat and stores the result to
  * lprofcurFilename structure. */
 static int parseFilenamePattern(const char *FilenamePat,
@@ -707,6 +716,7 @@ static int parseFilenamePattern(const char *FilenamePat,
   char *PidChars = &lprofCurFilename.PidChars[0];
   char *Hostname = &lprofCurFilename.Hostname[0];
   int MergingEnabled = 0;
+  int FilenamePatLen = strlen(FilenamePat);
 
   /* Clean up cached prefix and filename.  */
   if (lprofCurFilename.ProfilePathPrefix)
@@ -725,9 +735,12 @@ static int parseFilenamePattern(const char *FilenamePat,
     lprofCurFilename.OwnsFilenamePat = 1;
   }
   /* Check the filename for "%p", which indicates a pid-substitution. */
-  for (I = 0; FilenamePat[I]; ++I)
+  for (I = 0; checkBounds(I, FilenamePatLen) && FilenamePat[I]; ++I) {
     if (FilenamePat[I] == '%') {
-      if (FilenamePat[++I] == 'p') {
+      ++I; /* Advance to the next character. */
+      if (!checkBounds(I, FilenamePatLen))
+        break;
+      if (FilenamePat[I] == 'p') {
         if (!NumPids++) {
           if (snprintf(PidChars, MAX_PID_SIZE, "%ld", (long)getpid()) <= 0) {
             PROF_WARN("Unable to get pid for filename pattern %s. Using the "
@@ -744,6 +757,14 @@ static int parseFilenamePattern(const char *FilenamePat,
                       FilenamePat);
             return -1;
           }
+      } else if (FilenamePat[I] == 't') {
+        lprofCurFilename.TmpDir = getenv("TMPDIR");
+        if (!lprofCurFilename.TmpDir) {
+          PROF_WARN("Unable to get the TMPDIR environment variable, referenced "
+                    "in %s. Using the default path.",
+                    FilenamePat);
+          return -1;
+        }
       } else if (FilenamePat[I] == 'c') {
         if (__llvm_profile_is_continuous_mode_enabled()) {
           PROF_WARN("%%c specifier can only be specified once in %s.\n",
@@ -753,7 +774,6 @@ static int parseFilenamePattern(const char *FilenamePat,
 
         __llvm_profile_set_page_size(getpagesize());
         __llvm_profile_enable_continuous_mode();
-        I++; /* advance to 'c' */
       } else {
         unsigned MergePoolSize = getMergePoolSize(FilenamePat, &I);
         if (!MergePoolSize)
@@ -767,6 +787,7 @@ static int parseFilenamePattern(const char *FilenamePat,
         lprofCurFilename.MergePoolSize = MergePoolSize;
       }
     }
+  }
 
   lprofCurFilename.NumPids = NumPids;
   lprofCurFilename.NumHosts = NumHosts;
@@ -827,12 +848,13 @@ static int getCurFilenameLength() {
     return 0;
 
   if (!(lprofCurFilename.NumPids || lprofCurFilename.NumHosts ||
-        lprofCurFilename.MergePoolSize))
+        lprofCurFilename.TmpDir || lprofCurFilename.MergePoolSize))
     return strlen(lprofCurFilename.FilenamePat);
 
   Len = strlen(lprofCurFilename.FilenamePat) +
         lprofCurFilename.NumPids * (strlen(lprofCurFilename.PidChars) - 2) +
-        lprofCurFilename.NumHosts * (strlen(lprofCurFilename.Hostname) - 2);
+        lprofCurFilename.NumHosts * (strlen(lprofCurFilename.Hostname) - 2) +
+        (lprofCurFilename.TmpDir ? (strlen(lprofCurFilename.TmpDir) - 1) : 0);
   if (lprofCurFilename.MergePoolSize)
     Len += SIGLEN;
   return Len;
@@ -844,14 +866,14 @@ static int getCurFilenameLength() {
  * current filename pattern string is directly returned, unless ForceUseBuf
  * is enabled. */
 static const char *getCurFilename(char *FilenameBuf, int ForceUseBuf) {
-  int I, J, PidLength, HostNameLength, FilenamePatLength;
+  int I, J, PidLength, HostNameLength, TmpDirLength, FilenamePatLength;
   const char *FilenamePat = lprofCurFilename.FilenamePat;
 
   if (!lprofCurFilename.FilenamePat || !lprofCurFilename.FilenamePat[0])
     return 0;
 
   if (!(lprofCurFilename.NumPids || lprofCurFilename.NumHosts ||
-        lprofCurFilename.MergePoolSize ||
+        lprofCurFilename.TmpDir || lprofCurFilename.MergePoolSize ||
         __llvm_profile_is_continuous_mode_enabled())) {
     if (!ForceUseBuf)
       return lprofCurFilename.FilenamePat;
@@ -864,6 +886,7 @@ static const char *getCurFilename(char *FilenameBuf, int ForceUseBuf) {
 
   PidLength = strlen(lprofCurFilename.PidChars);
   HostNameLength = strlen(lprofCurFilename.Hostname);
+  TmpDirLength = lprofCurFilename.TmpDir ? strlen(lprofCurFilename.TmpDir) : 0;
   /* Construct the new filename. */
   for (I = 0, J = 0; FilenamePat[I]; ++I)
     if (FilenamePat[I] == '%') {
@@ -873,6 +896,10 @@ static const char *getCurFilename(char *FilenameBuf, int ForceUseBuf) {
       } else if (FilenamePat[I] == 'h') {
         memcpy(FilenameBuf + J, lprofCurFilename.Hostname, HostNameLength);
         J += HostNameLength;
+      } else if (FilenamePat[I] == 't') {
+        memcpy(FilenameBuf + J, lprofCurFilename.TmpDir, TmpDirLength);
+        FilenameBuf[J + TmpDirLength] = DIR_SEPARATOR;
+        J += TmpDirLength + 1;
       } else {
         if (!getMergePoolSize(FilenamePat, &I))
           continue;

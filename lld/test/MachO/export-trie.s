@@ -6,7 +6,7 @@
 ## the image base starts at a non-zero address. This allows us to verify that
 ## addresses in the export trie are correctly encoded as relative to the image
 ## base.
-# RUN: lld -flavor darwinnew %t.o -o %t
+# RUN: %lld %t.o -o %t
 
 # RUN: llvm-objdump --syms --exports-trie %t | FileCheck %s --check-prefix=EXPORTS
 # EXPORTS-LABEL: SYMBOL TABLE:
@@ -15,7 +15,9 @@
 # EXPORTS-DAG:   [[#%x, HELLO_WORLD_ADDR:]] {{.*}} _hello_world
 # EXPORTS-DAG:   [[#%x, HELLO_ITS_ME_ADDR:]] {{.*}} _hello_its_me
 # EXPORTS-DAG:   [[#%x, HELLO_ITS_YOU_ADDR:]] {{.*}} _hello_its_you
+# EXPORTS-DAG:   [[#%x, HEADER_ADDR:]] g F __TEXT,__text __mh_execute_header
 # EXPORTS-LABEL: Exports trie:
+# EXPORTS-DAG:   0x{{0*}}[[#%X, HEADER_ADDR]] __mh_execute_header
 # EXPORTS-DAG:   0x{{0*}}[[#%X, MAIN_ADDR]] _main
 # EXPORTS-DAG:   0x{{0*}}[[#%X, HELLO_ADDR]] _hello
 # EXPORTS-DAG:   0x{{0*}}[[#%X, HELLO_WORLD_ADDR]] _hello_world
@@ -27,13 +29,16 @@
 # CHECK-LABEL: ExportTrie:
 # CHECK: Name: ''
 # CHECK: Name: _
-# CHECK: Name: main
-# CHECK: Name: hello
+# CHECK-DAG: Name: _mh_execute_header
+# CHECK-DAG: Name: main
+# CHECK-DAG: Name: hello
 # CHECK: Name: _
 # CHECK: Name: world
 # CHECK: Name: its_
-# CHECK: Name: you
-# CHECK: Name: me
+# CHECK-DAG: Name: you
+# CHECK-DAG: Name: me
+
+
 
 .section __TEXT,__cstring
 .globl _hello, _hello_world, _hello_its_me, _hello_its_you, _main

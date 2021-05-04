@@ -20,6 +20,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
@@ -55,6 +56,15 @@ void TargetLoweringObjectFile::Initialize(MCContext &ctx,
 
 TargetLoweringObjectFile::~TargetLoweringObjectFile() {
   delete Mang;
+}
+
+unsigned TargetLoweringObjectFile::getCallSiteEncoding() const {
+  // If target does not have LEB128 directives, we would need the
+  // call site encoding to be udata4 so that the alternative path
+  // for not having LEB128 directives could work.
+  if (!getContext().getAsmInfo()->hasLEB128Directives())
+    return dwarf::DW_EH_PE_udata4;
+  return CallSiteEncoding;
 }
 
 static bool isNullOrUndef(const Constant *C) {
@@ -138,8 +148,8 @@ void TargetLoweringObjectFile::emitPersonalityValue(MCStreamer &Streamer,
                                                     const MCSymbol *Sym) const {
 }
 
-void TargetLoweringObjectFile::emitCGProfile(MCStreamer &Streamer,
-                                             Module &M) const {
+void TargetLoweringObjectFile::emitCGProfileMetadata(MCStreamer &Streamer,
+                                                     Module &M) const {
   MCContext &C = getContext();
   SmallVector<Module::ModuleFlagEntry, 8> ModuleFlags;
   M.getModuleFlagsMetadata(ModuleFlags);
@@ -161,7 +171,9 @@ void TargetLoweringObjectFile::emitCGProfile(MCStreamer &Streamer,
     if (!MDO)
       return nullptr;
     auto *V = cast<ValueAsMetadata>(MDO);
-    const Function *F = cast<Function>(V->getValue());
+    const Function *F = cast<Function>(V->getValue()->stripPointerCasts());
+    if (F->hasDLLImportStorageClass())
+      return nullptr;
     return TM->getSymbol(F);
   };
 
@@ -205,8 +217,14 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalObject *GO,
 
   // Handle thread-local data first.
   if (GVar->isThreadLocal()) {
-    if (isSuitableForBSS(GVar) && !TM.Options.NoZerosInBSS)
+    if (isSuitableForBSS(GVar) && !TM.Options.NoZerosInBSS) {
+      // Zero-initialized TLS variables with local linkage always get classified
+      // as ThreadBSSLocal.
+      if (GVar->hasLocalLinkage()) {
+        return SectionKind::getThreadBSSLocal();
+      }
       return SectionKind::getThreadBSS();
+    }
     return SectionKind::getThreadData();
   }
 
@@ -278,7 +296,8 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalObject *GO,
       // consideration when it tries to merge entries in the section.
       Reloc::Model ReloModel = TM.getRelocationModel();
       if (ReloModel == Reloc::Static || ReloModel == Reloc::ROPI ||
-          ReloModel == Reloc::RWPI || ReloModel == Reloc::ROPI_RWPI)
+          ReloModel == Reloc::RWPI || ReloModel == Reloc::ROPI_RWPI ||
+          !C->needsDynamicRelocation())
         return SectionKind::getReadOnly();
 
       // Otherwise, the dynamic linker needs to fix it up, put it in the
@@ -365,6 +384,11 @@ MCSection *TargetLoweringObjectFile::getSectionForConstant(
 MCSection *TargetLoweringObjectFile::getSectionForMachineBasicBlock(
     const Function &F, const MachineBasicBlock &MBB,
     const TargetMachine &TM) const {
+  return nullptr;
+}
+
+MCSection *TargetLoweringObjectFile::getUniqueSectionForFunction(
+    const Function &F, const TargetMachine &TM) const {
   return nullptr;
 }
 

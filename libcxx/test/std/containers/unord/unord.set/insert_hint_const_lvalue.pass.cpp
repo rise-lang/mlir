@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: LIBCXX-DEBUG-FIXME
+
 // <unordered_set>
 
 // template <class Value, class Hash = hash<Value>, class Pred = equal_to<Value>,
@@ -13,10 +15,6 @@
 // class unordered_set
 
 // iterator insert(const_iterator p, const value_type& x);
-
-#if _LIBCPP_DEBUG >= 1
-#define _LIBCPP_ASSERT(x, m) ((x) ? (void)0 : std::exit(0))
-#endif
 
 #include <unordered_set>
 #include <cassert>
@@ -62,19 +60,6 @@ int main(int, char**)
         do_insert_hint_const_lvalue_test<C>();
     }
 #endif
-#if _LIBCPP_DEBUG >= 1
-    {
-        typedef std::unordered_set<double> C;
-        typedef C::iterator R;
-        typedef C::value_type P;
-        C c;
-        C c2;
-        C::const_iterator e = c2.end();
-        P v(3.5);
-        R r = c.insert(e, v);
-        assert(false);
-    }
-#endif
 
-  return 0;
+    return 0;
 }

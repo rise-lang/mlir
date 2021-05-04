@@ -315,7 +315,8 @@ int main() {
 // CHECK: define internal i32 [[TASK_ENTRY6]](i32 %0, [[KMP_TASK_T]]{{.*}}* noalias %{{.+}})
 // UNTIEDRT: [[S1_ADDR_PTR:%.+]] = alloca %struct.S*,
 // UNTIEDRT: [[S2_ADDR_PTR_REF:%.+]] = alloca %struct.S**,
-// UNTIEDRT: call void (i8*, ...) %{{.+}}(i8* %{{.+}}, %struct.S** [[S1_ADDR_PTR]], %struct.S*** [[S2_ADDR_PTR_REF]])
+// UNTIEDRT: [[FN:%.+]] = bitcast void (i8*, ...)* %{{.*}} to void (i8*,
+// UNTIEDRT: call void [[FN]](i8* %{{.+}}, %struct.S** [[S1_ADDR_PTR]], %struct.S*** [[S2_ADDR_PTR_REF]])
 // UNTIEDRT-DAG: [[S1_ADDR:%.+]] = load %struct.S*, %struct.S** [[S1_ADDR_PTR]],
 // UNTIEDRT-DAG: [[S2_ADDR_PTR:%.+]] = load %struct.S**, %struct.S*** [[S2_ADDR_PTR_REF]],
 // UNTIEDRT-DAG: [[S2_ADDR:%.+]] = load %struct.S*, %struct.S** [[S2_ADDR_PTR]],
@@ -329,7 +330,7 @@ int main() {
 // CHECK: call i32 @__kmpc_omp_task(%
 // UNTIEDRT: br label %[[EXIT:[^,]+]]
 
-// UNTIEDRT: call void [[CONSTR:@.+]](%struct.S* [[S1_ADDR]])
+// UNTIEDRT: call void [[CONSTR:@.+]](%struct.S* {{[^,]*}} [[S1_ADDR]])
 // UNTIEDRT: [[S2_VOID_PTR:%.+]] = call i8* @__kmpc_alloc(i32 %{{.+}}, i64 4, i8* inttoptr (i64 7 to i8*))
 // UNTIEDRT: [[S2_PTR:%.+]] = bitcast i8* [[S2_VOID_PTR]] to %struct.S*
 // UNTIEDRT: store %struct.S* [[S2_PTR]], %struct.S** [[S2_ADDR_PTR]],
@@ -338,7 +339,7 @@ int main() {
 // UNTIEDRT: call i32 @__kmpc_omp_task(%
 // UNTIEDRT: br label %[[EXIT]]
 
-// UNTIEDRT: call void [[CONSTR]](%struct.S* [[S2_ADDR]])
+// UNTIEDRT: call void [[CONSTR]](%struct.S* {{[^,]*}} [[S2_ADDR]])
 // CHECK: call i8* @__kmpc_omp_task_alloc(
 // CHECK: call i32 @__kmpc_omp_task(%
 // CHECK: load i32*, i32** %
@@ -353,11 +354,11 @@ int main() {
 // UNTIEDRT: br label %[[EXIT]]
 
 // s1 = S();
-// UNTIEDRT: call void [[CONSTR]](%struct.S* [[TMP:%.+]])
+// UNTIEDRT: call void [[CONSTR]](%struct.S* {{[^,]*}} [[TMP:%.+]])
 // UNTIEDRT: [[DST:%.+]] = bitcast %struct.S* [[S1_ADDR]] to i8*
 // UNTIEDRT: [[SRC:%.+]] = bitcast %struct.S* [[TMP]] to i8*
 // UNTIEDRT: call void @llvm.memcpy.{{.+}}(i8* {{.*}}[[DST]], i8* {{.*}}[[SRC]], i64 4, i1 false)
-// UNTIEDRT: call void [[DESTR:@.+]](%struct.S* [[TMP]])
+// UNTIEDRT: call void [[DESTR:@.+]](%struct.S* {{[^,]*}} [[TMP]])
 
 // CHECK: call i32 @__kmpc_omp_taskwait(%
 // CHECK: load i32*, i32** %
@@ -365,10 +366,10 @@ int main() {
 // CHECK: call i32 @__kmpc_omp_task(%
 // UNTIEDRT: br label %[[EXIT]]
 
-// UNTIEDRT: call void [[DESTR]](%struct.S* [[S2_ADDR]])
+// UNTIEDRT: call void [[DESTR]](%struct.S* {{[^,]*}} [[S2_ADDR]])
 // UNTIEDRT: [[S2_VOID_PTR:%.+]] = bitcast %struct.S* [[S2_ADDR]] to i8*
 // UNTIEDRT: call void @__kmpc_free(i32 %{{.+}}, i8* [[S2_VOID_PTR]], i8* inttoptr (i64 7 to i8*))
-// UNTIEDRT: call void [[DESTR]](%struct.S* [[S1_ADDR]])
+// UNTIEDRT: call void [[DESTR]](%struct.S* {{[^,]*}} [[S1_ADDR]])
 // CHECK: br label %[[CLEANUP]]
 
 // CHECK: [[CLEANUP]]:
@@ -389,4 +390,51 @@ struct S1 {
 // CHECK-LABEL: taskinit
 // CHECK: call i8* @__kmpc_omp_task_alloc(
 
+#ifdef UNTIEDRT
+// FIXME: There is a buffer overflow in IrBuilder mode.
+template <typename T = void>
+void foobar() {
+  float a;
+#pragma omp parallel
+#pragma omp single
+  {
+    double b;
+#pragma omp task
+    a += b;
+  }
+}
+
+// UNTIEDRT: define{{.*}} void @{{.+}}xxxx{{.+}}()
+void xxxx() {
+  // UNTIEDRT: call void @{{.+}}foobar{{.+}}()
+  foobar();
+}
+// UNTIEDRT: define {{.*}}void @{{.+}}foobar{{.+}}()
+// UNTIEDRT: call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* {{.+}}, i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, float*)* [[PAR_OUTLINED:@.+]] to void (i32*, i32*, ...)*), float* %{{.+}})
+
+// UNTIEDRT: define internal void [[PAR_OUTLINED]](i32* {{.+}}, i32* {{.+}}, float* {{.*}}[[A_ADDR:%.+]])
+// UNTIEDRT: [[A_ADDR_REF:%.+]] = alloca float*,
+// UNTIEDRT: [[B_ADDR:%.+]] = alloca double,
+// UNTIEDRT: [[A_ADDR:%.+]] = load float*, float** [[A_ADDR_REF]],
+
+// Copy `a` to the list of shared variables
+// UNTIEDRT: [[SHARED_A:%.+]] = getelementptr inbounds %{{.+}}, [[SHAREDS_TY:%.+]]* [[SHAREDS:%.+]], i32 0, i32 0
+// UNTIEDRT: store float* [[A_ADDR]], float** [[SHARED_A]],
+
+// Allocate task.
+// UNTIEDRT: [[RES:%.+]] = call i8* @__kmpc_omp_task_alloc(%struct.ident_t* {{.+}}, i32 {{.+}}, i32 1, i64 48, i64 8, i32 (i32, i8*)* bitcast (i32 (i32, [[T_TASK_TY:%.+]]*)* @{{.+}} to i32 (i32, i8*)*))
+// UNTIEDRT: [[TD:%.+]] = bitcast i8* [[RES]] to [[T_TASK_TY]]*
+// Copy shared vars.
+// UNTIEDRT: [[TD_TASK:%.+]] = getelementptr inbounds [[T_TASK_TY]], [[T_TASK_TY]]* [[TD]], i32 0, i32 0
+// UNTIEDRT: [[TD_TASK_SHARES_REF:%.+]] = getelementptr inbounds %{{.+}}, %{{.+}}* [[TD_TASK]], i32 0, i32 0
+// UNTIEDRT: [[TD_TASK_SHARES:%.+]] = load i8*, i8** [[TD_TASK_SHARES_REF]],
+// UNTIEDRT: [[SHAREDS_BC:%.+]] = bitcast [[SHAREDS_TY]]* [[SHAREDS]] to i8*
+// UNTIEDRT: call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 8 [[TD_TASK_SHARES]], i8* align 8 [[SHAREDS_BC]], i64 8, i1 false)
+
+// Copy firstprivate value of `b`.
+// UNTIEDRT: [[TD_TASK_PRIVS:%.+]] = getelementptr inbounds [[T_TASK_TY]], [[T_TASK_TY]]* [[TD]], i32 0, i32 1
+// UNTIEDRT: [[TD_TASK_PRIVS_B:%.+]] = getelementptr inbounds %{{.+}}, %{{.+}}* [[TD_TASK_PRIVS]], i32 0, i32 0
+// UNTIEDRT: [[B_VAL:%.+]] = load double, double* [[B_ADDR]],
+// UNTIEDRT: store double [[B_VAL]], double* [[TD_TASK_PRIVS_B]],
+#endif // UNTIEDRT
 #endif

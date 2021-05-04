@@ -51,13 +51,21 @@ struct PaddedUserAtomicType
 
 struct LargeUserAtomicType
 {
-    int i, j[127]; /* decidedly not lock-free */
+    int a[128];  /* decidedly not lock-free */
 
-    LargeUserAtomicType(int d = 0) TEST_NOEXCEPT : i(d)
-    {}
+    LargeUserAtomicType(int d = 0) TEST_NOEXCEPT
+    {
+        for (auto && e : a)
+            e = d++;
+    }
 
-    friend bool operator==(const LargeUserAtomicType& x, const LargeUserAtomicType& y)
-    { return x.i == y.i; }
+    friend bool operator==(LargeUserAtomicType const& x, LargeUserAtomicType const& y) TEST_NOEXCEPT
+    {
+        for (int i = 0; i < 128; ++i)
+            if (x.a[i] != y.a[i])
+                return false;
+        return true;
+    }
 };
 
 template < template <class TestArg> class TestFunctor >
@@ -75,6 +83,9 @@ struct TestEachIntegralType {
         TestFunctor<long long>()();
         TestFunctor<unsigned long long>()();
         TestFunctor<wchar_t>();
+#if TEST_STD_VER > 17 && defined(__cpp_char8_t)
+        TestFunctor<char8_t>()();
+#endif
 #ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
         TestFunctor<char16_t>()();
         TestFunctor<char32_t>()();
@@ -95,13 +106,14 @@ struct TestEachAtomicType {
     void operator()() const {
         TestEachIntegralType<TestFunctor>()();
         TestFunctor<UserAtomicType>()();
-#ifndef __APPLE__
         /*
-            These aren't going to be lock-free,
-            so some libatomic.a is necessary.
+            Note: These aren't going to be lock-free,
+            so some libatomic.a is necessary. To handle
+            the case where the support functions are
+            missing, all tests that use this file should add:
+            XFAIL: !non-lockfree-atomics
         */
         TestFunctor<LargeUserAtomicType>()();
-#endif
 /*
     Enable these once we have P0528 
     

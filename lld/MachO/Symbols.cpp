@@ -14,17 +14,32 @@ using namespace llvm;
 using namespace lld;
 using namespace lld::macho;
 
-void LazySymbol::fetchArchiveMember() { file->fetch(sym); }
-
 // Returns a symbol for an error message.
-std::string lld::toString(const Symbol &sym) {
-  if (Optional<std::string> s = demangleItanium(sym.getName()))
-    return *s;
-  return std::string(sym.getName());
+static std::string demangle(StringRef symName) {
+  if (config->demangle)
+    return demangleItanium(symName);
+  return std::string(symName);
 }
 
-uint64_t DSOHandle::getVA() const { return header->addr; }
+std::string lld::toString(const Symbol &sym) { return demangle(sym.getName()); }
 
-uint64_t DSOHandle::getFileOffset() const { return header->fileOff; }
+std::string lld::toMachOString(const object::Archive::Symbol &b) {
+  return demangle(b.getName());
+}
 
-constexpr StringRef DSOHandle::name;
+uint64_t Defined::getVA() const {
+  if (isAbsolute())
+    return value;
+  return isec->getVA() + value;
+}
+
+uint64_t Defined::getFileOffset() const {
+  if (isAbsolute()) {
+    error("absolute symbol " + toString(*this) +
+          " does not have a file offset");
+    return 0;
+  }
+  return isec->getFileOffset() + value;
+}
+
+void LazySymbol::fetchArchiveMember() { getFile()->fetch(sym); }

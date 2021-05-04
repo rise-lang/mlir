@@ -80,6 +80,26 @@ static void printIntegral(const TemplateArgument &TemplArg,
   }
 }
 
+static unsigned getArrayDepth(QualType type) {
+  unsigned count = 0;
+  while (const auto *arrayType = type->getAsArrayTypeUnsafe()) {
+    count++;
+    type = arrayType->getElementType();
+  }
+  return count;
+}
+
+static bool needsAmpersandOnTemplateArg(QualType paramType, QualType argType) {
+  // Generally, if the parameter type is a pointer, we must be taking the
+  // address of something and need a &.  However, if the argument is an array,
+  // this could be implicit via array-to-pointer decay.
+  if (!paramType->isPointerType())
+    return paramType->isMemberPointerType();
+  if (argType->isArrayType())
+    return getArrayDepth(argType) == getArrayDepth(paramType->getPointeeType());
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // TemplateArgument Implementation
 //===----------------------------------------------------------------------===//
@@ -244,6 +264,7 @@ void TemplateArgument::Profile(llvm::FoldingSetNodeID &ID,
     break;
 
   case Declaration:
+    getParamTypeForDecl().Profile(ID);
     ID.AddPointer(getAsDecl()? getAsDecl()->getCanonicalDecl() : nullptr);
     break;
 
@@ -288,10 +309,13 @@ bool TemplateArgument::structurallyEquals(const TemplateArgument &Other) const {
   case Null:
   case Type:
   case Expression:
-  case Template:
-  case TemplateExpansion:
   case NullPtr:
     return TypeOrValue.V == Other.TypeOrValue.V;
+
+  case Template:
+  case TemplateExpansion:
+    return TemplateArg.Name == Other.TemplateArg.Name &&
+           TemplateArg.NumExpansions == Other.TemplateArg.NumExpansions;
 
   case Declaration:
     return getAsDecl() == Other.getAsDecl();
@@ -352,8 +376,17 @@ void TemplateArgument::print(const PrintingPolicy &Policy,
 
   case Declaration: {
     NamedDecl *ND = getAsDecl();
-    if (!getParamTypeForDecl()->isReferenceType())
-      Out << '&';
+    if (getParamTypeForDecl()->isRecordType()) {
+      if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(ND)) {
+        // FIXME: Include the type if it's not obvious from the context.
+        TPO->printAsInit(Out);
+        break;
+      }
+    }
+    if (auto *VD = dyn_cast<ValueDecl>(ND)) {
+      if (needsAmpersandOnTemplateArg(getParamTypeForDecl(), VD->getType()))
+        Out << "&";
+    }
     ND->printQualifiedName(Out);
     break;
   }
@@ -448,8 +481,8 @@ SourceRange TemplateArgumentLoc::getSourceRange() const {
   llvm_unreachable("Invalid TemplateArgument Kind!");
 }
 
-const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
-                                           const TemplateArgument &Arg) {
+template <typename T>
+static const T &DiagTemplateArg(const T &DB, const TemplateArgument &Arg) {
   switch (Arg.getKind()) {
   case TemplateArgument::Null:
     // This is bad, but not as bad as crashing because of argument
@@ -502,14 +535,19 @@ const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
   llvm_unreachable("Invalid TemplateArgument Kind!");
 }
 
+const StreamingDiagnostic &clang::operator<<(const StreamingDiagnostic &DB,
+                                             const TemplateArgument &Arg) {
+  return DiagTemplateArg(DB, Arg);
+}
+
 clang::TemplateArgumentLocInfo::TemplateArgumentLocInfo(
     ASTContext &Ctx, NestedNameSpecifierLoc QualifierLoc,
     SourceLocation TemplateNameLoc, SourceLocation EllipsisLoc) {
   TemplateTemplateArgLocInfo *Template = new (Ctx) TemplateTemplateArgLocInfo;
   Template->Qualifier = QualifierLoc.getNestedNameSpecifier();
   Template->QualifierLocData = QualifierLoc.getOpaqueData();
-  Template->TemplateNameLoc = TemplateNameLoc.getRawEncoding();
-  Template->EllipsisLoc = EllipsisLoc.getRawEncoding();
+  Template->TemplateNameLoc = TemplateNameLoc;
+  Template->EllipsisLoc = EllipsisLoc;
   Pointer = Template;
 }
 

@@ -13,7 +13,8 @@ add_mlir_conversion_library(MLIRLinalgToStandard
   LINK_LIBS PUBLIC
   MLIREDSC
   MLIRIR
-  MLIRLinalgOps
+  MLIRLinalg
+  MLIRMemRef
   MLIRPass
   MLIRSCF
   MLIRTransforms

@@ -400,7 +400,7 @@ void ProcessSwitchInst(SwitchInst *SI,
     // TODO Shouldn't this create a signed range?
     ConstantRange KnownBitsRange =
         ConstantRange::fromKnownBits(Known, /*IsSigned=*/false);
-    const ConstantRange LVIRange = LVI->getConstantRange(Val, OrigBlock, SI);
+    const ConstantRange LVIRange = LVI->getConstantRange(Val, SI);
     ConstantRange ValRange = KnownBitsRange.intersectWith(LVIRange);
     // We delegate removal of unreachable non-default cases to other passes. In
     // the unlikely event that some of them survived, we just conservatively
@@ -474,10 +474,8 @@ void ProcessSwitchInst(SwitchInst *SI,
     // cases.
     assert(MaxPop > 0 && PopSucc);
     Default = PopSucc;
-    Cases.erase(
-        llvm::remove_if(
-            Cases, [PopSucc](const CaseRange &R) { return R.BB == PopSucc; }),
-        Cases.end());
+    llvm::erase_if(Cases,
+                   [PopSucc](const CaseRange &R) { return R.BB == PopSucc; });
 
     // If there are no cases left, just branch.
     if (Cases.empty()) {
@@ -518,7 +516,7 @@ void ProcessSwitchInst(SwitchInst *SI,
   OrigBlock->getInstList().erase(SI);
 
   // If the Default block has no more predecessors just add it to DeleteList.
-  if (pred_begin(OldDefault) == pred_end(OldDefault))
+  if (pred_empty(OldDefault))
     DeleteList.insert(OldDefault);
 }
 

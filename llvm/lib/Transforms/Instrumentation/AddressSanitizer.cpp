@@ -105,8 +105,10 @@ static const uint64_t kSystemZ_ShadowOffset64 = 1ULL << 52;
 static const uint64_t kMIPS32_ShadowOffset32 = 0x0aaa0000;
 static const uint64_t kMIPS64_ShadowOffset64 = 1ULL << 37;
 static const uint64_t kAArch64_ShadowOffset64 = 1ULL << 36;
+static const uint64_t kRISCV64_ShadowOffset64 = 0xd55550000;
 static const uint64_t kFreeBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kFreeBSD_ShadowOffset64 = 1ULL << 46;
+static const uint64_t kFreeBSDKasan_ShadowOffset64 = 0xdffff7c000000000;
 static const uint64_t kNetBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kNetBSD_ShadowOffset64 = 1ULL << 46;
 static const uint64_t kNetBSDKasan_ShadowOffset64 = 0xdfff900000000000;
@@ -129,56 +131,51 @@ static const size_t kMaxStackMallocSize = 1 << 16;  // 64K
 static const uintptr_t kCurrentStackFrameMagic = 0x41B58AB3;
 static const uintptr_t kRetiredStackFrameMagic = 0x45E0360E;
 
-static const char *const kAsanModuleCtorName = "asan.module_ctor";
-static const char *const kAsanModuleDtorName = "asan.module_dtor";
+const char kAsanModuleCtorName[] = "asan.module_ctor";
+const char kAsanModuleDtorName[] = "asan.module_dtor";
 static const uint64_t kAsanCtorAndDtorPriority = 1;
 // On Emscripten, the system needs more than one priorities for constructors.
 static const uint64_t kAsanEmscriptenCtorAndDtorPriority = 50;
-static const char *const kAsanReportErrorTemplate = "__asan_report_";
-static const char *const kAsanRegisterGlobalsName = "__asan_register_globals";
-static const char *const kAsanUnregisterGlobalsName =
-    "__asan_unregister_globals";
-static const char *const kAsanRegisterImageGlobalsName =
-  "__asan_register_image_globals";
-static const char *const kAsanUnregisterImageGlobalsName =
-  "__asan_unregister_image_globals";
-static const char *const kAsanRegisterElfGlobalsName =
-  "__asan_register_elf_globals";
-static const char *const kAsanUnregisterElfGlobalsName =
-  "__asan_unregister_elf_globals";
-static const char *const kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
-static const char *const kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
-static const char *const kAsanInitName = "__asan_init";
-static const char *const kAsanVersionCheckNamePrefix =
-    "__asan_version_mismatch_check_v";
-static const char *const kAsanPtrCmp = "__sanitizer_ptr_cmp";
-static const char *const kAsanPtrSub = "__sanitizer_ptr_sub";
-static const char *const kAsanHandleNoReturnName = "__asan_handle_no_return";
+const char kAsanReportErrorTemplate[] = "__asan_report_";
+const char kAsanRegisterGlobalsName[] = "__asan_register_globals";
+const char kAsanUnregisterGlobalsName[] = "__asan_unregister_globals";
+const char kAsanRegisterImageGlobalsName[] = "__asan_register_image_globals";
+const char kAsanUnregisterImageGlobalsName[] =
+    "__asan_unregister_image_globals";
+const char kAsanRegisterElfGlobalsName[] = "__asan_register_elf_globals";
+const char kAsanUnregisterElfGlobalsName[] = "__asan_unregister_elf_globals";
+const char kAsanPoisonGlobalsName[] = "__asan_before_dynamic_init";
+const char kAsanUnpoisonGlobalsName[] = "__asan_after_dynamic_init";
+const char kAsanInitName[] = "__asan_init";
+const char kAsanVersionCheckNamePrefix[] = "__asan_version_mismatch_check_v";
+const char kAsanPtrCmp[] = "__sanitizer_ptr_cmp";
+const char kAsanPtrSub[] = "__sanitizer_ptr_sub";
+const char kAsanHandleNoReturnName[] = "__asan_handle_no_return";
 static const int kMaxAsanStackMallocSizeClass = 10;
-static const char *const kAsanStackMallocNameTemplate = "__asan_stack_malloc_";
-static const char *const kAsanStackFreeNameTemplate = "__asan_stack_free_";
-static const char *const kAsanGenPrefix = "___asan_gen_";
-static const char *const kODRGenPrefix = "__odr_asan_gen_";
-static const char *const kSanCovGenPrefix = "__sancov_gen_";
-static const char *const kAsanSetShadowPrefix = "__asan_set_shadow_";
-static const char *const kAsanPoisonStackMemoryName =
-    "__asan_poison_stack_memory";
-static const char *const kAsanUnpoisonStackMemoryName =
-    "__asan_unpoison_stack_memory";
+const char kAsanStackMallocNameTemplate[] = "__asan_stack_malloc_";
+const char kAsanStackFreeNameTemplate[] = "__asan_stack_free_";
+const char kAsanGenPrefix[] = "___asan_gen_";
+const char kODRGenPrefix[] = "__odr_asan_gen_";
+const char kSanCovGenPrefix[] = "__sancov_gen_";
+const char kAsanSetShadowPrefix[] = "__asan_set_shadow_";
+const char kAsanPoisonStackMemoryName[] = "__asan_poison_stack_memory";
+const char kAsanUnpoisonStackMemoryName[] = "__asan_unpoison_stack_memory";
 
 // ASan version script has __asan_* wildcard. Triple underscore prevents a
 // linker (gold) warning about attempting to export a local symbol.
-static const char *const kAsanGlobalsRegisteredFlagName =
-    "___asan_globals_registered";
+const char kAsanGlobalsRegisteredFlagName[] = "___asan_globals_registered";
 
-static const char *const kAsanOptionDetectUseAfterReturn =
+const char kAsanOptionDetectUseAfterReturn[] =
     "__asan_option_detect_stack_use_after_return";
 
-static const char *const kAsanShadowMemoryDynamicAddress =
+const char kAsanShadowMemoryDynamicAddress[] =
     "__asan_shadow_memory_dynamic_address";
 
-static const char *const kAsanAllocaPoison = "__asan_alloca_poison";
-static const char *const kAsanAllocasUnpoison = "__asan_allocas_unpoison";
+const char kAsanAllocaPoison[] = "__asan_alloca_poison";
+const char kAsanAllocasUnpoison[] = "__asan_allocas_unpoison";
+
+const char kAMDGPUAddressSharedName[] = "llvm.amdgcn.is.shared";
+const char kAMDGPUAddressPrivateName[] = "llvm.amdgcn.is.private";
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;
@@ -390,6 +387,15 @@ static cl::opt<bool>
                  cl::desc("Place ASan constructors in comdat sections"),
                  cl::Hidden, cl::init(true));
 
+static cl::opt<AsanDtorKind> ClOverrideDestructorKind(
+    "asan-destructor-kind",
+    cl::desc("Sets the ASan destructor kind. The default is to use the value "
+             "provided to the pass constructor"),
+    cl::values(clEnumValN(AsanDtorKind::None, "none", "No destructors"),
+               clEnumValN(AsanDtorKind::Global, "global",
+                          "Use global destructors")),
+    cl::init(AsanDtorKind::Invalid), cl::Hidden);
+
 // Debug flags.
 
 static cl::opt<int> ClDebug("asan-debug", cl::desc("debug"), cl::Hidden,
@@ -447,10 +453,16 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
   bool IsMIPS64 = TargetTriple.isMIPS64();
   bool IsArmOrThumb = TargetTriple.isARM() || TargetTriple.isThumb();
   bool IsAArch64 = TargetTriple.getArch() == Triple::aarch64;
+  bool IsRISCV64 = TargetTriple.getArch() == Triple::riscv64;
   bool IsWindows = TargetTriple.isOSWindows();
   bool IsFuchsia = TargetTriple.isOSFuchsia();
   bool IsMyriad = TargetTriple.getVendor() == llvm::Triple::Myriad;
   bool IsEmscripten = TargetTriple.isOSEmscripten();
+  bool IsAMDGPU = TargetTriple.isAMDGPU();
+
+  // Asan support for AMDGPU assumes X86 as the host right now.
+  if (IsAMDGPU)
+    IsX86_64 = true;
 
   ShadowMapping Mapping;
 
@@ -490,9 +502,12 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
       Mapping.Offset = kPPC64_ShadowOffset64;
     else if (IsSystemZ)
       Mapping.Offset = kSystemZ_ShadowOffset64;
-    else if (IsFreeBSD && !IsMIPS64)
-      Mapping.Offset = kFreeBSD_ShadowOffset64;
-    else if (IsNetBSD) {
+    else if (IsFreeBSD && !IsMIPS64) {
+      if (IsKasan)
+        Mapping.Offset = kFreeBSDKasan_ShadowOffset64;
+      else
+        Mapping.Offset = kFreeBSD_ShadowOffset64;
+    } else if (IsNetBSD) {
       if (IsKasan)
         Mapping.Offset = kNetBSDKasan_ShadowOffset64;
       else
@@ -515,6 +530,8 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
       Mapping.Offset = kDynamicShadowSentinel;
     else if (IsAArch64)
       Mapping.Offset = kAArch64_ShadowOffset64;
+    else if (IsRISCV64)
+      Mapping.Offset = kRISCV64_ShadowOffset64;
     else
       Mapping.Offset = kDefaultShadowOffset64;
   }
@@ -533,6 +550,7 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
   // we could OR the constant in a single instruction, but it's more
   // efficient to load it once and use indexed addressing.
   Mapping.OrShadowOffset = !IsAArch64 && !IsPPC64 && !IsSystemZ && !IsPS4CPU &&
+                           !IsRISCV64 &&
                            !(Mapping.Offset & (Mapping.Offset - 1)) &&
                            Mapping.Offset != kDynamicShadowSentinel;
   bool IsAndroidWithIfuncSupport =
@@ -554,22 +572,6 @@ static uint64_t GetCtorAndDtorPriority(Triple &TargetTriple) {
   } else {
     return kAsanCtorAndDtorPriority;
   }
-}
-
-// For a ret instruction followed by a musttail call, we cannot insert anything
-// in between. Instead we use the musttail call instruction as the insertion
-// point.
-static Instruction *adjustForMusttailCall(Instruction *I) {
-  ReturnInst *RI = dyn_cast<ReturnInst>(I);
-  if (!RI)
-    return I;
-  Instruction *Prev = RI->getPrevNode();
-  if (BitCastInst *BCI = dyn_cast_or_null<BitCastInst>(Prev))
-    Prev = BCI->getPrevNode();
-  if (CallInst *CI = dyn_cast_or_null<CallInst>(Prev))
-    if (CI->isMustTailCall())
-      return CI;
-  return RI;
 }
 
 namespace {
@@ -649,6 +651,10 @@ struct AddressSanitizer {
   void instrumentAddress(Instruction *OrigIns, Instruction *InsertBefore,
                          Value *Addr, uint32_t TypeSize, bool IsWrite,
                          Value *SizeArgument, bool UseCalls, uint32_t Exp);
+  Instruction *instrumentAMDGPUAddress(Instruction *OrigIns,
+                                       Instruction *InsertBefore, Value *Addr,
+                                       uint32_t TypeSize, bool IsWrite,
+                                       Value *SizeArgument);
   void instrumentUnusualSizeOrAlignment(Instruction *I,
                                         Instruction *InsertBefore, Value *Addr,
                                         uint32_t TypeSize, bool IsWrite,
@@ -717,6 +723,9 @@ private:
   Value *LocalDynamicShadow = nullptr;
   const GlobalsMetadata &GlobalsMD;
   DenseMap<const AllocaInst *, bool> ProcessedAllocas;
+
+  FunctionCallee AMDGPUAddressShared;
+  FunctionCallee AMDGPUAddressPrivate;
 };
 
 class AddressSanitizerLegacyPass : public FunctionPass {
@@ -760,7 +769,8 @@ class ModuleAddressSanitizer {
 public:
   ModuleAddressSanitizer(Module &M, const GlobalsMetadata *GlobalsMD,
                          bool CompileKernel = false, bool Recover = false,
-                         bool UseGlobalsGC = true, bool UseOdrIndicator = false)
+                         bool UseGlobalsGC = true, bool UseOdrIndicator = false,
+                         AsanDtorKind DestructorKind = AsanDtorKind::Global)
       : GlobalsMD(*GlobalsMD),
         CompileKernel(ClEnableKasan.getNumOccurrences() > 0 ? ClEnableKasan
                                                             : CompileKernel),
@@ -776,12 +786,17 @@ public:
         // argument is designed as workaround. Therefore, disable both
         // ClWithComdat and ClUseGlobalsGC unless the frontend says it's ok to
         // do globals-gc.
-        UseCtorComdat(UseGlobalsGC && ClWithComdat && !this->CompileKernel) {
+        UseCtorComdat(UseGlobalsGC && ClWithComdat && !this->CompileKernel),
+        DestructorKind(DestructorKind) {
     C = &(M.getContext());
     int LongSize = M.getDataLayout().getPointerSizeInBits();
     IntptrTy = Type::getIntNTy(*C, LongSize);
     TargetTriple = Triple(M.getTargetTriple());
     Mapping = getShadowMapping(TargetTriple, LongSize, this->CompileKernel);
+
+    if (ClOverrideDestructorKind != AsanDtorKind::Invalid)
+      this->DestructorKind = ClOverrideDestructorKind;
+    assert(this->DestructorKind != AsanDtorKind::Invalid);
   }
 
   bool instrumentModule(Module &);
@@ -811,7 +826,7 @@ private:
                                   StringRef InternalSuffix);
   Instruction *CreateAsanModuleDtor(Module &M);
 
-  bool canInstrumentAliasedGlobal(const GlobalAlias &GA) const;
+  const GlobalVariable *getExcludedAliasedGlobal(const GlobalAlias &GA) const;
   bool shouldInstrumentGlobal(GlobalVariable *G) const;
   bool ShouldUseMachOGlobalsSection() const;
   StringRef getGlobalMetadataSection() const;
@@ -830,6 +845,7 @@ private:
   bool UsePrivateAlias;
   bool UseOdrIndicator;
   bool UseCtorComdat;
+  AsanDtorKind DestructorKind;
   Type *IntptrTy;
   LLVMContext *C;
   Triple TargetTriple;
@@ -851,12 +867,13 @@ class ModuleAddressSanitizerLegacyPass : public ModulePass {
 public:
   static char ID;
 
-  explicit ModuleAddressSanitizerLegacyPass(bool CompileKernel = false,
-                                            bool Recover = false,
-                                            bool UseGlobalGC = true,
-                                            bool UseOdrIndicator = false)
+  explicit ModuleAddressSanitizerLegacyPass(
+      bool CompileKernel = false, bool Recover = false, bool UseGlobalGC = true,
+      bool UseOdrIndicator = false,
+      AsanDtorKind DestructorKind = AsanDtorKind::Global)
       : ModulePass(ID), CompileKernel(CompileKernel), Recover(Recover),
-        UseGlobalGC(UseGlobalGC), UseOdrIndicator(UseOdrIndicator) {
+        UseGlobalGC(UseGlobalGC), UseOdrIndicator(UseOdrIndicator),
+        DestructorKind(DestructorKind) {
     initializeModuleAddressSanitizerLegacyPassPass(
         *PassRegistry::getPassRegistry());
   }
@@ -871,7 +888,8 @@ public:
     GlobalsMetadata &GlobalsMD =
         getAnalysis<ASanGlobalsMetadataWrapperPass>().getGlobalsMD();
     ModuleAddressSanitizer ASanModule(M, &GlobalsMD, CompileKernel, Recover,
-                                      UseGlobalGC, UseOdrIndicator);
+                                      UseGlobalGC, UseOdrIndicator,
+                                      DestructorKind);
     return ASanModule.instrumentModule(M);
   }
 
@@ -880,6 +898,7 @@ private:
   bool Recover;
   bool UseGlobalGC;
   bool UseOdrIndicator;
+  AsanDtorKind DestructorKind;
 };
 
 // Stack poisoning does not play well with exception handling.
@@ -929,15 +948,19 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
 
   bool HasInlineAsm = false;
   bool HasReturnsTwiceCall = false;
+  bool PoisonStack;
 
   FunctionStackPoisoner(Function &F, AddressSanitizer &ASan)
       : F(F), ASan(ASan), DIB(*F.getParent(), /*AllowUnresolved*/ false),
         C(ASan.C), IntptrTy(ASan.IntptrTy),
         IntptrPtrTy(PointerType::get(IntptrTy, 0)), Mapping(ASan.Mapping),
-        StackAlignment(1 << Mapping.Scale) {}
+        StackAlignment(1 << Mapping.Scale),
+        PoisonStack(ClStack &&
+                    !Triple(F.getParent()->getTargetTriple()).isAMDGPU()) {}
 
   bool runOnFunction() {
-    if (!ClStack) return false;
+    if (!PoisonStack)
+      return false;
 
     if (ClRedzoneByvalArgs)
       copyArgsPassedByValToAllocas();
@@ -980,8 +1003,14 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   void createDynamicAllocasInitStorage();
 
   // ----------------------- Visitors.
-  /// Collect all Ret instructions.
-  void visitReturnInst(ReturnInst &RI) { RetVec.push_back(&RI); }
+  /// Collect all Ret instructions, or the musttail call instruction if it
+  /// precedes the return instruction.
+  void visitReturnInst(ReturnInst &RI) {
+    if (CallInst *CI = RI.getParent()->getTerminatingMustTailCall())
+      RetVec.push_back(CI);
+    else
+      RetVec.push_back(&RI);
+  }
 
   /// Collect all Resume instructions.
   void visitResumeInst(ResumeInst &RI) { RetVec.push_back(&RI); }
@@ -1016,8 +1045,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   // Unpoison dynamic allocas redzones.
   void unpoisonDynamicAllocas() {
     for (Instruction *Ret : RetVec)
-      unpoisonDynamicAllocasBeforeInst(adjustForMusttailCall(Ret),
-                                       DynamicAllocaLayout);
+      unpoisonDynamicAllocasBeforeInst(Ret, DynamicAllocaLayout);
 
     for (Instruction *StackRestoreInst : StackRestoreVec)
       unpoisonDynamicAllocasBeforeInst(StackRestoreInst,
@@ -1078,7 +1106,9 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
         !ConstantInt::isValueValidForType(IntptrTy, SizeValue))
       return;
     // Find alloca instruction that corresponds to llvm.lifetime argument.
-    AllocaInst *AI = findAllocaForValue(II.getArgOperand(1));
+    // Currently we can only handle lifetime markers pointing to the
+    // beginning of the alloca.
+    AllocaInst *AI = findAllocaForValue(II.getArgOperand(1), true);
     if (!AI) {
       HasUntracedLifetimeIntrinsic = true;
       return;
@@ -1198,18 +1228,18 @@ PreservedAnalyses AddressSanitizerPass::run(Function &F,
   return PreservedAnalyses::all();
 }
 
-ModuleAddressSanitizerPass::ModuleAddressSanitizerPass(bool CompileKernel,
-                                                       bool Recover,
-                                                       bool UseGlobalGC,
-                                                       bool UseOdrIndicator)
+ModuleAddressSanitizerPass::ModuleAddressSanitizerPass(
+    bool CompileKernel, bool Recover, bool UseGlobalGC, bool UseOdrIndicator,
+    AsanDtorKind DestructorKind)
     : CompileKernel(CompileKernel), Recover(Recover), UseGlobalGC(UseGlobalGC),
-      UseOdrIndicator(UseOdrIndicator) {}
+      UseOdrIndicator(UseOdrIndicator), DestructorKind(DestructorKind) {}
 
 PreservedAnalyses ModuleAddressSanitizerPass::run(Module &M,
                                                   AnalysisManager<Module> &AM) {
   GlobalsMetadata &GlobalsMD = AM.getResult<ASanGlobalsMetadataAnalysis>(M);
   ModuleAddressSanitizer Sanitizer(M, &GlobalsMD, CompileKernel, Recover,
-                                   UseGlobalGC, UseOdrIndicator);
+                                   UseGlobalGC, UseOdrIndicator,
+                                   DestructorKind);
   if (Sanitizer.instrumentModule(M))
     return PreservedAnalyses::none();
   return PreservedAnalyses::all();
@@ -1249,10 +1279,11 @@ INITIALIZE_PASS(
     false, false)
 
 ModulePass *llvm::createModuleAddressSanitizerLegacyPassPass(
-    bool CompileKernel, bool Recover, bool UseGlobalsGC, bool UseOdrIndicator) {
+    bool CompileKernel, bool Recover, bool UseGlobalsGC, bool UseOdrIndicator,
+    AsanDtorKind Destructor) {
   assert(!CompileKernel || Recover);
-  return new ModuleAddressSanitizerLegacyPass(CompileKernel, Recover,
-                                              UseGlobalsGC, UseOdrIndicator);
+  return new ModuleAddressSanitizerLegacyPass(
+      CompileKernel, Recover, UseGlobalsGC, UseOdrIndicator, Destructor);
 }
 
 static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
@@ -1293,6 +1324,14 @@ static bool GlobalWasGeneratedByCompiler(GlobalVariable *G) {
   if (G->getName() == "__llvm_gcov_ctr")
     return true;
 
+  return false;
+}
+
+static bool isUnsupportedAMDGPUAddrspace(Value *Addr) {
+  Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
+  unsigned int AddrSpace = PtrTy->getPointerAddressSpace();
+  if (AddrSpace == 3 || AddrSpace == 5)
+    return true;
   return false;
 }
 
@@ -1356,10 +1395,10 @@ bool AddressSanitizer::isInterestingAlloca(const AllocaInst &AI) {
 }
 
 bool AddressSanitizer::ignoreAccess(Value *Ptr) {
-  // Do not instrument acesses from different address spaces; we cannot deal
-  // with them.
+  // Instrument acesses from different address spaces only for AMDGPU.
   Type *PtrTy = cast<PointerType>(Ptr->getType()->getScalarType());
-  if (PtrTy->getPointerAddressSpace() != 0)
+  if (PtrTy->getPointerAddressSpace() != 0 &&
+      !(TargetTriple.isAMDGPU() && !isUnsupportedAMDGPUAddrspace(Ptr)))
     return true;
 
   // Ignore swifterror addresses.
@@ -1653,12 +1692,42 @@ Value *AddressSanitizer::createSlowPathCmp(IRBuilder<> &IRB, Value *AddrLong,
   return IRB.CreateICmpSGE(LastAccessedByte, ShadowValue);
 }
 
+Instruction *AddressSanitizer::instrumentAMDGPUAddress(
+    Instruction *OrigIns, Instruction *InsertBefore, Value *Addr,
+    uint32_t TypeSize, bool IsWrite, Value *SizeArgument) {
+  // Do not instrument unsupported addrspaces.
+  if (isUnsupportedAMDGPUAddrspace(Addr))
+    return nullptr;
+  Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
+  // Follow host instrumentation for global and constant addresses.
+  if (PtrTy->getPointerAddressSpace() != 0)
+    return InsertBefore;
+  // Instrument generic addresses in supported addressspaces.
+  IRBuilder<> IRB(InsertBefore);
+  Value *AddrLong = IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy());
+  Value *IsShared = IRB.CreateCall(AMDGPUAddressShared, {AddrLong});
+  Value *IsPrivate = IRB.CreateCall(AMDGPUAddressPrivate, {AddrLong});
+  Value *IsSharedOrPrivate = IRB.CreateOr(IsShared, IsPrivate);
+  Value *Cmp = IRB.CreateICmpNE(IRB.getTrue(), IsSharedOrPrivate);
+  Value *AddrSpaceZeroLanding =
+      SplitBlockAndInsertIfThen(Cmp, InsertBefore, false);
+  InsertBefore = cast<Instruction>(AddrSpaceZeroLanding);
+  return InsertBefore;
+}
+
 void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
                                          Instruction *InsertBefore, Value *Addr,
                                          uint32_t TypeSize, bool IsWrite,
                                          Value *SizeArgument, bool UseCalls,
                                          uint32_t Exp) {
   bool IsMyriad = TargetTriple.getVendor() == llvm::Triple::Myriad;
+
+  if (TargetTriple.isAMDGPU()) {
+    InsertBefore = instrumentAMDGPUAddress(OrigIns, InsertBefore, Addr,
+                                           TypeSize, IsWrite, SizeArgument);
+    if (!InsertBefore)
+      return;
+  }
 
   IRBuilder<> IRB(InsertBefore);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
@@ -1799,20 +1868,22 @@ void ModuleAddressSanitizer::createInitializerPoisonCalls(
   }
 }
 
-bool ModuleAddressSanitizer::canInstrumentAliasedGlobal(
-    const GlobalAlias &GA) const {
+const GlobalVariable *
+ModuleAddressSanitizer::getExcludedAliasedGlobal(const GlobalAlias &GA) const {
   // In case this function should be expanded to include rules that do not just
   // apply when CompileKernel is true, either guard all existing rules with an
   // 'if (CompileKernel) { ... }' or be absolutely sure that all these rules
   // should also apply to user space.
   assert(CompileKernel && "Only expecting to be called when compiling kernel");
 
+  const Constant *C = GA.getAliasee();
+
   // When compiling the kernel, globals that are aliased by symbols prefixed
   // by "__" are special and cannot be padded with a redzone.
   if (GA.getName().startswith("__"))
-    return false;
+    return dyn_cast<GlobalVariable>(C->stripPointerCastsAndAliases());
 
-  return true;
+  return nullptr;
 }
 
 bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const {
@@ -1824,8 +1895,10 @@ bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const {
   if (GlobalsMD.get(G).IsExcluded) return false;
   if (!Ty->isSized()) return false;
   if (!G->hasInitializer()) return false;
-  // Only instrument globals of default address spaces
-  if (G->getAddressSpace()) return false;
+  // Globals in address space 1 and 4 are supported for AMDGPU.
+  if (G->getAddressSpace() &&
+      !(TargetTriple.isAMDGPU() && !isUnsupportedAMDGPUAddrspace(G)))
+    return false;
   if (GlobalWasGeneratedByCompiler(G)) return false; // Our own globals.
   // Two problems with thread-locals:
   //   - The address of the main thread's copy can't be computed at link-time.
@@ -1883,6 +1956,14 @@ bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const {
       return false;
     }
 
+    // Do not instrument user-defined sections (with names resembling
+    // valid C identifiers)
+    if (TargetTriple.isOSBinFormatELF()) {
+      if (llvm::all_of(Section,
+                       [](char c) { return llvm::isAlnum(c) || c == '_'; }))
+        return false;
+    }
+
     // On COFF, if the section name contains '$', it is highly likely that the
     // user is using section sorting to create an array of globals similar to
     // the way initialization callbacks are registered in .init_array and
@@ -1901,9 +1982,8 @@ bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const {
       StringRef ParsedSegment, ParsedSection;
       unsigned TAA = 0, StubSize = 0;
       bool TAAParsed;
-      std::string ErrorCode = MCSectionMachO::ParseSectionSpecifier(
-          Section, ParsedSegment, ParsedSection, TAA, TAAParsed, StubSize);
-      assert(ErrorCode.empty() && "Invalid section specifier.");
+      cantFail(MCSectionMachO::ParseSectionSpecifier(
+          Section, ParsedSegment, ParsedSection, TAA, TAAParsed, StubSize));
 
       // Ignore the globals from the __OBJC section. The ObjC runtime assumes
       // those conform to /usr/lib/objc/runtime.h, so we can't add redzones to
@@ -2060,9 +2140,11 @@ ModuleAddressSanitizer::CreateMetadataGlobal(Module &M, Constant *Initializer,
 }
 
 Instruction *ModuleAddressSanitizer::CreateAsanModuleDtor(Module &M) {
-  AsanDtorFunction =
-      Function::Create(FunctionType::get(Type::getVoidTy(*C), false),
-                       GlobalValue::InternalLinkage, kAsanModuleDtorName, &M);
+  AsanDtorFunction = Function::createWithDefaultAttr(
+      FunctionType::get(Type::getVoidTy(*C), false),
+      GlobalValue::InternalLinkage, 0, kAsanModuleDtorName, &M);
+  AsanDtorFunction->addAttribute(AttributeList::FunctionIndex,
+                                 Attribute::NoUnwind);
   BasicBlock *AsanDtorBB = BasicBlock::Create(*C, "", AsanDtorFunction);
 
   return ReturnInst::Create(*C, AsanDtorBB);
@@ -2107,6 +2189,12 @@ void ModuleAddressSanitizer::InstrumentGlobalsELF(
     const std::string &UniqueModuleId) {
   assert(ExtendedGlobals.size() == MetadataInitializers.size());
 
+  // Putting globals in a comdat changes the semantic and potentially cause
+  // false negative odr violations at link time. If odr indicators are used, we
+  // keep the comdat sections, as link time odr violations will be dectected on
+  // the odr indicator symbols.
+  bool UseComdatForGlobalsGC = UseOdrIndicator;
+
   SmallVector<GlobalValue *, 16> MetadataGlobals(ExtendedGlobals.size());
   for (size_t i = 0; i < ExtendedGlobals.size(); i++) {
     GlobalVariable *G = ExtendedGlobals[i];
@@ -2116,7 +2204,8 @@ void ModuleAddressSanitizer::InstrumentGlobalsELF(
     Metadata->setMetadata(LLVMContext::MD_associated, MD);
     MetadataGlobals[i] = Metadata;
 
-    SetComdatForGlobalMetadata(G, Metadata, UniqueModuleId);
+    if (UseComdatForGlobalsGC)
+      SetComdatForGlobalMetadata(G, Metadata, UniqueModuleId);
   }
 
   // Update llvm.compiler.used, adding the new metadata globals. This is
@@ -2153,11 +2242,13 @@ void ModuleAddressSanitizer::InstrumentGlobalsELF(
 
   // We also need to unregister globals at the end, e.g., when a shared library
   // gets closed.
-  IRBuilder<> IRB_Dtor(CreateAsanModuleDtor(M));
-  IRB_Dtor.CreateCall(AsanUnregisterElfGlobals,
-                      {IRB.CreatePointerCast(RegisteredFlag, IntptrTy),
-                       IRB.CreatePointerCast(StartELFMetadata, IntptrTy),
-                       IRB.CreatePointerCast(StopELFMetadata, IntptrTy)});
+  if (DestructorKind != AsanDtorKind::None) {
+    IRBuilder<> IrbDtor(CreateAsanModuleDtor(M));
+    IrbDtor.CreateCall(AsanUnregisterElfGlobals,
+                       {IRB.CreatePointerCast(RegisteredFlag, IntptrTy),
+                        IRB.CreatePointerCast(StartELFMetadata, IntptrTy),
+                        IRB.CreatePointerCast(StopELFMetadata, IntptrTy)});
+  }
 }
 
 void ModuleAddressSanitizer::InstrumentGlobalsMachO(
@@ -2212,9 +2303,11 @@ void ModuleAddressSanitizer::InstrumentGlobalsMachO(
 
   // We also need to unregister globals at the end, e.g., when a shared library
   // gets closed.
-  IRBuilder<> IRB_Dtor(CreateAsanModuleDtor(M));
-  IRB_Dtor.CreateCall(AsanUnregisterImageGlobals,
-                      {IRB.CreatePointerCast(RegisteredFlag, IntptrTy)});
+  if (DestructorKind != AsanDtorKind::None) {
+    IRBuilder<> IrbDtor(CreateAsanModuleDtor(M));
+    IrbDtor.CreateCall(AsanUnregisterImageGlobals,
+                       {IRB.CreatePointerCast(RegisteredFlag, IntptrTy)});
+  }
 }
 
 void ModuleAddressSanitizer::InstrumentGlobalsWithMetadataArray(
@@ -2240,10 +2333,12 @@ void ModuleAddressSanitizer::InstrumentGlobalsWithMetadataArray(
 
   // We also need to unregister globals at the end, e.g., when a shared library
   // gets closed.
-  IRBuilder<> IRB_Dtor(CreateAsanModuleDtor(M));
-  IRB_Dtor.CreateCall(AsanUnregisterGlobals,
-                      {IRB.CreatePointerCast(AllGlobals, IntptrTy),
-                       ConstantInt::get(IntptrTy, N)});
+  if (DestructorKind != AsanDtorKind::None) {
+    IRBuilder<> IrbDtor(CreateAsanModuleDtor(M));
+    IrbDtor.CreateCall(AsanUnregisterGlobals,
+                       {IRB.CreatePointerCast(AllGlobals, IntptrTy),
+                        ConstantInt::get(IntptrTy, N)});
+  }
 }
 
 // This function replaces all global variables with new variables that have
@@ -2256,14 +2351,12 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
   *CtorComdat = false;
 
   // Build set of globals that are aliased by some GA, where
-  // canInstrumentAliasedGlobal(GA) returns false.
+  // getExcludedAliasedGlobal(GA) returns the relevant GlobalVariable.
   SmallPtrSet<const GlobalVariable *, 16> AliasedGlobalExclusions;
   if (CompileKernel) {
     for (auto &GA : M.aliases()) {
-      if (const auto *GV = dyn_cast<GlobalVariable>(GA.getAliasee())) {
-        if (!canInstrumentAliasedGlobal(GA))
-          AliasedGlobalExclusions.insert(GV);
-      }
+      if (const GlobalVariable *GV = getExcludedAliasedGlobal(GA))
+        AliasedGlobalExclusions.insert(GV);
     }
   }
 
@@ -2330,9 +2423,9 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     GlobalValue::LinkageTypes Linkage = G->getLinkage();
     if (G->isConstant() && Linkage == GlobalValue::PrivateLinkage)
       Linkage = GlobalValue::InternalLinkage;
-    GlobalVariable *NewGlobal =
-        new GlobalVariable(M, NewTy, G->isConstant(), Linkage, NewInitializer,
-                           "", G, G->getThreadLocalMode());
+    GlobalVariable *NewGlobal = new GlobalVariable(
+        M, NewTy, G->isConstant(), Linkage, NewInitializer, "", G,
+        G->getThreadLocalMode(), G->getAddressSpace());
     NewGlobal->copyAttributesFrom(G);
     NewGlobal->setComdat(G->getComdat());
     NewGlobal->setAlignment(MaybeAlign(getMinRedzoneSizeForGlobal()));
@@ -2349,12 +2442,9 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
         NewGlobal->setSection("__TEXT,__asan_cstring,regular");
     }
 
-    // Transfer the debug info.  The payload starts at offset zero so we can
-    // copy the debug info over as is.
-    SmallVector<DIGlobalVariableExpression *, 1> GVs;
-    G->getDebugInfo(GVs);
-    for (auto *GV : GVs)
-      NewGlobal->addDebugInfo(GV);
+    // Transfer the debug info and type metadata.  The payload starts at offset
+    // zero so we can copy the metadata over as is.
+    NewGlobal->copyMetadata(G, 0);
 
     Value *Indices2[2];
     Indices2[0] = IRB.getInt32(0);
@@ -2593,6 +2683,11 @@ void AddressSanitizer::initializeCallbacks(Module &M) {
   if (Mapping.InGlobal)
     AsanShadowGlobal = M.getOrInsertGlobal("__asan_shadow",
                                            ArrayType::get(IRB.getInt8Ty(), 0));
+
+  AMDGPUAddressShared = M.getOrInsertFunction(
+      kAMDGPUAddressSharedName, IRB.getInt1Ty(), IRB.getInt8PtrTy());
+  AMDGPUAddressPrivate = M.getOrInsertFunction(
+      kAMDGPUAddressPrivateName, IRB.getInt1Ty(), IRB.getInt8PtrTy());
 }
 
 bool AddressSanitizer::maybeInsertAsanInitAtFunctionEntry(Function &F) {
@@ -3112,7 +3207,8 @@ void FunctionStackPoisoner::processStaticAllocas() {
   int StackMallocIdx = -1;
   DebugLoc EntryDebugLocation;
   if (auto SP = F.getSubprogram())
-    EntryDebugLocation = DebugLoc::get(SP->getScopeLine(), 0, SP);
+    EntryDebugLocation =
+        DILocation::get(SP->getContext(), SP->getScopeLine(), 0, SP);
 
   Instruction *InsBefore = AllocaVec[0];
   IRBuilder<> IRB(InsBefore);
@@ -3321,8 +3417,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
 
   // (Un)poison the stack before all ret instructions.
   for (Instruction *Ret : RetVec) {
-    Instruction *Adjusted = adjustForMusttailCall(Ret);
-    IRBuilder<> IRBRet(Adjusted);
+    IRBuilder<> IRBRet(Ret);
     // Mark the current frame as retired.
     IRBRet.CreateStore(ConstantInt::get(IntptrTy, kRetiredStackFrameMagic),
                        BasePlus0);
@@ -3341,7 +3436,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
       Value *Cmp =
           IRBRet.CreateICmpNE(FakeStack, Constant::getNullValue(IntptrTy));
       Instruction *ThenTerm, *ElseTerm;
-      SplitBlockAndInsertIfThenElse(Cmp, Adjusted, &ThenTerm, &ElseTerm);
+      SplitBlockAndInsertIfThenElse(Cmp, Ret, &ThenTerm, &ElseTerm);
 
       IRBuilder<> IRBPoison(ThenTerm);
       if (StackMallocIdx <= 4) {

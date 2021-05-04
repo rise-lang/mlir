@@ -302,7 +302,7 @@ private:
     /// The maximum size of the dereferences of the pointer.
     ///
     /// May be UnknownSize if the sizes are unknown.
-    LocationSize Size = LocationSize::unknown();
+    LocationSize Size = LocationSize::afterPointer();
     /// The AA tags associated with dereferences of the pointer.
     ///
     /// The members may be null if there are no tags or conflicting tags.
@@ -363,6 +363,7 @@ private:
   PredIteratorCache PredCache;
 
   unsigned DefaultBlockScanLimit;
+  Optional<int32_t> ClobberOffset;
 
 public:
   MemoryDependenceResults(AAResults &AA, AssumptionCache &AC,
@@ -467,6 +468,8 @@ public:
 
   /// Release memory in caches.
   void releaseMemory();
+
+  Optional<int32_t> getClobberOffset() const { return ClobberOffset; }
 
 private:
   MemDepResult getCallDependencyFrom(CallBase *Call, bool isReadOnlyCall,

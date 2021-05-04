@@ -22,6 +22,7 @@
 #include "Targets/Hexagon.h"
 #include "Targets/Lanai.h"
 #include "Targets/Le64.h"
+#include "Targets/M68k.h"
 #include "Targets/MSP430.h"
 #include "Targets/Mips.h"
 #include "Targets/NVPTX.h"
@@ -303,6 +304,16 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new MipsTargetInfo(Triple, Opts);
     }
 
+  case llvm::Triple::m68k:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<M68kTargetInfo>(Triple, Opts);
+    case llvm::Triple::NetBSD:
+      return new NetBSDTargetInfo<M68kTargetInfo>(Triple, Opts);
+    default:
+      return new M68kTargetInfo(Triple, Opts);
+    }
+
   case llvm::Triple::le32:
     switch (os) {
     case llvm::Triple::NaCl:
@@ -330,6 +341,16 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new RTEMSTargetInfo<PPC32TargetInfo>(Triple, Opts);
     case llvm::Triple::AIX:
       return new AIXPPC32TargetInfo(Triple, Opts);
+    default:
+      return new PPC32TargetInfo(Triple, Opts);
+    }
+
+  case llvm::Triple::ppcle:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<PPC32TargetInfo>(Triple, Opts);
+    case llvm::Triple::FreeBSD:
+      return new FreeBSDTargetInfo<PPC32TargetInfo>(Triple, Opts);
     default:
       return new PPC32TargetInfo(Triple, Opts);
     }
@@ -574,13 +595,13 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
     }
 
   case llvm::Triple::spir: {
-    if (Triple.getOS() != llvm::Triple::UnknownOS ||
+    if (os != llvm::Triple::UnknownOS ||
         Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
       return nullptr;
     return new SPIR32TargetInfo(Triple, Opts);
   }
   case llvm::Triple::spir64: {
-    if (Triple.getOS() != llvm::Triple::UnknownOS ||
+    if (os != llvm::Triple::UnknownOS ||
         Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
       return nullptr;
     return new SPIR64TargetInfo(Triple, Opts);
@@ -590,7 +611,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
         !Triple.isOSBinFormatWasm())
       return nullptr;
-    switch (Triple.getOS()) {
+    switch (os) {
       case llvm::Triple::WASI:
         return new WASITargetInfo<WebAssembly32TargetInfo>(Triple, Opts);
       case llvm::Triple::Emscripten:
@@ -605,7 +626,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
         !Triple.isOSBinFormatWasm())
       return nullptr;
-    switch (Triple.getOS()) {
+    switch (os) {
       case llvm::Triple::WASI:
         return new WASITargetInfo<WebAssembly64TargetInfo>(Triple, Opts);
       case llvm::Triple::Emscripten:
@@ -695,7 +716,7 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
     return nullptr;
 
   Target->setSupportedOpenCLOpts();
-  Target->setOpenCLExtensionOpts();
+  Target->setCommandLineOpenCLOpts();
   Target->setMaxAtomicWidth();
 
   if (!Target->validateTarget(Diags))
@@ -704,4 +725,25 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
   Target->CheckFixedPointBits();
 
   return Target.release();
+}
+/// validateOpenCLTarget  - Check that OpenCL target has valid
+/// options setting based on OpenCL version.
+bool TargetInfo::validateOpenCLTarget(const LangOptions &Opts,
+                                      DiagnosticsEngine &Diags) const {
+  const llvm::StringMap<bool> &OpenCLFeaturesMap = getSupportedOpenCLOpts();
+
+  auto diagnoseNotSupportedCore = [&](llvm::StringRef Name, auto... OptArgs) {
+    if (OpenCLOptions::isOpenCLOptionCoreIn(Opts, OptArgs...) &&
+        !hasFeatureEnabled(OpenCLFeaturesMap, Name))
+      Diags.Report(diag::warn_opencl_unsupported_core_feature)
+          << Name << Opts.OpenCLCPlusPlus
+          << Opts.getOpenCLVersionTuple().getAsString();
+  };
+#define OPENCL_GENERIC_EXTENSION(Ext, ...)                                     \
+  diagnoseNotSupportedCore(#Ext, __VA_ARGS__);
+#include "clang/Basic/OpenCLExtensions.def"
+
+  // For now assume that OpenCL target is always
+  // valid and just provide necessary diagnostics
+  return true;
 }

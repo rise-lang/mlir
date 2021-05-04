@@ -32,6 +32,7 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -160,12 +161,6 @@ static cl::opt<std::string>
                                       cl::desc(""), cl::cat(AnalysisOptions),
                                       cl::init(""));
 
-static cl::list<std::string>
-    AllowedHostCpus("allowed-host-cpu",
-                    cl::desc("If specified, only run the benchmark if the host "
-                             "CPU matches the names"),
-                    cl::cat(Options), cl::ZeroOrMore);
-
 static cl::opt<bool> AnalysisDisplayUnstableOpcodes(
     "analysis-display-unstable-clusters",
     cl::desc("if there is more than one benchmark for an opcode, said "
@@ -257,8 +252,9 @@ generateSnippets(const LLVMState &State, unsigned Opcode,
   const Instruction &Instr = State.getIC().getInstr(Opcode);
   const MCInstrDesc &InstrDesc = Instr.Description;
   // Ignore instructions that we cannot run.
-  if (InstrDesc.isPseudo())
-    return make_error<Failure>("Unsupported opcode: isPseudo");
+  if (InstrDesc.isPseudo() || InstrDesc.usesCustomInsertionHook())
+    return make_error<Failure>(
+        "Unsupported opcode: isPseudo/usesCustomInserter");
   if (InstrDesc.isBranch() || InstrDesc.isIndirectBranch())
     return make_error<Failure>("Unsupported opcode: isBranch/isIndirectBranch");
   if (InstrDesc.isCall() || InstrDesc.isReturn())
@@ -302,12 +298,9 @@ void benchmarkMain() {
 
   const LLVMState State(CpuName);
 
-  llvm::StringRef ActualCpu = State.getTargetMachine().getTargetCPU();
-  for (auto Begin = AllowedHostCpus.begin(); Begin != AllowedHostCpus.end();
-       ++Begin) {
-    if (ActualCpu != *Begin)
-      ExitWithError(llvm::Twine("Unexpected host CPU ").concat(ActualCpu));
-  }
+  // Preliminary check to ensure features needed for requested
+  // benchmark mode are present on target CPU and/or OS.
+  ExitOnErr(State.getExegesisTarget().checkFeatureSupport());
 
   const std::unique_ptr<BenchmarkRunner> Runner =
       ExitOnErr(State.getExegesisTarget().createBenchmarkRunner(
@@ -406,7 +399,7 @@ static void analysisMain() {
   if (AnalysisClustersOutputFile.empty() &&
       AnalysisInconsistenciesOutputFile.empty()) {
     ExitWithError(
-        "for --mode=analysis: At least one of --analysis-clusters-output-file"
+        "for --mode=analysis: At least one of --analysis-clusters-output-file "
         "and --analysis-inconsistencies-output-file must be specified");
   }
 
@@ -436,6 +429,7 @@ static void analysisMain() {
   }
 
   std::unique_ptr<MCInstrInfo> InstrInfo(TheTarget->createMCInstrInfo());
+  assert(InstrInfo && "Unable to create instruction info!");
 
   const auto Clustering = ExitOnErr(InstructionBenchmarkClustering::create(
       Points, AnalysisClusteringAlgorithm, AnalysisDbscanNumPoints,
@@ -443,7 +437,7 @@ static void analysisMain() {
 
   const Analysis Analyzer(*TheTarget, std::move(InstrInfo), Clustering,
                           AnalysisInconsistencyEpsilon,
-                          AnalysisDisplayUnstableOpcodes);
+                          AnalysisDisplayUnstableOpcodes, CpuName);
 
   maybeRunAnalysis<Analysis::PrintClusters>(Analyzer, "analysis clusters",
                                             AnalysisClustersOutputFile);

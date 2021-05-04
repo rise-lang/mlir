@@ -89,12 +89,32 @@ public:
     return Result.first->second;
   }
 
+  uint64_t getAnonymousStructIdForDebugInfo(const NamedDecl *D) {
+    llvm::DenseMap<const NamedDecl *, uint64_t>::iterator Result =
+        AnonStructIds.find(D);
+    // The decl should already be inserted, but return 0 in case it is not.
+    if (Result == AnonStructIds.end())
+      return 0;
+    return Result->second;
+  }
+
+  virtual std::string getLambdaString(const CXXRecordDecl *Lambda) = 0;
+
   /// @name Mangler Entry Points
   /// @{
 
   bool shouldMangleDeclName(const NamedDecl *D);
   virtual bool shouldMangleCXXName(const NamedDecl *D) = 0;
   virtual bool shouldMangleStringLiteral(const StringLiteral *SL) = 0;
+
+  virtual bool isDeviceMangleContext() const { return false; }
+  virtual void setDeviceMangleContext(bool) {}
+
+  virtual bool isUniqueInternalLinkageDecl(const NamedDecl *ND) {
+    return false;
+  }
+
+  virtual void needsUniqueInternalLinkageNames() { }
 
   // FIXME: consider replacing raw_ostream & with something like SmallString &.
   void mangleName(GlobalDecl GD, raw_ostream &);
@@ -123,8 +143,11 @@ public:
   void mangleBlock(const DeclContext *DC, const BlockDecl *BD,
                    raw_ostream &Out);
 
-  void mangleObjCMethodNameWithoutSize(const ObjCMethodDecl *MD, raw_ostream &);
-  void mangleObjCMethodName(const ObjCMethodDecl *MD, raw_ostream &);
+  void mangleObjCMethodName(const ObjCMethodDecl *MD, raw_ostream &OS,
+                            bool includePrefixByte = true,
+                            bool includeCategoryNamespace = true);
+  void mangleObjCMethodNameAsSourceName(const ObjCMethodDecl *MD,
+                                        raw_ostream &);
 
   virtual void mangleStaticGuardVariable(const VarDecl *D, raw_ostream &) = 0;
 
@@ -149,14 +172,9 @@ public:
 };
 
 class ItaniumMangleContext : public MangleContext {
-  bool IsUniqueNameMangler = false;
 public:
   explicit ItaniumMangleContext(ASTContext &C, DiagnosticsEngine &D)
       : MangleContext(C, D, MK_Itanium) {}
-  explicit ItaniumMangleContext(ASTContext &C, DiagnosticsEngine &D,
-                                bool IsUniqueNameMangler)
-      : MangleContext(C, D, MK_Itanium),
-        IsUniqueNameMangler(IsUniqueNameMangler) {}
 
   virtual void mangleCXXVTable(const CXXRecordDecl *RD, raw_ostream &) = 0;
   virtual void mangleCXXVTT(const CXXRecordDecl *RD, raw_ostream &) = 0;
@@ -177,15 +195,12 @@ public:
 
   virtual void mangleDynamicStermFinalizer(const VarDecl *D, raw_ostream &) = 0;
 
-  bool isUniqueNameMangler() { return IsUniqueNameMangler; }
-
   static bool classof(const MangleContext *C) {
     return C->getKind() == MK_Itanium;
   }
 
   static ItaniumMangleContext *create(ASTContext &Context,
-                                      DiagnosticsEngine &Diags,
-                                      bool IsUniqueNameMangler = false);
+                                      DiagnosticsEngine &Diags);
 };
 
 class MicrosoftMangleContext : public MangleContext {

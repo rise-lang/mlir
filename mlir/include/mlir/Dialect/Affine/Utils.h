@@ -13,6 +13,7 @@
 #ifndef MLIR_DIALECT_AFFINE_UTILS_H
 #define MLIR_DIALECT_AFFINE_UTILS_H
 
+#include "mlir/IR/AffineExpr.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -23,12 +24,17 @@ class AffineForOp;
 class AffineIfOp;
 class AffineParallelOp;
 struct LogicalResult;
+struct LoopReduction;
 class Operation;
 
 /// Replaces parallel affine.for op with 1-d affine.parallel op.
-/// mlir::isLoopParallel detect the parallel affine.for ops.
+/// mlir::isLoopParallel detects the parallel affine.for ops.
+/// Parallelizes the specified reductions. Parallelization will fail in presence
+/// of loop iteration arguments that are not listed in `parallelReductions`.
 /// There is no cost model currently used to drive this parallelization.
-void affineParallelize(AffineForOp forOp);
+LogicalResult
+affineParallelize(AffineForOp forOp,
+                  ArrayRef<LoopReduction> parallelReductions = {});
 
 /// Hoists out affine.if/else to as high as possible, i.e., past all invariant
 /// affine.fors/parallel's. Returns success if any hoisting happened; folded` is
@@ -122,13 +128,22 @@ void vectorizeAffineLoops(
 /// loops = {{%i3}}, to vectorize only the second innermost loop;
 /// loops = {{%i1}}, to vectorize only the middle loop.
 LogicalResult
-vectorizeAffineLoopNest(const std::vector<SmallVector<AffineForOp, 2>> &loops,
+vectorizeAffineLoopNest(std::vector<SmallVector<AffineForOp, 2>> &loops,
                         const VectorizationStrategy &strategy);
 
 /// Normalize a affine.parallel op so that lower bounds are 0 and steps are 1.
 /// As currently implemented, this transformation cannot fail and will return
 /// early if the op is already in a normalized form.
 void normalizeAffineParallel(AffineParallelOp op);
+
+/// Traverse `e` and return an AffineExpr where all occurrences of `dim` have
+/// been replaced by either:
+///  - `min` if `positivePath` is true when we reach an occurrence of `dim`
+///  - `max` if `positivePath` is true when we reach an occurrence of `dim`
+/// `positivePath` is negated each time we hit a multiplicative or divisive
+/// binary op with a constant negative coefficient.
+AffineExpr substWithMin(AffineExpr e, AffineExpr dim, AffineExpr min,
+                        AffineExpr max, bool positivePath = true);
 
 } // namespace mlir
 

@@ -76,8 +76,8 @@ For example, you can build your program with
 to use all schemes except for non-virtual member function call and indirect call
 checking.
 
-Remember that you have to provide ``-flto`` if at least one CFI scheme is
-enabled.
+Remember that you have to provide ``-flto`` or ``-flto=thin`` if at
+least one CFI scheme is enabled.
 
 Trapping and Diagnostics
 ========================
@@ -217,7 +217,8 @@ statically linked into the program or shared library, and calls across
 shared library boundaries are handled as if the callee was not compiled with
 ``-fsanitize=cfi-icall``.
 
-This scheme is currently only supported on the x86 and x86_64 architectures.
+This scheme is currently supported on a limited set of targets: x86,
+x86_64, arm, arch64 and wasm.
 
 ``-fsanitize-cfi-icall-generalize-pointers``
 --------------------------------------------
@@ -282,7 +283,7 @@ for CFI. For example, this is necessary when a function's address
 is taken by assembly code and then called by CFI-checking C code. The
 ``__attribute__((cfi_canonical_jump_table))`` attribute may be used to make
 the jump table entry of a specific function canonical so that the external
-code will end up taking a address for the function that will pass CFI checks.
+code will end up taking an address for the function that will pass CFI checks.
 
 ``-fsanitize=cfi-icall`` and ``-fsanitize=function``
 ----------------------------------------------------
@@ -368,7 +369,7 @@ Shared library support
 Use **-f[no-]sanitize-cfi-cross-dso** to enable the cross-DSO control
 flow integrity mode, which allows all CFI schemes listed above to
 apply across DSO boundaries. As in the regular CFI, each DSO must be
-built with ``-flto``.
+built with ``-flto`` or ``-flto=thin``.
 
 Normally, CFI checks will only be performed for classes that have hidden LTO
 visibility. With this flag enabled, the compiler will emit cross-DSO CFI

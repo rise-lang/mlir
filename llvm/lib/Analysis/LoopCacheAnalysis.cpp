@@ -499,14 +499,13 @@ CacheCost::CacheCost(const LoopVectorTy &Loops, const LoopInfo &LI,
 std::unique_ptr<CacheCost>
 CacheCost::getCacheCost(Loop &Root, LoopStandardAnalysisResults &AR,
                         DependenceInfo &DI, Optional<unsigned> TRT) {
-  if (Root.getParentLoop()) {
+  if (!Root.isOutermost()) {
     LLVM_DEBUG(dbgs() << "Expecting the outermost loop in a loop nest\n");
     return nullptr;
   }
 
   LoopVectorTy Loops;
-  for (Loop *L : breadth_first(&Root))
-    Loops.push_back(L);
+  append_range(Loops, breadth_first(&Root));
 
   if (!getInnerMostLoop(Loops)) {
     LLVM_DEBUG(dbgs() << "Cannot compute cache cost of loop nest with more "

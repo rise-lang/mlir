@@ -45,6 +45,7 @@ struct FrameInfo {
   const MCSymbol *PrologEnd = nullptr;
   const MCSymbol *Symbol = nullptr;
   MCSection *TextSection = nullptr;
+  uint32_t PackedInfo = 0;
 
   bool HandlesUnwind = false;
   bool HandlesExceptions = false;
@@ -79,7 +80,8 @@ public:
 
   /// This emits the unwind info sections (.pdata and .xdata in PE/COFF).
   virtual void Emit(MCStreamer &Streamer) const = 0;
-  virtual void EmitUnwindInfo(MCStreamer &Streamer, FrameInfo *FI) const = 0;
+  virtual void EmitUnwindInfo(MCStreamer &Streamer, FrameInfo *FI,
+                              bool HandlerData) const = 0;
 };
 }
 }

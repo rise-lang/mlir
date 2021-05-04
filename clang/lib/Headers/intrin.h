@@ -214,10 +214,6 @@ unsigned char _interlockedbittestandreset64(__int64 volatile *, __int64);
 unsigned char _interlockedbittestandset64(__int64 volatile *, __int64);
 long _InterlockedCompareExchange_np(long volatile *_Destination, long _Exchange,
                                     long _Comparand);
-unsigned char _InterlockedCompareExchange128(__int64 volatile *_Destination,
-                                             __int64 _ExchangeHigh,
-                                             __int64 _ExchangeLow,
-                                             __int64 *_CompareandResult);
 unsigned char _InterlockedCompareExchange128_np(__int64 volatile *_Destination,
                                                 __int64 _ExchangeHigh,
                                                 __int64 _ExchangeLow,
@@ -427,6 +423,26 @@ __int64 _InterlockedCompareExchange64_nf(__int64 volatile *_Destination,
 __int64 _InterlockedCompareExchange64_rel(__int64 volatile *_Destination,
                               __int64 _Exchange, __int64 _Comparand);
 #endif
+#if defined(__x86_64__) || defined(__aarch64__)
+unsigned char _InterlockedCompareExchange128(__int64 volatile *_Destination,
+                                             __int64 _ExchangeHigh,
+                                             __int64 _ExchangeLow,
+                                             __int64 *_ComparandResult);
+#endif
+#if defined(__aarch64__)
+unsigned char _InterlockedCompareExchange128_acq(__int64 volatile *_Destination,
+                                                 __int64 _ExchangeHigh,
+                                                 __int64 _ExchangeLow,
+                                                 __int64 *_ComparandResult);
+unsigned char _InterlockedCompareExchange128_nf(__int64 volatile *_Destination,
+                                                __int64 _ExchangeHigh,
+                                                __int64 _ExchangeLow,
+                                                __int64 *_ComparandResult);
+unsigned char _InterlockedCompareExchange128_rel(__int64 volatile *_Destination,
+                                                 __int64 _ExchangeHigh,
+                                                 __int64 _ExchangeLow,
+                                                 __int64 *_ComparandResult);
+#endif
 
 /*----------------------------------------------------------------------------*\
 |* movs, stos
@@ -491,16 +507,26 @@ static __inline__ void __DEFAULT_FN_ATTRS __stosq(unsigned __int64 *__dst,
 |* Misc
 \*----------------------------------------------------------------------------*/
 #if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__)
+#define __cpuid_count(__leaf, __count, __eax, __ebx, __ecx, __edx)             \
+  __asm("cpuid"                                                                \
+        : "=a"(__eax), "=b"(__ebx), "=c"(__ecx), "=d"(__edx)                   \
+        : "0"(__leaf), "2"(__count))
+#else
+/* x86-64 uses %rbx as the base register, so preserve it. */
+#define __cpuid_count(__leaf, __count, __eax, __ebx, __ecx, __edx)             \
+  __asm("xchgq %%rbx,%q1\n"                                                    \
+        "cpuid\n"                                                              \
+        "xchgq %%rbx,%q1"                                                      \
+        : "=a"(__eax), "=r"(__ebx), "=c"(__ecx), "=d"(__edx)                   \
+        : "0"(__leaf), "2"(__count))
+#endif
 static __inline__ void __DEFAULT_FN_ATTRS __cpuid(int __info[4], int __level) {
-  __asm__("cpuid"
-          : "=a"(__info[0]), "=b"(__info[1]), "=c"(__info[2]), "=d"(__info[3])
-          : "a"(__level), "c"(0));
+  __cpuid_count(__level, 0, __info[0], __info[1], __info[2], __info[3]);
 }
 static __inline__ void __DEFAULT_FN_ATTRS __cpuidex(int __info[4], int __level,
                                                     int __ecx) {
-  __asm__("cpuid"
-          : "=a"(__info[0]), "=b"(__info[1]), "=c"(__info[2]), "=d"(__info[3])
-          : "a"(__level), "c"(__ecx));
+  __cpuid_count(__level, __ecx, __info[0], __info[1], __info[2], __info[3]);
 }
 static __inline__ void __DEFAULT_FN_ATTRS __halt(void) {
   __asm__ volatile("hlt");

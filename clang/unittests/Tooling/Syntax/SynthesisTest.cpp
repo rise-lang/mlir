@@ -188,8 +188,9 @@ TEST_P(SynthesisTest, DeepCopy_Original) {
 TranslationUnit Detached synthesized
 `-SimpleDeclaration synthesized
   |-'int' synthesized
-  |-SimpleDeclarator Declarator synthesized
-  | `-'a' synthesized
+  |-DeclaratorList Declarators synthesized
+  | `-SimpleDeclarator ListElement synthesized
+  |   `-'a' synthesized
   `-';' synthesized
   )txt"));
 }
@@ -201,8 +202,9 @@ TEST_P(SynthesisTest, DeepCopy_Child) {
   EXPECT_TRUE(treeDumpEqual(Copy, R"txt(
 SimpleDeclaration Detached synthesized
 |-'int' synthesized
-|-SimpleDeclarator Declarator synthesized
-| `-'a' synthesized
+|-DeclaratorList Declarators synthesized
+| `-SimpleDeclarator ListElement synthesized
+|   `-'a' synthesized
 `-';' synthesized
   )txt"));
 }
@@ -225,22 +227,24 @@ void test() {
 TranslationUnit Detached synthesized
 `-SimpleDeclaration synthesized
   |-'void' synthesized
-  |-SimpleDeclarator Declarator synthesized
-  | |-'test' synthesized
-  | `-ParametersAndQualifiers synthesized
-  |   |-'(' OpenParen synthesized
-  |   `-')' CloseParen synthesized
+  |-DeclaratorList Declarators synthesized
+  | `-SimpleDeclarator ListElement synthesized
+  |   |-'test' synthesized
+  |   `-ParametersAndQualifiers synthesized
+  |     |-'(' OpenParen synthesized
+  |     `-')' CloseParen synthesized
   `-CompoundStatement synthesized
     |-'{' OpenParen synthesized
     |-IfStatement Statement synthesized
     | |-'if' IntroducerKeyword synthesized
     | |-'(' synthesized
-    | |-BinaryOperatorExpression synthesized
-    | | |-IntegerLiteralExpression LeftHandSide synthesized
-    | | | `-'1' LiteralToken synthesized
-    | | |-'+' OperatorToken synthesized
-    | | `-IntegerLiteralExpression RightHandSide synthesized
-    | |   `-'1' LiteralToken synthesized
+    | |-ExpressionStatement Condition synthesized
+    | | `-BinaryOperatorExpression Expression synthesized
+    | |   |-IntegerLiteralExpression LeftHandSide synthesized
+    | |   | `-'1' LiteralToken synthesized
+    | |   |-'+' OperatorToken synthesized
+    | |   `-IntegerLiteralExpression RightHandSide synthesized
+    | |     `-'1' LiteralToken synthesized
     | |-')' synthesized
     | |-CompoundStatement ThenStatement synthesized
     | | |-'{' OpenParen synthesized

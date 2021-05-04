@@ -7,9 +7,11 @@ add_mlir_dialect_library(MLIRLinalgEDSC
   LINK_LIBS PUBLIC
   MLIREDSC
   MLIRIR
-  MLIRAffineOps
+  MLIRAffine
   MLIRAffineEDSC
-  MLIRLinalgOps
+  MLIRLinalg
+  MLIRMath
+  MLIRMemRef
   MLIRSCF
-  MLIRStandardOps
+  MLIRStandard
   )

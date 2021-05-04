@@ -3,9 +3,9 @@
 # RUN: echo "-sectcreate 1.1" >%t1
 # RUN: echo "-sectcreate 1.2" >%t2
 # RUN: echo "-sectcreate 2" >%t3
-# RUN: lld -flavor darwinnew -Z \
+# RUN: %lld \
 # RUN:     -sectcreate SEG SEC1 %t1 \
-# RUN:     -sectcreate SEG SEC2 %t3 \
+# RUN:     -segcreate SEG SEC2 %t3 \
 # RUN:     -sectcreate SEG SEC1 %t2 \
 # RUN:     -o %t %t.o
 # RUN: llvm-objdump -s %t | FileCheck %s

@@ -17,6 +17,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Progress.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Host/Host.h"
@@ -43,6 +44,7 @@
 
 #include "lldb/Host/SafeMachO.h"
 
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 #include "ObjectFileMachO.h"
@@ -2161,12 +2163,14 @@ ParseNList(DataExtractor &nlist_data, lldb::offset_t &nlist_data_offset,
 enum { DebugSymbols = true, NonDebugSymbols = false };
 
 size_t ObjectFileMachO::ParseSymtab() {
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, "ObjectFileMachO::ParseSymtab () module = %s",
+  LLDB_SCOPED_TIMERF("ObjectFileMachO::ParseSymtab () module = %s",
                      m_file.GetFilename().AsCString(""));
   ModuleSP module_sp(GetModule());
   if (!module_sp)
     return 0;
+
+  Progress progress(llvm::formatv("Parsing symbol table for {0}",
+                                  m_file.GetFilename().AsCString("<Unknown>")));
 
   struct symtab_command symtab_load_command = {0, 0, 0, 0, 0, 0};
   struct linkedit_data_command function_starts_load_command = {0, 0, 0, 0};
@@ -2579,7 +2583,7 @@ size_t ObjectFileMachO::ParseSymtab() {
   typedef std::set<ConstString> IndirectSymbols;
   IndirectSymbols indirect_symbol_names;
 
-#if defined(__APPLE__) && TARGET_OS_EMBEDDED
+#if TARGET_OS_IPHONE
 
   // Some recent builds of the dyld_shared_cache (hereafter: DSC) have been
   // optimized by moving LOCAL symbols out of the memory mapped portion of
@@ -3032,12 +3036,10 @@ size_t ObjectFileMachO::ParseSymtab() {
                             // contains just the filename, so here we combine
                             // it with the first one if we are minimizing the
                             // symbol table
-                            const char *so_path =
-                                sym[sym_idx - 1]
-                                    .GetMangled()
-                                    .GetDemangledName(
-                                        lldb::eLanguageTypeUnknown)
-                                    .AsCString();
+                            const char *so_path = sym[sym_idx - 1]
+                                                      .GetMangled()
+                                                      .GetDemangledName()
+                                                      .AsCString();
                             if (so_path && so_path[0]) {
                               std::string full_so_path(so_path);
                               const size_t double_slash_pos =
@@ -3472,8 +3474,7 @@ size_t ObjectFileMachO::ParseSymtab() {
                             const char *gsym_name =
                                 sym[sym_idx]
                                     .GetMangled()
-                                    .GetName(lldb::eLanguageTypeUnknown,
-                                             Mangled::ePreferMangled)
+                                    .GetName(Mangled::ePreferMangled)
                                     .GetCString();
                             if (gsym_name)
                               N_GSYM_name_to_sym_idx[gsym_name] = sym_idx;
@@ -3555,10 +3556,8 @@ size_t ObjectFileMachO::ParseSymtab() {
                             for (auto pos = range.first; pos != range.second;
                                  ++pos) {
                               if (sym[sym_idx].GetMangled().GetName(
-                                      lldb::eLanguageTypeUnknown,
                                       Mangled::ePreferMangled) ==
                                   sym[pos->second].GetMangled().GetName(
-                                      lldb::eLanguageTypeUnknown,
                                       Mangled::ePreferMangled)) {
                                 m_nlist_idx_to_sym_idx[nlist_idx] = pos->second;
                                 // We just need the flags from the linker
@@ -3600,10 +3599,8 @@ size_t ObjectFileMachO::ParseSymtab() {
                             for (auto pos = range.first; pos != range.second;
                                  ++pos) {
                               if (sym[sym_idx].GetMangled().GetName(
-                                      lldb::eLanguageTypeUnknown,
                                       Mangled::ePreferMangled) ==
                                   sym[pos->second].GetMangled().GetName(
-                                      lldb::eLanguageTypeUnknown,
                                       Mangled::ePreferMangled)) {
                                 m_nlist_idx_to_sym_idx[nlist_idx] = pos->second;
                                 // We just need the flags from the linker
@@ -3625,8 +3622,7 @@ size_t ObjectFileMachO::ParseSymtab() {
                             const char *gsym_name =
                                 sym[sym_idx]
                                     .GetMangled()
-                                    .GetName(lldb::eLanguageTypeUnknown,
-                                             Mangled::ePreferMangled)
+                                    .GetName(Mangled::ePreferMangled)
                                     .GetCString();
                             if (gsym_name) {
                               // Combine N_GSYM stab entries with the non
@@ -5519,7 +5515,8 @@ std::string ObjectFileMachO::GetIdentifierString() {
   return result;
 }
 
-bool ObjectFileMachO::GetCorefileMainBinaryInfo(addr_t &address, UUID &uuid) {
+bool ObjectFileMachO::GetCorefileMainBinaryInfo(addr_t &address, UUID &uuid,
+                                                ObjectFile::BinaryType &type) {
   address = LLDB_INVALID_ADDRESS;
   uuid.Clear();
   ModuleSP module_sp(GetModule());
@@ -5542,24 +5539,43 @@ bool ObjectFileMachO::GetCorefileMainBinaryInfo(addr_t &address, UUID &uuid) {
         // "main bin spec" (main binary specification) data payload is
         // formatted:
         //    uint32_t version       [currently 1]
-        //    uint32_t type          [0 == unspecified, 1 == kernel, 2 == user
-        //    process] uint64_t address       [ UINT64_MAX if address not
-        //    specified ] uuid_t   uuid          [ all zero's if uuid not
-        //    specified ] uint32_t log2_pagesize [ process page size in log base
-        //    2, e.g. 4k pages are 12.  0 for unspecified ]
+        //    uint32_t type          [0 == unspecified, 1 == kernel,
+        //                            2 == user process, 3 == firmware ]
+        //    uint64_t address       [ UINT64_MAX if address not specified ]
+        //    uuid_t   uuid          [ all zero's if uuid not specified ]
+        //    uint32_t log2_pagesize [ process page size in log base
+        //                             2, e.g. 4k pages are 12.
+        //                             0 for unspecified ]
+        //    uint32_t unused        [ for alignment ]
 
         if (strcmp("main bin spec", data_owner) == 0 && size >= 32) {
           offset = fileoff;
           uint32_t version;
           if (m_data.GetU32(&offset, &version, 1) != nullptr && version == 1) {
-            uint32_t type = 0;
+            uint32_t binspec_type = 0;
             uuid_t raw_uuid;
             memset(raw_uuid, 0, sizeof(uuid_t));
 
-            if (m_data.GetU32(&offset, &type, 1) &&
+            if (m_data.GetU32(&offset, &binspec_type, 1) &&
                 m_data.GetU64(&offset, &address, 1) &&
                 m_data.CopyData(offset, sizeof(uuid_t), raw_uuid) != 0) {
               uuid = UUID::fromOptionalData(raw_uuid, sizeof(uuid_t));
+              // convert the "main bin spec" type into our
+              // ObjectFile::BinaryType enum
+              switch (binspec_type) {
+              case 0:
+                type = eBinaryTypeUnknown;
+                break;
+              case 1:
+                type = eBinaryTypeKernel;
+                break;
+              case 2:
+                type = eBinaryTypeUser;
+                break;
+              case 3:
+                type = eBinaryTypeStandalone;
+                break;
+              }
               return true;
             }
           }

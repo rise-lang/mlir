@@ -1,31 +1,40 @@
 # Exclude tests from libMLIR.so
 add_mlir_library(MLIRTestTransforms
-  TestAllReduceLowering.cpp
   TestAffineLoopParametricTiling.cpp
-  TestBufferPlacement.cpp
   TestExpandTanh.cpp
   TestCallGraph.cpp
+  TestDecomposeCallGraphTypes.cpp
   TestConstantFold.cpp
   TestConvVectorization.cpp
   TestConvertCallOp.cpp
   TestConvertGPUKernelToCubin.cpp
   TestConvertGPUKernelToHsaco.cpp
+  TestDataLayoutQuery.cpp
   TestDominance.cpp
+  TestDynamicPipeline.cpp
+  TestComposeSubView.cpp
   TestLoopFusion.cpp
   TestGpuMemoryPromotion.cpp
   TestGpuParallelLoopMapping.cpp
+  TestGpuRewrite.cpp
   TestInlining.cpp
+  TestLinalgCodegenStrategy.cpp
+  TestLinalgElementwiseFusion.cpp
+  TestLinalgFusionTransforms.cpp
   TestLinalgHoisting.cpp
   TestLinalgTransforms.cpp
   TestLiveness.cpp
   TestLoopMapping.cpp
   TestLoopParametricTiling.cpp
   TestLoopUnrolling.cpp
+  TestNumberOfExecutions.cpp
   TestOpaqueLoc.cpp
+  TestPolynomialApproximation.cpp
   TestMemRefBoundCheck.cpp
   TestMemRefDependenceCheck.cpp
   TestMemRefStrideCalculation.cpp
   TestSCFUtils.cpp
+  TestSparsification.cpp
   TestVectorTransforms.cpp
 
   EXCLUDE_FROM_LIBMLIR
@@ -37,26 +46,31 @@ add_mlir_library(MLIRTestTransforms
   MLIRStandardOpsIncGen
 
   LINK_LIBS PUBLIC
-  MLIRAffineOps
+  MLIRAffine
   MLIRAnalysis
   MLIREDSC
   MLIRGPU
-  MLIRGPUToGPURuntimeTransforms
-  MLIRLinalgOps
-  MLIRLinalgTransforms
-  MLIRNVVMIR
-  MLIRSCF
-  MLIRSCFTransforms
   MLIRGPU
+  MLIRGPUToGPURuntimeTransforms
+  MLIRLinalg
+  MLIRLinalgTransforms
+  MLIRLLVMToLLVMIRTranslation
+  MLIRMathTransforms
+  MLIRNVVMIR
+  MLIRNVVMToLLVMIRTranslation
   MLIRPass
   MLIRROCDLIR
+  MLIRROCDLToLLVMIRTranslation
+  MLIRSCF
+  MLIRSCFTransforms
   MLIRStandardOpsTransforms
-  MLIRTargetNVVMIR
-  MLIRTargetROCDLIR
+  MLIRSparseTensor
+  MLIRSparseTensorTransforms
+  MLIRTargetLLVMIRExport
   MLIRTestDialect
   MLIRTransformUtils
-  MLIRVectorToSCF
   MLIRVector
+  MLIRVectorToSCF
   )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test)

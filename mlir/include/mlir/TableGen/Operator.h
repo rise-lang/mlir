@@ -16,10 +16,11 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/TableGen/Argument.h"
 #include "mlir/TableGen/Attribute.h"
+#include "mlir/TableGen/Builder.h"
 #include "mlir/TableGen/Dialect.h"
-#include "mlir/TableGen/OpTrait.h"
 #include "mlir/TableGen/Region.h"
 #include "mlir/TableGen/Successor.h"
+#include "mlir/TableGen/Trait.h"
 #include "mlir/TableGen/Type.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
@@ -28,7 +29,6 @@
 #include "llvm/Support/SMLoc.h"
 
 namespace llvm {
-class CodeInit;
 class DefInit;
 class Record;
 class StringInit;
@@ -176,9 +176,7 @@ public:
   var_decorator_range getArgDecorators(int index) const;
 
   // Returns the trait wrapper for the given MLIR C++ `trait`.
-  // TODO: We should add a C++ wrapper class for TableGen OpTrait instead of
-  // requiring the raw MLIR trait here.
-  const OpTrait *getTrait(llvm::StringRef trait) const;
+  const Trait *getTrait(llvm::StringRef trait) const;
 
   // Regions.
   using const_region_iterator = const NamedRegion *;
@@ -209,7 +207,7 @@ public:
   unsigned getNumVariadicSuccessors() const;
 
   // Trait.
-  using const_trait_iterator = const OpTrait *;
+  using const_trait_iterator = const Trait *;
   const_trait_iterator trait_begin() const;
   const_trait_iterator trait_end() const;
   llvm::iterator_range<const_trait_iterator> getTraits() const;
@@ -241,17 +239,6 @@ public:
   // Prints the contents in this operator to the given `os`. This is used for
   // debugging purposes.
   void print(llvm::raw_ostream &os) const;
-
-  // A helper RAII class to emit nested namespaces for this op.
-  class NamespaceEmitter {
-  public:
-    NamespaceEmitter(raw_ostream &os, Operator &op);
-    ~NamespaceEmitter();
-
-  private:
-    raw_ostream &os;
-    SmallVector<StringRef, 2> namespaces;
-  };
 
   // Return whether all the result types are known.
   bool allResultTypesKnown() const { return allResultsHaveKnownTypes; };
@@ -299,6 +286,9 @@ public:
   // Returns the OperandOrAttribute corresponding to the index.
   OperandOrAttribute getArgToOperandOrAttribute(int index) const;
 
+  // Returns the builders of this operation.
+  ArrayRef<Builder> getBuilders() const { return builders; }
+
 private:
   // Populates the vectors containing operands, attributes, results and traits.
   void populateOpStructure();
@@ -333,7 +323,7 @@ private:
   SmallVector<NamedSuccessor, 0> successors;
 
   // The traits of the op.
-  SmallVector<OpTrait, 4> traits;
+  SmallVector<Trait, 4> traits;
 
   // The regions of this op.
   SmallVector<NamedRegion, 1> regions;
@@ -343,6 +333,9 @@ private:
 
   // Map from argument to attribute or operand number.
   SmallVector<OperandOrAttribute, 4> attrOrOperandMapping;
+
+  // The builders of this operator.
+  SmallVector<Builder> builders;
 
   // The number of native attributes stored in the leading positions of
   // `attributes`.

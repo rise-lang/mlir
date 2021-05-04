@@ -52,11 +52,12 @@ static void memcpy_impl(char *__restrict dst, const char *__restrict src,
     return CopyBlockOverlap<32>(dst, src, count);
   if (count < 128)
     return CopyBlockOverlap<64>(dst, src, count);
-  return CopyAlignedBlocks<32>(dst, src, count);
+  return CopySrcAlignedBlocks<32>(dst, src, count);
 }
 
-void *LLVM_LIBC_ENTRYPOINT(memcpy)(void *__restrict dst,
-                                   const void *__restrict src, size_t size) {
+LLVM_LIBC_FUNCTION(void *, memcpy,
+                   (void *__restrict dst, const void *__restrict src,
+                    size_t size)) {
   memcpy_impl(reinterpret_cast<char *>(dst),
               reinterpret_cast<const char *>(src), size);
   return dst;

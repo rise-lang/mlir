@@ -172,6 +172,8 @@ size_t SBThread::GetStopReasonDataCount() {
         case eStopReasonPlanComplete:
         case eStopReasonThreadExiting:
         case eStopReasonInstrumentation:
+        case eStopReasonProcessorTrace:
+        case eStopReasonVForkDone:
           // There is no data for these stop reasons.
           return 0;
 
@@ -193,6 +195,12 @@ size_t SBThread::GetStopReasonDataCount() {
           return 1;
 
         case eStopReasonException:
+          return 1;
+
+        case eStopReasonFork:
+          return 1;
+
+        case eStopReasonVFork:
           return 1;
         }
       }
@@ -223,6 +231,8 @@ uint64_t SBThread::GetStopReasonDataAtIndex(uint32_t idx) {
         case eStopReasonPlanComplete:
         case eStopReasonThreadExiting:
         case eStopReasonInstrumentation:
+        case eStopReasonProcessorTrace:
+        case eStopReasonVForkDone:
           // There is no data for these stop reasons.
           return 0;
 
@@ -255,6 +265,12 @@ uint64_t SBThread::GetStopReasonDataAtIndex(uint32_t idx) {
           return stop_info_sp->GetValue();
 
         case eStopReasonException:
+          return stop_info_sp->GetValue();
+
+        case eStopReasonFork:
+          return stop_info_sp->GetValue();
+
+        case eStopReasonVFork:
           return stop_info_sp->GetValue();
         }
       }

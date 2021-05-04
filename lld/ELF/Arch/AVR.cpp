@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// AVR is a Harvard-architecture 8-bit micrcontroller designed for small
+// AVR is a Harvard-architecture 8-bit microcontroller designed for small
 // baremetal programs. All AVR-family processors have 32 8-bit registers.
 // The tiniest AVR has 32 byte RAM and 1 KiB program memory, and the largest
 // one supports up to 2^24 data address space and 2^22 code address space.
@@ -43,6 +43,7 @@ namespace {
 class AVR final : public TargetInfo {
 public:
   AVR();
+  uint32_t calcEFlags() const override;
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
@@ -195,4 +196,29 @@ void AVR::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
 TargetInfo *elf::getAVRTargetInfo() {
   static AVR target;
   return &target;
+}
+
+static uint32_t getEFlags(InputFile *file) {
+  return cast<ObjFile<ELF32LE>>(file)->getObj().getHeader().e_flags;
+}
+
+uint32_t AVR::calcEFlags() const {
+  assert(!objectFiles.empty());
+
+  uint32_t flags = getEFlags(objectFiles[0]);
+  bool hasLinkRelaxFlag = flags & EF_AVR_LINKRELAX_PREPARED;
+
+  for (InputFile *f : makeArrayRef(objectFiles).slice(1)) {
+    uint32_t objFlags = getEFlags(f);
+    if ((objFlags & EF_AVR_ARCH_MASK) != (flags & EF_AVR_ARCH_MASK))
+      error(toString(f) +
+            ": cannot link object files with incompatible target ISA");
+    if (!(objFlags & EF_AVR_LINKRELAX_PREPARED))
+      hasLinkRelaxFlag = false;
+  }
+
+  if (!hasLinkRelaxFlag)
+    flags &= ~EF_AVR_LINKRELAX_PREPARED;
+
+  return flags;
 }
