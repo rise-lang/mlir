@@ -34,6 +34,7 @@ RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter 
 
   // Check if expr has been deleted or replaced already
   if (op == nullptr) return rr;
+  if (op->getBlock() == nullptr) return rr;
   if (op->use_empty()) return rr;
   // Did the strategy modify the IR at all
   if (op == newOp) return rr;
@@ -47,6 +48,7 @@ RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter 
   };
 
   addOperandsToGarbageCandidates(op);
+
   op->replaceAllUsesWith(newOp);
   rewriter.eraseOp(op);
   do {

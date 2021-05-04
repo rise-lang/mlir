@@ -58,14 +58,12 @@ void ElevateRewritingPass::runOnFunction() {
   OutOp outOp = dyn_cast<OutOp>(*_outOp);
   auto lastApply = outOp.input().getDefiningOp();
   ///////////////////////////////////////////////////
-//  bool erased;
-//  applyOpPatternsAndFold(op, patterns, &erased);
 
   ElevateRewriteDriver rewriter(op->getContext());
   RiseDialect::dumpRiseExpression(outOp);
 
   RewriteResult rr_fused = topdown(fuseReduceMap())(lastApply, rewriter);
-//
+
   auto rr_betared1 = flatMapSuccess(rr_fused,
                                     topdown(betaReduction()),
                                     rewriter);
