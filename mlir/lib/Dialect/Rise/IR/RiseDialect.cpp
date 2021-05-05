@@ -21,11 +21,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
+#include "mlir/Dialect/Rise/IR/TypeDetail.h"
 #include <iostream>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/StandardTypes.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -44,7 +45,7 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx, Ty
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
-      >();
+  >();
   ///      Types:                    Nats: Datatypes:
   addTypes<FunType, DataTypeWrapper, Nat, Tuple, ArrayType, ScalarType>();
   addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();

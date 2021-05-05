@@ -9,9 +9,7 @@
 #include "mlir/Dialect/Rise/EDSC/HighLevel.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Function.h"
 #include "mlir/IR/Matchers.h"
-#include "mlir/IR/StandardTypes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -381,8 +379,8 @@ Value mlir::edsc::utils::getFilledMemRef(ArrayRef<int64_t> shape,
   }
   Value cstf = std_constant_float(llvm::APFloat(fillValue), f32Type);
   if (!memref)
-    memref = std_alloc(MemRefType::get(shape, f32Type, {}, 0));
-  StdIndexedValue val(memref);
+    memref = memref_alloc(MemRefType::get(shape, f32Type, {}, 0));
+  MemRefIndexedValue val(memref);
 
   loopNestBuilder(lbs, ub, steps, [&](auto ivs) {
     SmallVector<Value, 4> ivs_vector;
@@ -408,12 +406,12 @@ Value mlir::edsc::utils::getFilledMemRef(ArrayRef<int64_t> shape,
   }
   Value cst0f = std_constant_float(llvm::APFloat(0.0f), f32Type);
   Value cst1f = std_constant_float(llvm::APFloat(1.0f), f32Type);
-  StdIndexedValue initVal(std_alloc(MemRefType::get({}, f32Type, {}, 0)));
+  MemRefIndexedValue initVal(memref_alloc(MemRefType::get({}, f32Type, {}, 0)));
   initVal = cst0f;
 
   if (!memref)
-    memref = std_alloc(MemRefType::get(shape, f32Type, {}, 0));
-  StdIndexedValue val(memref);
+    memref = memref_alloc(MemRefType::get(shape, f32Type, {}, 0));
+  MemRefIndexedValue val(memref);
 
   mlir::edsc::loopNestBuilder(lbs, ub, steps, [&](auto ivs) {
     SmallVector<Value, 4> ivs_vector;

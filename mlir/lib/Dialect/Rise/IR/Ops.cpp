@@ -19,7 +19,6 @@
 
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/StandardTypes.h"
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"

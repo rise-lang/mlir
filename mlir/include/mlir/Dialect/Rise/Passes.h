@@ -12,12 +12,11 @@ namespace mlir {
 class ModuleOp;
 template <typename T>
 class OperationPass;
-class OwningRewritePatternList;
 class AffineDialect;
 
-void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
+void populateRiseToStdConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
-void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
+void populateRiseToImpConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
 
 #define GEN_PASS_CLASSES

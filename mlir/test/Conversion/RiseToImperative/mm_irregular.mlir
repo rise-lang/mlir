@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=MM_irreg
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 
 // A:10x2 * B:2x5 = C:10x5
 func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5xf32>) {
@@ -51,21 +51,21 @@ func @rise_fun(%outArg:memref<10x5xf32>, %inA:memref<10x2xf32>, %inB:memref<2x5x
     }
     return
 }
-func @rtclock() -> (f64)
-func @print_flops(f64,f64,i64)
+func private @rtclock() -> (f64)
+func private @print_flops(f64,f64,i64)
 func @mm() {
     //prepare output Array
-    %outputArray = alloc() : memref<10x5xf32>
+    %outputArray = memref.alloc() : memref<10x5xf32>
 
-    %A = alloc() : memref<10x2xf32>
+    %A = memref.alloc() : memref<10x2xf32>
 
     %cst0 = constant 0.000000e+00 : f32
-    %memrefcst1 = alloc() : memref<f32>
+    %memrefcst1 = memref.alloc() : memref<f32>
     %cst1 = constant 1.000000e+00 : f32
-    store %cst1, %memrefcst1[] : memref<f32>
+    memref.store %cst1, %memrefcst1[] : memref<f32>
 
-    %val = alloc() : memref<f32>
-    store %cst0, %val[] : memref<f32>
+    %val = memref.alloc() : memref<f32>
+    memref.store %cst0, %val[] : memref<f32>
 
     %c0 = constant 0 : index
     %cArows = constant 10 : index
@@ -73,37 +73,37 @@ func @mm() {
     %c1 = constant 1 : index
     scf.for %arg0 = %c0 to %cArows step %c1 {
         scf.for %arg1 = %c0 to %cAcols step %c1 {
-            %val_loaded = load %val[] : memref<f32>
-            %cst1_loaded = load %memrefcst1[] : memref<f32>
+            %val_loaded = memref.load %val[] : memref<f32>
+            %cst1_loaded = memref.load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
-            store %interm, %val[] : memref<f32>
-            store %interm, %A[%arg0, %arg1] : memref<10x2xf32>
+            memref.store %interm, %val[] : memref<f32>
+            memref.store %interm, %A[%arg0, %arg1] : memref<10x2xf32>
         }
     }
 
     %cBrows = constant 2 : index
     %cBcols = constant 5 : index
-    %B = alloc() : memref<2x5xf32>
+    %B = memref.alloc() : memref<2x5xf32>
 
     scf.for %arg0 = %c0 to %cBrows step %c1 {
         scf.for %arg1 = %c0 to %cBcols step %c1 {
-            %val_loaded = load %val[] : memref<f32>
-            %cst1_loaded = load %memrefcst1[] : memref<f32>
+            %val_loaded = memref.load %val[] : memref<f32>
+            %cst1_loaded = memref.load %memrefcst1[] : memref<f32>
             %interm = addf %val_loaded, %cst1_loaded : f32
-            store %interm, %val[] : memref<f32>
-            store %interm, %B[%arg0, %arg1] : memref<2x5xf32>
+            memref.store %interm, %val[] : memref<f32>
+            memref.store %interm, %B[%arg0, %arg1] : memref<2x5xf32>
         }
     }
 
     call @rise_fun(%outputArray, %A, %B) : (memref<10x5xf32>, memref<10x2xf32>, memref<2x5xf32>) -> ()
 
-    %print_meA = memref_cast %A : memref<10x2xf32> to memref<*xf32>
+    %print_meA = memref.cast %A : memref<10x2xf32> to memref<*xf32>
     call @print_memref_f32(%print_meA): (memref<*xf32>) -> ()
 
-    %print_meB = memref_cast %B : memref<2x5xf32> to memref<*xf32>
+    %print_meB = memref.cast %B : memref<2x5xf32> to memref<*xf32>
     call @print_memref_f32(%print_meB): (memref<*xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<10x5xf32> to memref<*xf32>
+    %print_me = memref.cast %outputArray : memref<10x5xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
 
     return

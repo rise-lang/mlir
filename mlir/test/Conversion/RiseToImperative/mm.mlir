@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e mm -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=MM
 
-func @print_memref_f32(memref<*xf32>)
+func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf32>) {
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<4, array<4, scalar<f32>>>
@@ -57,19 +57,19 @@ func @rise_fun(%outArg:memref<4x4xf32>, %inA:memref<4x4xf32>, %inB:memref<4x4xf3
 }
 func @mm() {
     //prepare output Array
-    %outputArray = alloc() : memref<4x4xf32>
+    %outputArray = memref.alloc() : memref<4x4xf32>
 
-    %A = alloc() : memref<4x4xf32>
+    %A = memref.alloc() : memref<4x4xf32>
     %cst_0 = constant 5.000000e+00 : f32
     linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
 
-    %B = alloc() : memref<4x4xf32>
+    %B = memref.alloc() : memref<4x4xf32>
     %cst_1 = constant 5.000000e+00 : f32
     linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
 
     call @rise_fun(%outputArray, %A, %B) : (memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<4x4xf32> to memref<*xf32>
+    %print_me = memref.cast %outputArray : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }

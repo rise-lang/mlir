@@ -10,16 +10,16 @@ llvm_update_compile_flags(rise_highlevel_test)
 
 target_link_libraries(rise_highlevel_test
   PRIVATE
-  MLIRAffineOps
+  MLIRAffine
   MLIRAffineEDSC
   MLIREDSC
   MLIRIR
+  MLIRLinalg
   MLIRLinalgEDSC
-  MLIRLinalgOps
   MLIRRise
   MLIRRiseEDSC
   MLIRSCF
-  MLIRStandardOps
+  MLIRStandard
   MLIRTransforms
   MLIRVector
   )

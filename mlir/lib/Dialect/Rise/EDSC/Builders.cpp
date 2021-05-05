@@ -506,7 +506,7 @@ Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t) {
 
   return ValueBuilder<MapSeqOp>(
       mapType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
-      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
+      DataTypeAttr::get(context, t), StringAttr::get(context, lowerTo));
 }
 
 Value mlir::edsc::op::mapSeq(StringRef lowerTo, Nat n, DataType s, DataType t,
@@ -562,7 +562,7 @@ Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,
                    FunType::get(context, ArrayType::get(context, n, s), t)));
   return ValueBuilder<ReduceSeqOp>(
       reduceType, NatAttr::get(context, n), DataTypeAttr::get(context, s),
-      DataTypeAttr::get(context, t), StringAttr::get(lowerTo, context));
+      DataTypeAttr::get(context, t), StringAttr::get(context, lowerTo));
 }
 
 Value mlir::edsc::op::reduceSeq(StringRef lowerTo, Nat n, DataType s,

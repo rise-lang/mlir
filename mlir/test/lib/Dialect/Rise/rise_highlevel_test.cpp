@@ -19,6 +19,7 @@
 // clang-format on
 
 #include <iostream>
+#include <mlir/Dialect/Math/IR/Math.h>
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/EDSC/Builders.h"
@@ -35,8 +36,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Module.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -52,12 +52,14 @@ using namespace mlir::edsc;
 using namespace mlir::edsc::intrinsics;
 
 static MLIRContext &globalContext() {
-  static thread_local MLIRContext context(/*loadAllDialects=*/false);
+  static thread_local MLIRContext context;
   static thread_local bool initOnce = [&]() {
     // clang-format off
-    context.loadDialect<AffineDialect,
+    context.memref.loadDialect<AffineDialect,
         scf::SCFDialect,
         linalg::LinalgDialect,
+        math::MathDialect,
+        memref::MemRefDialect,
         StandardOpsDialect,
         vector::VectorDialect,
         rise::RiseDialect>();
@@ -68,6 +70,7 @@ static MLIRContext &globalContext() {
   context.allowUnregisteredDialects();
   return context;
 }
+
 using namespace mlir::edsc::op;
 using namespace mlir::edsc::type;
 using namespace mlir::edsc::highlevel;
@@ -78,7 +81,7 @@ static FuncOp makeFunction(StringRef name, ArrayRef<Type> results = {},
                            ArrayRef<Type> args = {}) {
   auto &ctx = globalContext();
   auto function = FuncOp::create(UnknownLoc::get(&ctx), name,
-                                 FunctionType::get(args, results, &ctx));
+                                 FunctionType::get(&ctx, args, results));
   function.addEntryBlock();
   return function;
 }
@@ -87,7 +90,8 @@ static FuncOp declareFunction(StringRef name, ArrayRef<Type> results = {},
                               ArrayRef<Type> args = {}) {
   auto &ctx = globalContext();
   auto function = FuncOp::create(UnknownLoc::get(&ctx), name,
-                                 FunctionType::get(args, results, &ctx));
+                                 FunctionType::get(&ctx, args, results));
+  function.setVisibility(SymbolTable::Visibility::Private);
   return function;
 }
 
@@ -150,18 +154,18 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
 // IMPERATIVE:           %[[VAL_8:.*]] = constant 1 : index
 // IMPERATIVE:           scf.for %[[VAL_9:.*]] = %[[VAL_6]] to %[[VAL_3]] step %[[VAL_8]] {
 // IMPERATIVE:             scf.for %[[VAL_10:.*]] = %[[VAL_6]] to %[[VAL_4]] step %[[VAL_8]] {
-// IMPERATIVE:               %[[VAL_11:.*]] = alloc() : memref<f32>
-// IMPERATIVE:               store %[[VAL_5]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               %[[VAL_11:.*]] = memref.alloc() : memref<f32>
+// IMPERATIVE:               memref.store %[[VAL_5]], %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:               scf.for %[[VAL_12:.*]] = %[[VAL_6]] to %[[VAL_7]] step %[[VAL_8]] {
-// IMPERATIVE:                 %[[VAL_13:.*]] = load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_12]]] : memref<32x16xf32>
-// IMPERATIVE:                 %[[VAL_14:.*]] = load %[[VAL_1]]{{\[}}%[[VAL_12]], %[[VAL_10]]] : memref<16x64xf32>
-// IMPERATIVE:                 %[[VAL_15:.*]] = load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:                 %[[VAL_13:.*]] = memref.load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_12]]] : memref<32x16xf32>
+// IMPERATIVE:                 %[[VAL_14:.*]] = memref.load %[[VAL_1]]{{\[}}%[[VAL_12]], %[[VAL_10]]] : memref<16x64xf32>
+// IMPERATIVE:                 %[[VAL_15:.*]] = memref.load %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:                 %[[VAL_16:.*]] = addf %[[VAL_13]], %[[VAL_14]] : f32
 // IMPERATIVE:                 %[[VAL_17:.*]] = mulf %[[VAL_15]], %[[VAL_16]] : f32
-// IMPERATIVE:                 store %[[VAL_17]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:                 memref.store %[[VAL_17]], %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:               }
-// IMPERATIVE:               %[[VAL_18:.*]] = load %[[VAL_11]][] : memref<f32>
-// IMPERATIVE:               store %[[VAL_18]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
+// IMPERATIVE:               %[[VAL_18:.*]] = memref.load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               memref.store %[[VAL_18]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
 // IMPERATIVE:             }
 // IMPERATIVE:           }
 // IMPERATIVE:           return

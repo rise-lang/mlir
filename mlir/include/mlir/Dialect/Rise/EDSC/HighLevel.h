@@ -17,6 +17,7 @@
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/MemRef/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/invoke.hpp"
@@ -123,14 +124,14 @@ template <typename T, typename... Targs>
 void makeRiseTest(FuncOp riseFun,
                                       ArrayRef<int64_t> outputShape, T input,
                                       Targs... inputs) {
-  Value output = std_alloc(MemRefType::get(outputShape, FloatType::getF32(ScopedContext::getContext()), {}, 0));
+  Value output = memref_alloc(MemRefType::get(outputShape, FloatType::getF32(ScopedContext::getContext()), {}, 0));
   std::tuple<T, Targs...> tuple = std::make_tuple(input, inputs...);
   std_call(riseFun, ValueRange{input, inputs..., output});
   for_each(tuple, [&](Value elem){
-    Value casted = std_memref_cast(elem, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
+    Value casted = memref_cast(elem, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
     std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{casted});
   });
-  Value casted = std_memref_cast(output, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
+  Value casted = memref_cast(output, UnrankedMemRefType::get(FloatType::getF32(ScopedContext::getContext()), 0));
   std_call("print_memref_f32", ArrayRef<Type>(), ValueRange{casted});
 }
 } // namespace utils
