@@ -21,6 +21,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Rise/IR/Dialect.h"
+#include "mlir/Dialect/Rise/IR/Types.h"
+#include "mlir/Dialect/Rise/IR/TypeDetail.h"
 #include <iostream>
 
 #include "mlir/IR/Builders.h"
@@ -44,7 +46,7 @@ RiseDialect::RiseDialect(mlir::MLIRContext *ctx) : mlir::Dialect("rise", ctx, Ty
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/Rise/IR/Rise.cpp.inc"
-      >();
+  >();
   ///      Types:                    Nats: Datatypes:
   addTypes<FunType, DataTypeWrapper, Nat, Tuple, ArrayType, ScalarType>();
   addAttributes<DataTypeAttr, NatAttr, LiteralAttr>();
@@ -285,7 +287,7 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
   auto getNestingLevelForLambda = [&](LambdaOp &lambda) -> int {
     int i = 0;
     LambdaOp parentLambda = lambda;
-    while (parentLambda = parentLambda.getParentOfType<LambdaOp>()) {
+    while (parentLambda = parentLambda->getParentOfType<LambdaOp>()) {
       i++;
     }
     return i;
@@ -293,7 +295,7 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
   auto getNestingLevelForEmbed = [&](EmbedOp &embed) -> int {
     int i = 0;
     EmbedOp parentEmbed = embed;
-    while (parentEmbed = parentEmbed.getParentOfType<EmbedOp>()) {
+    while (parentEmbed = parentEmbed->getParentOfType<EmbedOp>()) {
       i++;
     }
     return i;

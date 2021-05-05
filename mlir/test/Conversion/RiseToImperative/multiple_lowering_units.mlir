@@ -38,15 +38,15 @@ func @rise_fun(%outArg: memref<6xf32>, %in: memref<6xf32>) {
 
 func @multiple() {
     //prepare output Array
-    %outputArray = alloc() : memref<6xf32>
+    %outputArray = memref.alloc() : memref<6xf32>
 
-    %inputArray = alloc() : memref<6xf32>
+    %inputArray = memref.alloc() : memref<6xf32>
     %cst = constant 5.0 : f32
     linalg.fill(%inputArray, %cst) : memref<6xf32>, f32
 
     call @rise_fun(%outputArray, %inputArray) : (memref<6xf32>, memref<6xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<6xf32> to memref<*xf32>
+    %print_me = memref.cast %outputArray : memref<6xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
 }

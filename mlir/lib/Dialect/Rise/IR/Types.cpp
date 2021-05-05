@@ -17,10 +17,10 @@
 #include "mlir/Dialect/Rise/IR/Types.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/Rise/IR/TypeDetail.h"
-
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Diagnostics.h"
-#include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 
 using llvm::ArrayRef;

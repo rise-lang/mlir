@@ -152,6 +152,11 @@ protected:
   /// with the given root name.
   Pattern(StringRef rootName, PatternBenefit benefit, MLIRContext *context,
           ArrayRef<StringRef> generatedNames = {});
+  /// Construct a pattern with a certain benefit that matches any operation
+  /// type. `MatchAnyOpTypeTag` is just a tag to ensure that the "match any"
+  /// behavior is what the user actually desired, `MatchAnyOpTypeTag()` should
+  /// always be supplied here.
+  Pattern(PatternBenefit benefit, MatchAnyOpTypeTag tag);
   /// Construct a pattern that may match any operation type. `generatedNames`
   /// contains the names of operations that may be generated during a successful
   /// rewrite. `MatchAnyOpTypeTag` is just a tag to ensure that the "match any"

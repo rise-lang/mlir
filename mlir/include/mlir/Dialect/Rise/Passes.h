@@ -12,15 +12,14 @@ namespace mlir {
 class ModuleOp;
 template <typename T>
 class OperationPass;
-class OwningRewritePatternList;
 class AffineDialect;
 namespace scf {
   class SCFDialect;
 }
 
-void populateRiseToStdConversionPatterns(OwningRewritePatternList &patterns,
+void populateRiseToStdConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
-void populateRiseToImpConversionPatterns(OwningRewritePatternList &patterns,
+void populateRiseToImpConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
 void populateElevatePatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);

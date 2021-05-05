@@ -18,6 +18,7 @@
 // CHECK-NEXT: pdl
 // CHECK-NEXT: pdl_interp
 // CHECK-NEXT: quant
+// CHECK-NEXT: rise
 // CHECK-NEXT: rocdl
 // CHECK-NEXT: scf
 // CHECK-NEXT: sdbm

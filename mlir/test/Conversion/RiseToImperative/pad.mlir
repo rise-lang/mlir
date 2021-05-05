@@ -27,32 +27,32 @@ func @rise_fun(%outArg: memref<14xf32>, %in: memref<9xf32>) {
 
 func @stencil() {
     //prepare output Array
-    %outputArray = alloc() : memref<14xf32>
-    %inputArray = alloc() : memref<9xf32>
+    %outputArray = memref.alloc() : memref<14xf32>
+    %inputArray = memref.alloc() : memref<9xf32>
 
-    %memrefcst1 = alloc() : memref<f32>
+    %memrefcst1 = memref.alloc() : memref<f32>
     %cst1 = constant 1.000000e+00 : f32
-    store %cst1, %memrefcst1[] : memref<f32>
+    memref.store %cst1, %memrefcst1[] : memref<f32>
 
     %cst0 = constant 0.000000e+00 : f32
-    %val = alloc() : memref<f32>
-    store %cst0, %val[] : memref<f32>
+    %val = memref.alloc() : memref<f32>
+    memref.store %cst0, %val[] : memref<f32>
 
     %c0 = constant 0 : index
     %c16 = constant 9 : index
     %c1 = constant 1 : index
     scf.for %arg0 = %c0 to %c16 step %c1 {
-        %val_loaded = load %val[] : memref<f32>
-        %cst1_loaded = load %memrefcst1[] : memref<f32>
+        %val_loaded = memref.load %val[] : memref<f32>
+        %cst1_loaded = memref.load %memrefcst1[] : memref<f32>
         %interm = addf %val_loaded, %cst1_loaded : f32
-        store %interm, %val[] : memref<f32>
-        store %interm, %inputArray[%arg0] : memref<9xf32>
+        memref.store %interm, %val[] : memref<f32>
+        memref.store %interm, %inputArray[%arg0] : memref<9xf32>
     }
 
     call @rise_fun(%outputArray, %inputArray) : (memref<14xf32>, memref<9xf32>) -> ()
 
-    %print_me_in = memref_cast %inputArray : memref<9xf32> to memref<*xf32>
-    %print_me_out = memref_cast %outputArray : memref<14xf32> to memref<*xf32>
+    %print_me_in = memref.cast %inputArray : memref<9xf32> to memref<*xf32>
+    %print_me_out = memref.cast %outputArray : memref<14xf32> to memref<*xf32>
     call @print_memref_f32(%print_me_in): (memref<*xf32>) -> ()
     call @print_memref_f32(%print_me_out): (memref<*xf32>) -> ()
     return

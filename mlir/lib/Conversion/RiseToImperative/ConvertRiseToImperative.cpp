@@ -14,7 +14,9 @@
 #include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
 #include "mlir/Dialect/SCF/EDSC/Intrinsics.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/EDSC/Builders.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
@@ -545,7 +547,7 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
         ValueRange());
     rewriter.setInsertionPointToStart(&embedOp.region().front());
 
-    AllocOp alloc = rewriter.create<AllocOp>(
+    memref::AllocOp alloc = rewriter.create<memref::AllocOp>(
         loc, MemRefType::get(ArrayRef<int64_t>{},
                              FloatType::getF32(rewriter.getContext())));
     rewriter.create<rise::ReturnOp>(initializer.getLoc(), alloc.getResult());
@@ -755,7 +757,7 @@ mlir::Value lowerLiteral(Value literalValue, Location loc,
         "Element type of inner array of Literal has to be of Type ScalarType!");
     Type memrefElementType = elementType.getWrappedType();
 
-    auto array = rewriter.create<AllocOp>(
+    auto array = rewriter.create<memref::AllocOp>(
         loc, MemRefType::get(shape, memrefElementType));
 
     // For now just fill the array with one value
@@ -793,7 +795,7 @@ mlir::Value lowerMapSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t, Value val,
   }
 
   rewriter.setInsertionPointToStart(&embedOp.region().front());
-  auto tmpArray = rewriter.create<AllocOp>(
+  auto tmpArray = rewriter.create<memref::AllocOp>(
       loc, MemRefType::get(shape, FloatType::getF32(rewriter.getContext())));
   rewriter.create<rise::ReturnOp>(tmpArray.getLoc(), tmpArray.getResult());
 
@@ -1085,7 +1087,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     Value iv = idx.iv();
     path.push_back(iv);
     return resolveIndexing(idx.array(), path, rewriter);
-  } else if (AllocOp alloc = dyn_cast<AllocOp>(val.getDefiningOp())) {
+  } else if (memref::AllocOp alloc = dyn_cast<memref::AllocOp>(val.getDefiningOp())) {
     emitRemark(alloc.getLoc()) << "resolveIndexing for alloc";
 
     // call to reverse here.
@@ -1135,7 +1137,7 @@ Value resolveIndexing(Value val, SmallVector<OutputPathType, 10> path,
     path.push_back(false);
     return resolveIndexing(sndIntermOp.value(), path, rewriter);
 
-  } else if (isa<LoadOp>(val.getDefiningOp()) ||
+  } else if (isa<memref::LoadOp>(val.getDefiningOp()) ||
              isa<AffineLoadOp>(val.getDefiningOp())) {
     emitRemark(val.getLoc()) << "resolveIndexing for Load";
     return val;
@@ -1310,7 +1312,7 @@ Value generateWriteAccess(SmallVector<OutputPathType, 10> path, Value accessVal,
         .create<AffineLoadOp>(accessVal.getLoc(), accessVal, indexValues)
         .getResult();
   } else {
-    return rewriter.create<LoadOp>(accessVal.getLoc(), accessVal, indexValues)
+    return rewriter.create<memref::LoadOp>(accessVal.getLoc(), accessVal, indexValues)
         .getResult();
   }
 }
@@ -1329,7 +1331,7 @@ void generateReadAccess(SmallVector<OutputPathType, 10> path, Value storeVal,
                                    llvm::makeArrayRef(indexValues));
     return;
   } else {
-    rewriter.create<StoreOp>(storeLoc.getLoc(), storeVal, storeLoc,
+    rewriter.create<memref::StoreOp>(storeLoc.getLoc(), storeVal, storeLoc,
                              llvm::makeArrayRef(indexValues));
 
     return;
@@ -1392,7 +1394,7 @@ void Substitute(LambdaOp lambda, llvm::SmallVector<Value, 10> args) {
 
 /// gather all patterns
 void mlir::populateRiseToImpConversionPatterns(
-    OwningRewritePatternList &patterns, MLIRContext *ctx) {
+    RewritePatternSet &patterns, MLIRContext *ctx) {
   patterns.insert<RiseToImperativePattern>(ctx);
 }
 //===----------------------------------------------------------------------===//
@@ -1402,13 +1404,13 @@ void mlir::populateRiseToImpConversionPatterns(
 /// The pass:
 void ConvertRiseToImperativePass::runOnFunction() {
   auto module = getOperation();
-  OwningRewritePatternList patterns;
+  RewritePatternSet patterns(module->getContext());
 
   populateRiseToImpConversionPatterns(patterns, &getContext());
 
   ConversionTarget target(getContext());
 
-  target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target.addLegalOp<ModuleOp>();
 
   target.addLegalDialect<StandardOpsDialect>();
   target.addLegalDialect<scf::SCFDialect>();
@@ -1429,9 +1431,9 @@ void ConvertRiseToImperativePass::runOnFunction() {
   });
 
   bool erased;
+//  applyFullConversion(module, target, patterns);
 
   applyOpPatternsAndFold(module, std::move(patterns), &erased);
-//  applyFullConversion(module, target, patterns);
   return;
 }
 

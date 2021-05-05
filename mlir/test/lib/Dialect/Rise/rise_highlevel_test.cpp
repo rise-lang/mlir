@@ -10,11 +10,11 @@
 // TODO: Not sure so far how to make the test depend on that target
 //
 // clang-format off
-// RU: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize | FileCheck %s --check-prefix=IMPERATIVE
-// RU: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=STENCIL_2D_TEST
-// RU: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e pad2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=PAD_2D_TEST
-// RU: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e zip2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=ZIP_2D_TEST
-// RU: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e conv2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=CONV_2D_TEST
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize | FileCheck %s --check-prefix=IMPERATIVE
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e stencil2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=STENCIL_2D_TEST
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e pad2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=PAD_2D_TEST
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e zip2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=ZIP_2D_TEST
+// RUN: rise_highlevel_test | mlir-opt -split-input-file -convert-rise-to-imperative -canonicalize --convert-linalg-to-std -lower-affine -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e conv2D_test -entry-point-result=void -O3 -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext | FileCheck %s --check-prefix=CONV_2D_TEST
 //
 // Drop measurelib in folder where the other lib is.
 //,/home/martin/development/phd/projects/MLIR/performance_measuring/dylib/measure_libi_no_mkl.so
@@ -22,6 +22,7 @@
 // clang-format on
 
 #include <iostream>
+#include <mlir/Dialect/Math/IR/Math.h>
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/EDSC/Builders.h"
@@ -38,6 +39,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -56,9 +58,11 @@ static MLIRContext &globalContext() {
   static thread_local MLIRContext context;
   static thread_local bool initOnce = [&]() {
     // clang-format off
-    context.loadDialect<AffineDialect,
+    context.memref.loadDialect<AffineDialect,
         scf::SCFDialect,
         linalg::LinalgDialect,
+        math::MathDialect,
+        memref::MemRefDialect,
         StandardOpsDialect,
         vector::VectorDialect,
         rise::RiseDialect>();
@@ -85,12 +89,12 @@ static FuncOp makeFunction(StringRef name, ArrayRef<Type> results = {},
   return function;
 }
 
-
 static FuncOp declareFunction(StringRef name, ArrayRef<Type> results = {},
                               ArrayRef<Type> args = {}) {
   auto &ctx = globalContext();
   auto function = FuncOp::create(UnknownLoc::get(&ctx), name,
                                  FunctionType::get(&ctx, args, results));
+  function.setVisibility(SymbolTable::Visibility::Private);
   return function;
 }
 
@@ -155,18 +159,18 @@ TEST_FUNC(build_and_lower_matrix_multiplication) {
 // IMPERATIVE:           %[[VAL_8:.*]] = constant 1 : index
 // IMPERATIVE:           scf.for %[[VAL_9:.*]] = %[[VAL_6]] to %[[VAL_3]] step %[[VAL_8]] {
 // IMPERATIVE:             scf.for %[[VAL_10:.*]] = %[[VAL_6]] to %[[VAL_4]] step %[[VAL_8]] {
-// IMPERATIVE:               %[[VAL_11:.*]] = alloc() : memref<f32>
-// IMPERATIVE:               store %[[VAL_5]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               %[[VAL_11:.*]] = memref.alloc() : memref<f32>
+// IMPERATIVE:               memref.store %[[VAL_5]], %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:               scf.for %[[VAL_12:.*]] = %[[VAL_6]] to %[[VAL_7]] step %[[VAL_8]] {
-// IMPERATIVE:                 %[[VAL_13:.*]] = load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_12]]] : memref<32x16xf32>
-// IMPERATIVE:                 %[[VAL_14:.*]] = load %[[VAL_1]]{{\[}}%[[VAL_12]], %[[VAL_10]]] : memref<16x64xf32>
-// IMPERATIVE:                 %[[VAL_15:.*]] = load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:                 %[[VAL_13:.*]] = memref.load %[[VAL_0]]{{\[}}%[[VAL_9]], %[[VAL_12]]] : memref<32x16xf32>
+// IMPERATIVE:                 %[[VAL_14:.*]] = memref.load %[[VAL_1]]{{\[}}%[[VAL_12]], %[[VAL_10]]] : memref<16x64xf32>
+// IMPERATIVE:                 %[[VAL_15:.*]] = memref.load %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:                 %[[VAL_16:.*]] = addf %[[VAL_13]], %[[VAL_14]] : f32
 // IMPERATIVE:                 %[[VAL_17:.*]] = mulf %[[VAL_15]], %[[VAL_16]] : f32
-// IMPERATIVE:                 store %[[VAL_17]], %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:                 memref.store %[[VAL_17]], %[[VAL_11]][] : memref<f32>
 // IMPERATIVE:               }
-// IMPERATIVE:               %[[VAL_18:.*]] = load %[[VAL_11]][] : memref<f32>
-// IMPERATIVE:               store %[[VAL_18]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
+// IMPERATIVE:               %[[VAL_18:.*]] = memref.load %[[VAL_11]][] : memref<f32>
+// IMPERATIVE:               memref.store %[[VAL_18]], %[[VAL_2]]{{\[}}%[[VAL_9]], %[[VAL_10]]] : memref<32x64xf32>
 // IMPERATIVE:             }
 // IMPERATIVE:           }
 // IMPERATIVE:           return
@@ -550,66 +554,66 @@ TEST_FUNC(test_pad2d) {
   testFun.erase();
 }
 
-//TEST_FUNC(test_zip2D) {
-//  int64_t width = 3;
-//  int64_t height = 3;
-//  auto f32Type = FloatType::getF32(&globalContext());
-//
-//  auto f = makeFunction("zip2D", {},
-//                        {MemRefType::get({height, width}, f32Type, {}, 0),
-//                         MemRefType::get({height, width}, f32Type, {}, 0),
-//                         MemRefType::get({height, width}, f32Type, {}, 0)});
-//
-//  OpBuilder builder(f.getBody());
-//  ScopedContext scope(builder, f.getLoc());
-//
-//  Value inputA = f.getArgument(0);
-//  Value inputB = f.getArgument(1);
-//  Value output = f.getArgument(2);
-//
-//  makeRiseProgram(output, inputA, inputB)([&](Value inA, Value inB) {
-//    Value zipped = zip2D(inA, inB);
-//    return mapSeq2D(
-//        scalarF32Type(),
-//        [&](Value tuple) {
-//          return embed2(scalarF32Type(), ValueRange{fst(tuple), snd(tuple)},
-//                        [&](Value fst, Value snd) { return fst * snd; });
-//        },
-//        zipped);
-//  });
-//  std_ret();
-//
-//  // generate test
-//  auto testFun = makeFunction("zip2D_test", {}, {});
-//  OpBuilder test_builder(testFun.getBody());
-//  ScopedContext test_scope(test_builder, testFun.getLoc());
-//
-//  Value filledA = getFilledMemRef({height, width});
-//  Value filledB = getFilledMemRef({height, width});
-//  makeRiseTest(f, {height, width}, filledA, filledB);
-//  std_ret();
-//
-//  // clang-format off
-//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
-//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
-//  // ZIP_2D_TEST:        [3,  4,   5],
-//  // ZIP_2D_TEST:        [6,  7,   8]]
-//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
-//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
-//  // ZIP_2D_TEST:        [3,  4,   5],
-//  // ZIP_2D_TEST:        [6,  7,   8]]
-//  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
-//  // ZIP_2D_TEST:       {{\[\[}}0,   1,   4],
-//  // ZIP_2D_TEST:        [9,   16,   25],
-//  // ZIP_2D_TEST:        [36,   49,   64]]
-//  // clang-format on
-//
-//  f.print(llvm::outs());
-//  testFun.print(llvm::outs());
-//
-//  f.erase();
-//  testFun.erase();
-//}
+TEST_FUNC(test_zip2D) {
+  int64_t width = 3;
+  int64_t height = 3;
+  auto f32Type = FloatType::getF32(&globalContext());
+
+  auto f = makeFunction("zip2D", {},
+                        {MemRefType::get({height, width}, f32Type, {}, 0),
+                         MemRefType::get({height, width}, f32Type, {}, 0),
+                         MemRefType::get({height, width}, f32Type, {}, 0)});
+
+  OpBuilder builder(f.getBody());
+  ScopedContext scope(builder, f.getLoc());
+
+  Value inputA = f.getArgument(0);
+  Value inputB = f.getArgument(1);
+  Value output = f.getArgument(2);
+
+  makeRiseProgram(output, inputA, inputB)([&](Value inA, Value inB) {
+    Value zipped = zip2D(inA, inB);
+    return mapSeq2D(
+        scalarF32Type(),
+        [&](Value tuple) {
+          return embed2(scalarF32Type(), ValueRange{fst(tuple), snd(tuple)},
+                        [&](Value fst, Value snd) { return fst * snd; });
+        },
+        zipped);
+  });
+  std_ret();
+
+  // generate test
+  auto testFun = makeFunction("zip2D_test", {}, {});
+  OpBuilder test_builder(testFun.getBody());
+  ScopedContext test_scope(test_builder, testFun.getLoc());
+
+  Value filledA = getFilledMemRef({height, width});
+  Value filledB = getFilledMemRef({height, width});
+  makeRiseTest(f, {height, width}, filledA, filledB);
+  std_ret();
+
+  // clang-format off
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
+  // ZIP_2D_TEST:        [3,  4,   5],
+  // ZIP_2D_TEST:        [6,  7,   8]]
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}0,   1,   2],
+  // ZIP_2D_TEST:        [3,  4,   5],
+  // ZIP_2D_TEST:        [6,  7,   8]]
+  // ZIP_2D_TEST:       Unranked Memref base@ = {{.*}} rank = 2 offset = 0 sizes = [3, 3] strides = [3, 1] data =
+  // ZIP_2D_TEST:       {{\[\[}}0,   1,   4],
+  // ZIP_2D_TEST:        [9,   16,   25],
+  // ZIP_2D_TEST:        [36,   49,   64]]
+  // clang-format on
+
+  f.print(llvm::outs());
+  testFun.print(llvm::outs());
+
+  f.erase();
+  testFun.erase();
+}
 
 TEST_FUNC(test_expr_for_fission) {
   int64_t width = 4;
@@ -670,6 +674,7 @@ TEST_FUNC(test_expr_for_fission) {
   f.erase();
   testFun.erase();
 }
+
 int main() {
   RUN_TESTS();
   return 0;

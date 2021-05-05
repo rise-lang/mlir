@@ -40,6 +40,9 @@ Pattern::Pattern(StringRef rootName, PatternBenefit benefit,
 //===----------------------------------------------------------------------===//
 // MatchAnyOpTypeTag Root Constructors
 
+Pattern::Pattern(PatternBenefit benefit, MatchAnyOpTypeTag tag)
+    : benefit(benefit) {}
+
 Pattern::Pattern(MatchAnyOpTypeTag tag, PatternBenefit benefit,
                  MLIRContext *context, ArrayRef<StringRef> generatedNames)
     : Pattern(nullptr, RootKind::Any, generatedNames, benefit, context) {}

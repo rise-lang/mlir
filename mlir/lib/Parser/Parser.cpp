@@ -630,8 +630,8 @@ Value OperationParser::resolveSSAUse(SSAUseInfo useInfo) {
   auto &entries = getSSAValueEntry(useInfo.name);
 
   // If we have already seen a value of this name, return it.
-  if (useInfo.number < entries.size() && entries[useInfo.number].first) {
-    auto result = entries[useInfo.number].first;
+  if (useInfo.number < entries.size() && entries[useInfo.number].value) {
+    auto result = entries[useInfo.number].value;
     return result;
   } else {
     return nullptr;

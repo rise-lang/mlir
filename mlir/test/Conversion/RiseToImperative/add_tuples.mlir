@@ -1,5 +1,5 @@
-// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -lower-affine -convert-linalg-to-std -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_add_tuples -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_ADD_TUPLES
-module {
+// RUN: mlir-opt %s -convert-rise-to-imperative -convert-linalg-to-loops -convert-linalg-to-std -convert-scf-to-std -convert-std-to-llvm | mlir-cpu-runner -e simple_add_tuples -entry-point-result=void -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext  | FileCheck %s --check-prefix=SIMPLE_ADD_TUPLES
+
 func private @print_memref_f32(memref<*xf32>)
 func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf32>) {
     rise.lowering_unit {
@@ -31,21 +31,20 @@ func @rise_fun(%outArg:memref<4xf32>, %inArg0:memref<4xf32>, %inArg1:memref<4xf3
 }
 func @simple_add_tuples() {
     //prepare output Array
-    %outputArray = alloc() : memref<4xf32>
-    %inArg0 = alloc() : memref<4xf32>
+    %outputArray = memref.alloc() : memref<4xf32>
+    %inArg0 = memref.alloc() : memref<4xf32>
     %cst_5 = constant 5.0 : f32
     linalg.fill(%inArg0, %cst_5) : memref<4xf32>, f32
 
-    %inArg1 = alloc() : memref<4xf32>
+    %inArg1 = memref.alloc() : memref<4xf32>
     %cst_10 = constant 10.0 : f32
     linalg.fill(%inArg1, %cst_10) : memref<4xf32>, f32
 
     call @rise_fun(%outputArray, %inArg0, %inArg1) : (memref<4xf32>, memref<4xf32>, memref<4xf32>) -> ()
 
-    %print_me = memref_cast %outputArray : memref<4xf32> to memref<*xf32>
+    %print_me = memref.cast %outputArray : memref<4xf32> to memref<*xf32>
     call @print_memref_f32(%print_me): (memref<*xf32>) -> ()
     return
-}
 }
 // SIMPLE_ADD_TUPLES: Memref base@ = {{.*}} rank = 1 offset = 0 sizes = [4] strides = [1] data =
 // SIMPLE_ADD_TUPLES: [15, 15, 15, 15]
