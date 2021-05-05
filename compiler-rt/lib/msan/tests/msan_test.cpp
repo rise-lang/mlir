@@ -3608,8 +3608,7 @@ TEST(MemorySanitizer, getpwnam_r_positive) {
   strncpy(s, "abcd", 5);
   __msan_poison(s, 5);
   char buf[10000];
-  int res;
-  EXPECT_UMR(res = getpwnam_r(s, &pwd, buf, sizeof(buf), &pwdres));
+  EXPECT_UMR(getpwnam_r(s, &pwd, buf, sizeof(buf), &pwdres));
 }
 
 TEST(MemorySanitizer, getgrnam_r) {
@@ -3707,7 +3706,9 @@ TEST(MemorySanitizer, getgrent_r) {
   EXPECT_NOT_POISONED(grp.gr_gid);
   EXPECT_NOT_POISONED(grpres);
 }
+#endif
 
+#ifdef __GLIBC__
 TEST(MemorySanitizer, fgetgrent_r) {
   FILE *fp = fopen("/etc/group", "r");
   struct group grp;

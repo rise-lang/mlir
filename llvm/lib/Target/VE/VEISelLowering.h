@@ -130,6 +130,8 @@ public:
   SDValue lowerVAARG(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue lowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   /// } Custom Lower
 
   /// Replace the results of node with an illegal result
@@ -181,7 +183,7 @@ public:
                     bool ForCodeSize) const override;
   /// Returns true if the target allows unaligned memory accesses of the
   /// specified type.
-  bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS, unsigned Align,
+  bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS, Align A,
                                       MachineMemOperand::Flags Flags,
                                       bool *Fast) const override;
 

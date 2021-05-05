@@ -36,6 +36,18 @@ else()
   set(AOMP_BINDIR ${LLVM_BUILD_BINARY_DIR}/bin)
 endif()
 
+# Copied from nvptx CMakeLists
+if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(aux_triple x86_64-unknown-linux-gnu)
+elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "ppc64le")
+  set(aux_triple powerpc64le-unknown-linux-gnu)
+elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(aux_triple aarch64-unknown-linux-gnu)
+else()
+  libomptarget_say("Not building AMDGCN device RTL: unknown host arch: ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  return()
+endif()
+
 libomptarget_say("Building AMDGCN device RTL. LLVM_COMPILER_PATH=${AOMP_BINDIR}")
 
 project(omptarget-amdgcn)
@@ -68,19 +80,18 @@ set(cuda_sources
   ${devicertl_base_directory}/common/src/parallel.cu
   ${devicertl_base_directory}/common/src/reduction.cu
   ${devicertl_base_directory}/common/src/support.cu
+  ${devicertl_base_directory}/common/src/shuffle.cpp
   ${devicertl_base_directory}/common/src/sync.cu
   ${devicertl_base_directory}/common/src/task.cu)
 
 set(h_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_interface.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/hip_atomics.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/target_impl.h
   ${devicertl_base_directory}/common/debug.h
   ${devicertl_base_directory}/common/device_environment.h
   ${devicertl_base_directory}/common/omptarget.h
   ${devicertl_base_directory}/common/omptargeti.h
   ${devicertl_base_directory}/common/state-queue.h
-  ${devicertl_base_directory}/common/target_atomic.h
   ${devicertl_base_directory}/common/state-queuei.h
   ${devicertl_base_directory}/common/support.h)
 
@@ -92,24 +103,30 @@ else()
 endif()
 
 # create libraries
-set(mcpus gfx700 gfx701 gfx801 gfx803 gfx900)
+set(mcpus gfx700 gfx701 gfx801 gfx803 gfx900 gfx906)
 if (DEFINED LIBOMPTARGET_AMDGCN_GFXLIST)
   set(mcpus ${LIBOMPTARGET_AMDGCN_GFXLIST})
 endif()
 
 macro(add_cuda_bc_library)
   set(cu_cmd ${AOMP_BINDIR}/clang++
+    -xc++
+    -c
     -std=c++14
-    -fcuda-rdc
+    -ffreestanding
+    -target amdgcn-amd-amdhsa
+    -emit-llvm
+    -Xclang -aux-triple -Xclang ${aux_triple}
+    -fopenmp -fopenmp-cuda-mode -Xclang -fopenmp-is-device
+    -D__AMDGCN__
+    -Xclang -target-cpu -Xclang ${mcpu}
     -fvisibility=default
-    --cuda-device-only
     -Wno-unused-value
-    -x hip
-    -nogpulib -nogpuinc
+    -nogpulib
     -O${optimization_level}
-    --cuda-gpu-arch=${mcpu}
     ${CUDA_DEBUG}
     -I${CMAKE_CURRENT_SOURCE_DIR}/src
+    -I${devicertl_base_directory}/common/include
     -I${devicertl_base_directory})
 
   set(bc1_files)
@@ -149,6 +166,6 @@ foreach(mcpu ${mcpus})
   add_custom_target(lib${libname}-${mcpu} ALL DEPENDS ${bc_libname})
 
   install(FILES ${OUTPUTDIR}/${bc_libname}
-     DESTINATION "${OPENMP_INSTALL_LIBDIR}/libdevice"
+     DESTINATION "${OPENMP_INSTALL_LIBDIR}"
   )
 endforeach()

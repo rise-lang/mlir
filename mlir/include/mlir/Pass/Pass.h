@@ -139,10 +139,6 @@ public:
 
     /// Assign the statistic to the given value.
     Statistic &operator=(unsigned value);
-
-  private:
-    /// Hide some of the details of llvm::Statistic that we don't use.
-    using llvm::Statistic::getDebugType;
   };
 
   /// Returns the main statistics for this pass instance.
@@ -165,6 +161,14 @@ protected:
 
   /// The polymorphic API that runs the pass over the currently held operation.
   virtual void runOnOperation() = 0;
+
+  /// Initialize any complex state necessary for running this pass. This hook
+  /// should not rely on any state accessible during the execution of a pass.
+  /// For example, `getContext`/`getOperation`/`getAnalysis`/etc. should not be
+  /// invoked within this hook.
+  /// Returns a LogicalResult to indicate failure, in which case the pass
+  /// pipeline won't execute.
+  virtual LogicalResult initialize(MLIRContext *context) { return success(); }
 
   /// Schedule an arbitrary pass pipeline on the provided operation.
   /// This can be invoke any time in a pass to dynamic schedule more passes.

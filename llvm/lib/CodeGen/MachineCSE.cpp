@@ -433,6 +433,11 @@ bool MachineCSE::isProfitableToCSE(Register CSReg, Register Reg,
                                    MachineBasicBlock *CSBB, MachineInstr *MI) {
   // FIXME: Heuristics that works around the lack the live range splitting.
 
+  MachineBasicBlock *BB = MI->getParent();
+  // Prevent CSE-ing non-local convergent instructions.
+  if (MI->isConvergent() && CSBB != BB)
+    return false;
+
   // If CSReg is used at all uses of Reg, CSE should not increase register
   // pressure of CSReg.
   bool MayIncreasePressure = true;
@@ -455,7 +460,6 @@ bool MachineCSE::isProfitableToCSE(Register CSReg, Register Reg,
   // an immediate predecessor. We don't want to increase register pressure and
   // end up causing other computation to be spilled.
   if (TII->isAsCheapAsAMove(*MI)) {
-    MachineBasicBlock *BB = MI->getParent();
     if (CSBB != BB && !CSBB->isSuccessor(BB))
       return false;
   }
@@ -748,8 +752,7 @@ bool MachineCSE::PerformCSE(MachineDomTreeNode *Node) {
     Node = WorkList.pop_back_val();
     Scopes.push_back(Node);
     OpenChildren[Node] = Node->getNumChildren();
-    for (MachineDomTreeNode *Child : Node->children())
-      WorkList.push_back(Child);
+    append_range(WorkList, Node->children());
   } while (!WorkList.empty());
 
   // Now perform CSE.
@@ -861,8 +864,7 @@ bool MachineCSE::PerformSimplePRE(MachineDominatorTree *DT) {
   BBs.push_back(DT->getRootNode());
   do {
     auto Node = BBs.pop_back_val();
-    for (MachineDomTreeNode *Child : Node->children())
-      BBs.push_back(Child);
+    append_range(BBs, Node->children());
 
     MachineBasicBlock *MBB = Node->getBlock();
     Changed |= ProcessBlockPRE(DT, MBB);

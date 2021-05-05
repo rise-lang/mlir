@@ -384,7 +384,8 @@ class _LocalProcess(_BaseProcess):
             [executable] + args,
             stdout=open(
                 os.devnull) if not self._trace_on else None,
-            stdin=PIPE)
+            stdin=PIPE,
+            preexec_fn=lldbplatformutil.enable_attach)
 
     def terminate(self):
         if self._proc.poll() is None:
@@ -1268,12 +1269,12 @@ class Base(unittest2.TestCase):
             return True
         return False
 
-    def isAArch64SVE(self):
+    def getCPUInfo(self):
         triple = self.dbg.GetSelectedPlatform().GetTriple()
 
         # TODO other platforms, please implement this function
         if not re.match(".*-.*-linux", triple):
-            return False
+            return ""
 
         # Need to do something different for non-Linux/Android targets
         cpuinfo_path = self.getBuildArtifact("cpuinfo")
@@ -1283,37 +1284,21 @@ class Base(unittest2.TestCase):
             cpuinfo_path = "/proc/cpuinfo"
 
         try:
-            f = open(cpuinfo_path, 'r')
-            cpuinfo = f.read()
-            f.close()
+            with open(cpuinfo_path, 'r') as f:
+                cpuinfo = f.read()
         except:
-            return False
+            return ""
 
-        return " sve " in cpuinfo
+        return cpuinfo
 
-    def hasLinuxVmFlags(self):
-        """ Check that the target machine has "VmFlags" lines in
-        its /proc/{pid}/smaps files."""
+    def isAArch64SVE(self):
+        return "sve" in self.getCPUInfo()
 
-        triple = self.dbg.GetSelectedPlatform().GetTriple()
-        if not re.match(".*-.*-linux", triple):
-            return False
+    def isAArch64MTE(self):
+        return "mte" in self.getCPUInfo()
 
-        self.runCmd('platform process list')
-        pid = None
-        for line in self.res.GetOutput().splitlines():
-            if 'lldb-server' in line:
-                pid = line.split(' ')[0]
-                break
-
-        if pid is None:
-            return False
-
-        smaps_path = self.getBuildArtifact('smaps')
-        self.runCmd('platform get-file "/proc/{}/smaps" {}'.format(pid, smaps_path))
-
-        with open(smaps_path, 'r') as f:
-            return "VmFlags" in f.read()
+    def isAArch64PAuth(self):
+        return "paca" in self.getCPUInfo()
 
     def getArchitecture(self):
         """Returns the architecture in effect the test suite is running with."""
@@ -1764,6 +1749,19 @@ class Base(unittest2.TestCase):
             raise Exception(
                 "Don't know how to do cleanup with dictionary: " +
                 dictionary)
+
+    def invoke(self, obj, name, trace=False):
+        """Use reflection to call a method dynamically with no argument."""
+        trace = (True if traceAlways else trace)
+
+        method = getattr(obj, name)
+        import inspect
+        self.assertTrue(inspect.ismethod(method),
+                        name + "is a method name of object: " + str(obj))
+        result = method()
+        with recording(self, trace) as sbuf:
+            print(str(method) + ":", result, file=sbuf)
+        return result
 
     def getLLDBLibraryEnvVal(self):
         """ Returns the path that the OS-specific library search environment variable
@@ -2623,19 +2621,6 @@ FileCheck output:
                                  summary=summary, children=children)
         value_check.check_value(self, eval_result, str(eval_result))
         return eval_result
-
-    def invoke(self, obj, name, trace=False):
-        """Use reflection to call a method dynamically with no argument."""
-        trace = (True if traceAlways else trace)
-
-        method = getattr(obj, name)
-        import inspect
-        self.assertTrue(inspect.ismethod(method),
-                        name + "is a method name of object: " + str(obj))
-        result = method()
-        with recording(self, trace) as sbuf:
-            print(str(method) + ":", result, file=sbuf)
-        return result
 
     def build(
             self,

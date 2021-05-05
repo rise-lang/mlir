@@ -16,13 +16,13 @@
 
 #include "clang/Basic/CommentOptions.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/LangStandard.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/Sanitizers.h"
 #include "clang/Basic/Visibility.h"
 #include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/MC/MCTargetOptions.h"
 #include <string>
 #include <vector>
 
@@ -123,6 +123,7 @@ public:
     MSVC2017_5 = 1912,
     MSVC2017_7 = 1914,
     MSVC2019 = 1920,
+    MSVC2019_8 = 1928,
   };
 
   enum SYCLMajorVersion {
@@ -220,7 +221,7 @@ public:
   };
 
   /// Possible exception handling behavior.
-  using ExceptionHandlingKind = llvm::ExceptionHandling;
+  enum class ExceptionHandlingKind { None, SjLj, WinEH, DwarfCFI, Wasm };
 
   enum class LaxVectorConversionKind {
     /// Permit no implicit vector bitcasts.
@@ -257,12 +258,15 @@ public:
   };
 
 public:
+  /// The used language standard.
+  LangStandard::Kind LangStd;
+
   /// Set of enabled sanitizers.
   SanitizerSet Sanitize;
 
-  /// Paths to blacklist files specifying which objects
+  /// Paths to files specifying which objects
   /// (files, functions, variables) should not be instrumented.
-  std::vector<std::string> SanitizerBlacklistFiles;
+  std::vector<std::string> NoSanitizeFiles;
 
   /// Paths to the XRay "always instrument" files specifying which
   /// objects (files, functions, variables) should be imbued with the XRay
@@ -280,6 +284,10 @@ public:
   /// (files, functions, variables) should be imbued with the appropriate XRay
   /// attribute(s).
   std::vector<std::string> XRayAttrListFiles;
+
+  /// Paths to special case list files specifying which entities
+  /// (files, functions) should or should not be instrumented.
+  std::vector<std::string> ProfileListFiles;
 
   clang::ObjCRuntime ObjCRuntime;
 
@@ -322,6 +330,12 @@ public:
   /// Name of the IR file that contains the result of the OpenMP target
   /// host code generation.
   std::string OMPHostIRFile;
+
+  /// The user provided compilation unit ID, if non-empty. This is used to
+  /// externalize static variables which is needed to support accessing static
+  /// device variables in host code for single source offloading languages
+  /// like CUDA/HIP.
+  std::string CUID;
 
   /// Indicates whether the front-end is explicitly told that the
   /// input is a header file (i.e. -x c-header).
@@ -395,19 +409,19 @@ public:
   }
 
   bool hasSjLjExceptions() const {
-    return getExceptionHandling() == llvm::ExceptionHandling::SjLj;
+    return getExceptionHandling() == ExceptionHandlingKind::SjLj;
   }
 
   bool hasSEHExceptions() const {
-    return getExceptionHandling() == llvm::ExceptionHandling::WinEH;
+    return getExceptionHandling() == ExceptionHandlingKind::WinEH;
   }
 
   bool hasDWARFExceptions() const {
-    return getExceptionHandling() == llvm::ExceptionHandling::DwarfCFI;
+    return getExceptionHandling() == ExceptionHandlingKind::DwarfCFI;
   }
 
   bool hasWasmExceptions() const {
-    return getExceptionHandling() == llvm::ExceptionHandling::Wasm;
+    return getExceptionHandling() == ExceptionHandlingKind::Wasm;
   }
 };
 

@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "GISelMITest.h"
-#include "llvm/CodeGen/GlobalISel/ConstantFoldingMIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/MIPatternMatch.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
@@ -41,12 +40,55 @@ TEST_F(AArch64GISelMITest, MatchIntConstant) {
   EXPECT_EQ(Cst, 42);
 }
 
+TEST_F(AArch64GISelMITest, MatchIntConstantRegister) {
+  setUp();
+  if (!TM)
+    return;
+  auto MIBCst = B.buildConstant(LLT::scalar(64), 42);
+  Register Src0;
+  bool match = mi_match(MIBCst.getReg(0), *MRI, m_ICst(Src0));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, MIBCst.getReg(0));
+}
+
+TEST_F(AArch64GISelMITest, MachineInstrPtrBind) {
+  setUp();
+  if (!TM)
+    return;
+  auto MIBAdd = B.buildAdd(LLT::scalar(64), Copies[0], Copies[1]);
+  // Test 'MachineInstr *' bind.
+  // Default mi_match.
+  MachineInstr *MIPtr = MIBAdd.getInstr();
+  bool match = mi_match(MIPtr, *MRI, m_GAdd(m_Reg(), m_Reg()));
+  EXPECT_TRUE(match);
+  // Specialized mi_match for MachineInstr &.
+  MachineInstr &MI = *MIBAdd.getInstr();
+  match = mi_match(MI, *MRI, m_GAdd(m_Reg(), m_Reg()));
+  EXPECT_TRUE(match);
+  // MachineInstrBuilder has automatic conversion to MachineInstr *.
+  match = mi_match(MIBAdd, *MRI, m_GAdd(m_Reg(), m_Reg()));
+  EXPECT_TRUE(match);
+  // Match instruction without def.
+  auto MIBBrcond = B.buildBrCond(Copies[0], B.getMBB());
+  MachineInstr *MatchedMI;
+  match = mi_match(MIBBrcond, *MRI, m_MInstr(MatchedMI));
+  EXPECT_TRUE(match);
+  EXPECT_TRUE(MIBBrcond.getInstr() == MatchedMI);
+  // Match instruction with two defs.
+  auto MIBUAddO =
+      B.buildUAddo(LLT::scalar(64), LLT::scalar(1), Copies[0], Copies[1]);
+  match = mi_match(MIBUAddO, *MRI, m_MInstr(MatchedMI));
+  EXPECT_TRUE(match);
+  EXPECT_TRUE(MIBUAddO.getInstr() == MatchedMI);
+}
+
 TEST_F(AArch64GISelMITest, MatchBinaryOp) {
   setUp();
   if (!TM)
     return;
   LLT s32 = LLT::scalar(32);
   LLT s64 = LLT::scalar(64);
+  LLT p0 = LLT::pointer(0, 64);
   auto MIBAdd = B.buildAdd(s64, Copies[0], Copies[1]);
   // Test case for no bind.
   bool match =
@@ -145,6 +187,71 @@ TEST_F(AArch64GISelMITest, MatchBinaryOp) {
   EXPECT_TRUE(match);
   EXPECT_EQ(Src0, Copies[0]);
   EXPECT_EQ(Src1, TruncCopy1.getReg(0));
+
+  // Build a G_PTR_ADD and check that we can match it.
+  auto PtrAdd = B.buildPtrAdd(p0, {B.buildUndef(p0)}, Copies[0]);
+  match = mi_match(PtrAdd.getReg(0), *MRI, m_GPtrAdd(m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, PtrAdd->getOperand(1).getReg());
+  EXPECT_EQ(Src1, Copies[0]);
+
+  auto MIBCst = B.buildConstant(s64, 42);
+  auto MIBAddCst = B.buildAdd(s64, MIBCst, Copies[0]);
+  auto MIBUnmerge = B.buildUnmerge({s32, s32}, B.buildConstant(s64, 42));
+
+  // m_BinOp with opcode.
+  // Match binary instruction, opcode and its non-commutative operands.
+  match = mi_match(MIBAddCst, *MRI,
+                   m_BinOp(TargetOpcode::G_ADD, m_ICst(Cst), m_Reg(Src0)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, Copies[0]);
+  EXPECT_EQ(Cst, 42);
+
+  // Opcode doesn't match.
+  match = mi_match(MIBAddCst, *MRI,
+                   m_BinOp(TargetOpcode::G_MUL, m_ICst(Cst), m_Reg(Src0)));
+  EXPECT_FALSE(match);
+
+  match = mi_match(MIBAddCst, *MRI,
+                   m_BinOp(TargetOpcode::G_ADD, m_Reg(Src0), m_ICst(Cst)));
+  EXPECT_FALSE(match);
+
+  // Instruction is not binary.
+  match = mi_match(MIBCst, *MRI,
+                   m_BinOp(TargetOpcode::G_MUL, m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_FALSE(match);
+  match = mi_match(MIBUnmerge, *MRI,
+                   m_BinOp(TargetOpcode::G_MUL, m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_FALSE(match);
+
+  // m_CommutativeBinOp with opcode.
+  match = mi_match(
+      MIBAddCst, *MRI,
+      m_CommutativeBinOp(TargetOpcode::G_ADD, m_ICst(Cst), m_Reg(Src0)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, Copies[0]);
+  EXPECT_EQ(Cst, 42);
+
+  match = mi_match(
+      MIBAddCst, *MRI,
+      m_CommutativeBinOp(TargetOpcode::G_MUL, m_ICst(Cst), m_Reg(Src0)));
+  EXPECT_FALSE(match);
+
+  match = mi_match(
+      MIBAddCst, *MRI,
+      m_CommutativeBinOp(TargetOpcode::G_ADD, m_Reg(Src0), m_ICst(Cst)));
+  EXPECT_TRUE(match);
+  EXPECT_EQ(Src0, Copies[0]);
+  EXPECT_EQ(Cst, 42);
+
+  match = mi_match(
+      MIBCst, *MRI,
+      m_CommutativeBinOp(TargetOpcode::G_MUL, m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_FALSE(match);
+  match = mi_match(
+      MIBUnmerge, *MRI,
+      m_CommutativeBinOp(TargetOpcode::G_MUL, m_Reg(Src0), m_Reg(Src1)));
+  EXPECT_FALSE(match);
 }
 
 TEST_F(AArch64GISelMITest, MatchICmp) {
@@ -384,13 +491,24 @@ TEST_F(AArch64GISelMITest, MatchMiscellaneous) {
 
   LLT s64 = LLT::scalar(64);
   auto MIBAdd = B.buildAdd(s64, Copies[0], Copies[1]);
-  // Make multiple uses of this add.
+  Register Reg = MIBAdd.getReg(0);
+
+  // Only one use of Reg.
   B.buildCast(LLT::pointer(0, 32), MIBAdd);
+  EXPECT_TRUE(mi_match(Reg, *MRI, m_OneUse(m_GAdd(m_Reg(), m_Reg()))));
+  EXPECT_TRUE(mi_match(Reg, *MRI, m_OneNonDBGUse(m_GAdd(m_Reg(), m_Reg()))));
+
+  // Add multiple debug uses of Reg.
+  B.buildInstr(TargetOpcode::DBG_VALUE, {}, {Reg})->getOperand(0).setIsDebug();
+  B.buildInstr(TargetOpcode::DBG_VALUE, {}, {Reg})->getOperand(0).setIsDebug();
+
+  EXPECT_FALSE(mi_match(Reg, *MRI, m_OneUse(m_GAdd(m_Reg(), m_Reg()))));
+  EXPECT_TRUE(mi_match(Reg, *MRI, m_OneNonDBGUse(m_GAdd(m_Reg(), m_Reg()))));
+
+  // Multiple non-debug uses of Reg.
   B.buildCast(LLT::pointer(1, 32), MIBAdd);
-  bool match = mi_match(MIBAdd.getReg(0), *MRI, m_GAdd(m_Reg(), m_Reg()));
-  EXPECT_TRUE(match);
-  match = mi_match(MIBAdd.getReg(0), *MRI, m_OneUse(m_GAdd(m_Reg(), m_Reg())));
-  EXPECT_FALSE(match);
+  EXPECT_FALSE(mi_match(Reg, *MRI, m_OneUse(m_GAdd(m_Reg(), m_Reg()))));
+  EXPECT_FALSE(mi_match(Reg, *MRI, m_OneNonDBGUse(m_GAdd(m_Reg(), m_Reg()))));
 }
 
 TEST_F(AArch64GISelMITest, MatchSpecificConstant) {

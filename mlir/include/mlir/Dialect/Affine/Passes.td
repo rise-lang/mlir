@@ -18,6 +18,7 @@ include "mlir/Pass/PassBase.td"
 def AffineDataCopyGeneration : FunctionPass<"affine-data-copy-generate"> {
   let summary = "Generate explicit copying for affine memory operations";
   let constructor = "mlir::createAffineDataCopyGenerationPass()";
+  let dependentDialects = ["memref::MemRefDialect"];
   let options = [
     Option<"fastMemoryCapacity", "fast-mem-capacity", "uint64_t",
            /*default=*/"std::numeric_limits<uint64_t>::max()",
@@ -122,6 +123,9 @@ def AffineParallelize : FunctionPass<"affine-parallelize"> {
     Option<"maxNested", "max-nested", "unsigned", /*default=*/"-1u",
            "Maximum number of nested parallel loops to produce. "
            "Defaults to unlimited (UINT_MAX).">,
+    Option<"parallelReductions", "parallel-reductions", "bool",
+           /*default=*/"false",
+           "Whether to parallelize reduction loops. Defaults to false.">
   ];
 }
 

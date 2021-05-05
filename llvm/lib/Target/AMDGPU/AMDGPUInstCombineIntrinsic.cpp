@@ -14,8 +14,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AMDGPUInstrInfo.h"
 #include "AMDGPUTargetTransformInfo.h"
-#include "llvm/Support/KnownBits.h"
+#include "GCNSubtarget.h"
+#include "R600Subtarget.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 
 using namespace llvm;

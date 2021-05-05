@@ -20,8 +20,8 @@
 #include "clang/Analysis/CFG.h"
 #include "clang/Analysis/CallGraph.h"
 #include "clang/Analysis/CodeInjector.h"
+#include "clang/Analysis/MacroExpansionContext.h"
 #include "clang/Analysis/PathDiagnostic.h"
-#include "clang/Analysis/PathDiagnosticConsumers.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/CrossTU/CrossTranslationUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -31,6 +31,7 @@
 #include "clang/StaticAnalyzer/Core/AnalyzerOptions.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
+#include "clang/StaticAnalyzer/Core/PathDiagnosticConsumers.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ExprEngine.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -98,6 +99,8 @@ public:
   /// working with a PCH file.
   SetOfDecls LocalTUDecls;
 
+  MacroExpansionContext MacroExpansions;
+
   // Set of PathDiagnosticConsumers.  Owned by AnalysisManager.
   PathDiagnosticConsumers PathConsumers;
 
@@ -122,7 +125,8 @@ public:
                    CodeInjector *injector)
       : RecVisitorMode(0), RecVisitorBR(nullptr), Ctx(nullptr),
         PP(CI.getPreprocessor()), OutDir(outdir), Opts(std::move(opts)),
-        Plugins(plugins), Injector(injector), CTU(CI) {
+        Plugins(plugins), Injector(injector), CTU(CI),
+        MacroExpansions(CI.getLangOpts()) {
     DigestAnalyzerOptions();
     if (Opts->PrintStats || Opts->ShouldSerializeStats) {
       AnalyzerTimers = std::make_unique<llvm::TimerGroup>(
@@ -136,6 +140,9 @@ public:
           *AnalyzerTimers);
       llvm::EnableStatistics(/* PrintOnExit= */ false);
     }
+
+    if (Opts->ShouldDisplayMacroExpansions)
+      MacroExpansions.registerForPreprocessor(PP);
   }
 
   ~AnalysisConsumer() override {
@@ -150,9 +157,10 @@ public:
       break;
 #define ANALYSIS_DIAGNOSTICS(NAME, CMDFLAG, DESC, CREATEFN)                    \
   case PD_##NAME:                                                              \
-    CREATEFN(Opts->getDiagOpts(), PathConsumers, OutDir, PP, CTU);             \
+    CREATEFN(Opts->getDiagOpts(), PathConsumers, OutDir, PP, CTU,              \
+             MacroExpansions);                                                 \
     break;
-#include "clang/Analysis/PathDiagnosticConsumers.def"
+#include "clang/StaticAnalyzer/Core/Analyses.def"
     default:
       llvm_unreachable("Unknown analyzer output type!");
     }

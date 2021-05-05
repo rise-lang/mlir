@@ -77,7 +77,7 @@ public:
   /// supported LLVM IR type.  In particular, if more than one value is
   /// returned, create an LLVM IR structure type with elements that correspond
   /// to each of the MLIR types converted with `convertType`.
-  Type packFunctionResults(ArrayRef<Type> types);
+  Type packFunctionResults(TypeRange types);
 
   /// Convert a type in the context of the default or bare pointer calling
   /// convention. Calling convention sensitive types, such as MemRefType and
@@ -116,8 +116,10 @@ public:
                                    OpBuilder &builder);
 
   /// Converts the function type to a C-compatible format, in particular using
-  /// pointers to memref descriptors for arguments.
-  Type convertFunctionTypeCWrapper(FunctionType type);
+  /// pointers to memref descriptors for arguments. Also converts the return
+  /// type to a pointer argument if it is a struct. Returns true if this
+  /// was the case.
+  std::pair<Type, bool> convertFunctionTypeCWrapper(FunctionType type);
 
   /// Returns the data layout to use during and after conversion.
   const llvm::DataLayout &getDataLayout() { return options.dataLayout; }
@@ -127,7 +129,7 @@ public:
   Type getIndexType();
 
   /// Gets the bitwidth of the index type when converted to LLVM.
-  unsigned getIndexTypeBitwidth() { return options.indexBitwidth; }
+  unsigned getIndexTypeBitwidth() { return options.getIndexBitwidth(); }
 
   /// Gets the pointer bitwidth.
   unsigned getPointerBitwidth(unsigned addressSpace = 0);
@@ -150,8 +152,8 @@ private:
   /// Convert an integer type `i*` to `!llvm<"i*">`.
   Type convertIntegerType(IntegerType type);
 
-  /// Convert a floating point type: `f16` to `!llvm.half`, `f32` to
-  /// `!llvm.float` and `f64` to `!llvm.double`.  `bf16` is not supported
+  /// Convert a floating point type: `f16` to `f16`, `f32` to
+  /// `f32` and `f64` to `f64`.  `bf16` is not supported
   /// by LLVM.
   Type convertFloatType(FloatType type);
 
@@ -180,9 +182,9 @@ private:
   /// For example, memref<?x?xf32> is converted to the following list:
   /// - `!llvm<"float*">` (allocated pointer),
   /// - `!llvm<"float*">` (aligned pointer),
-  /// - `!llvm.i64` (offset),
-  /// - `!llvm.i64`, `!llvm.i64` (sizes),
-  /// - `!llvm.i64`, `!llvm.i64` (strides).
+  /// - `i64` (offset),
+  /// - `i64`, `i64` (sizes),
+  /// - `i64`, `i64` (strides).
   /// These types can be recomposed to a memref descriptor struct.
   SmallVector<Type, 5> getMemRefDescriptorFields(MemRefType type,
                                                  bool unpackAggregates);
@@ -193,7 +195,7 @@ private:
   /// - an integer rank, followed by
   /// - a pointer to the memref descriptor struct.
   /// For example, memref<*xf32> is converted to the following list:
-  /// !llvm.i64 (rank)
+  /// i64 (rank)
   /// !llvm<"i8*"> (type-erased pointer).
   /// These types can be recomposed to a unranked memref descriptor struct.
   SmallVector<Type, 2> getUnrankedMemRefDescriptorFields();
@@ -523,17 +525,17 @@ protected:
   /// strides and buffer size from these sizes.
   ///
   /// For example, memref<4x?xf32> emits:
-  /// `sizes[0]`   = llvm.mlir.constant(4 : index) : !llvm.i64
+  /// `sizes[0]`   = llvm.mlir.constant(4 : index) : i64
   /// `sizes[1]`   = `dynamicSizes[0]`
-  /// `strides[1]` = llvm.mlir.constant(1 : index) : !llvm.i64
+  /// `strides[1]` = llvm.mlir.constant(1 : index) : i64
   /// `strides[0]` = `sizes[0]`
-  /// %size        = llvm.mul `sizes[0]`, `sizes[1]` : !llvm.i64
-  /// %nullptr     = llvm.mlir.null : !llvm.ptr<float>
+  /// %size        = llvm.mul `sizes[0]`, `sizes[1]` : i64
+  /// %nullptr     = llvm.mlir.null : !llvm.ptr<f32>
   /// %gep         = llvm.getelementptr %nullptr[%size]
-  ///                  : (!llvm.ptr<float>, !llvm.i64) -> !llvm.ptr<float>
-  /// `sizeBytes`  = llvm.ptrtoint %gep : !llvm.ptr<float> to !llvm.i64
+  ///                  : (!llvm.ptr<f32>, i64) -> !llvm.ptr<f32>
+  /// `sizeBytes`  = llvm.ptrtoint %gep : !llvm.ptr<f32> to i64
   void getMemRefDescriptorSizes(Location loc, MemRefType memRefType,
-                                ArrayRef<Value> dynamicSizes,
+                                ValueRange dynamicSizes,
                                 ConversionPatternRewriter &rewriter,
                                 SmallVectorImpl<Value> &sizes,
                                 SmallVectorImpl<Value> &strides,
@@ -656,9 +658,6 @@ public:
     static_assert(
         std::is_base_of<OpTrait::OneResult<SourceOp>, SourceOp>::value,
         "expected single result op");
-    static_assert(std::is_base_of<OpTrait::SameOperandsAndResultType<SourceOp>,
-                                  SourceOp>::value,
-                  "expected same operands and result type");
     return LLVM::detail::vectorOneToOneRewrite(
         op, TargetOp::getOperationName(), operands, *this->getTypeConverter(),
         rewriter);

@@ -30,13 +30,19 @@ class LLVM_LIBRARY_VISIBILITY AArch64TargetInfo : public TargetInfo {
   unsigned FPU;
   bool HasCRC;
   bool HasCrypto;
+  bool HasAES;
+  bool HasSHA2;
+  bool HasSHA3;
+  bool HasSM4;
   bool HasUnaligned;
   bool HasFullFP16;
   bool HasDotProd;
   bool HasFP16FML;
   bool HasMTE;
   bool HasTME;
+  bool HasPAuth;
   bool HasLS64;
+  bool HasRandGen;
   bool HasMatMul;
   bool HasSVE2;
   bool HasSVE2AES;
@@ -46,6 +52,7 @@ class LLVM_LIBRARY_VISIBILITY AArch64TargetInfo : public TargetInfo {
   bool HasMatmulFP64;
   bool HasMatmulFP32;
   bool HasLSE;
+  bool HasFlagM;
 
   llvm::AArch64::ArchKind ArchKind;
 

@@ -45,6 +45,7 @@ public:
     AppleA11,
     AppleA12,
     AppleA13,
+    AppleA14,
     Carmel,
     CortexA35,
     CortexA53,
@@ -126,7 +127,7 @@ protected:
   bool HasAES = false;
 
   // ARMv8.3 extensions
-  bool HasPA = false;
+  bool HasPAuth = false;
   bool HasJS = false;
   bool HasCCIDX = false;
   bool HasComplxNum = false;
@@ -140,7 +141,7 @@ protected:
   bool HasSEL2 = false;
   bool HasPMU = false;
   bool HasTLB_RMI = false;
-  bool HasFMI = false;
+  bool HasFlagM = false;
   bool HasRCPC_IMMO = false;
 
   bool HasLSLFast = false;
@@ -186,6 +187,7 @@ protected:
   bool HasETE = false;
   bool HasTRBE = false;
   bool HasBRBE = false;
+  bool HasPAUTH = false;
   bool HasSPE_EEF = false;
 
   // HasZeroCycleRegMove - Has zero-cycle register mov instructions.
@@ -194,8 +196,13 @@ protected:
   // HasZeroCycleZeroing - Has zero-cycle zeroing instructions.
   bool HasZeroCycleZeroing = false;
   bool HasZeroCycleZeroingGP = false;
-  bool HasZeroCycleZeroingFP = false;
   bool HasZeroCycleZeroingFPWorkaround = false;
+
+  // It is generally beneficial to rewrite "fmov s0, wzr" to "movi d0, #0".
+  // as movi is more efficient across all cores. Newer cores can eliminate
+  // fmovs early and there is no difference with movi, but this not true for
+  // all implementations.
+  bool HasZeroCycleZeroingFP = true;
 
   // StrictAlign - Disallow unaligned memory accesses.
   bool StrictAlign = false;
@@ -207,7 +214,6 @@ protected:
   unsigned MinVectorRegisterBitWidth = 64;
 
   bool OutlineAtomics = false;
-  bool UseAA = false;
   bool PredictableSelectIsExpensive = false;
   bool BalanceFPOps = false;
   bool CustomAsCheapAsMove = false;
@@ -219,6 +225,7 @@ protected:
   bool UseAlternateSExtLoadCVTF32Pattern = false;
   bool HasArithmeticBccFusion = false;
   bool HasArithmeticCbzFusion = false;
+  bool HasCmpBccFusion = false;
   bool HasFuseAddress = false;
   bool HasFuseAES = false;
   bool HasFuseArithmeticLogic = false;
@@ -375,6 +382,7 @@ public:
   }
   bool hasArithmeticBccFusion() const { return HasArithmeticBccFusion; }
   bool hasArithmeticCbzFusion() const { return HasArithmeticCbzFusion; }
+  bool hasCmpBccFusion() const { return HasCmpBccFusion; }
   bool hasFuseAddress() const { return HasFuseAddress; }
   bool hasFuseAES() const { return HasFuseAES; }
   bool hasFuseArithmeticLogic() const { return HasFuseArithmeticLogic; }
@@ -450,6 +458,7 @@ public:
   bool hasRandGen() const { return HasRandGen; }
   bool hasMTE() const { return HasMTE; }
   bool hasTME() const { return HasTME; }
+  bool hasPAUTH() const { return HasPAUTH; }
   // Arm SVE2 extensions
   bool hasSVE2AES() const { return HasSVE2AES; }
   bool hasSVE2SM4() const { return HasSVE2SM4; }
@@ -479,9 +488,12 @@ public:
   bool isTargetELF() const { return TargetTriple.isOSBinFormatELF(); }
   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
 
-  bool isTargetILP32() const { return TargetTriple.isArch32Bit(); }
+  bool isTargetILP32() const {
+    return TargetTriple.isArch32Bit() ||
+           TargetTriple.getEnvironment() == Triple::GNUILP32;
+  }
 
-  bool useAA() const override { return UseAA; }
+  bool useAA() const override;
 
   bool outlineAtomics() const { return OutlineAtomics; }
 
@@ -493,7 +505,7 @@ public:
   bool hasPAN_RWV() const { return HasPAN_RWV; }
   bool hasCCPP() const { return HasCCPP; }
 
-  bool hasPA() const { return HasPA; }
+  bool hasPAuth() const { return HasPAuth; }
   bool hasJS() const { return HasJS; }
   bool hasCCIDX() const { return HasCCIDX; }
   bool hasComplxNum() const { return HasComplxNum; }
@@ -511,7 +523,7 @@ public:
   bool hasSEL2() const { return HasSEL2; }
   bool hasPMU() const { return HasPMU; }
   bool hasTLB_RMI() const { return HasTLB_RMI; }
-  bool hasFMI() const { return HasFMI; }
+  bool hasFlagM() const { return HasFlagM; }
   bool hasRCPC_IMMO() const { return HasRCPC_IMMO; }
 
   bool addrSinkUsingGEPs() const override {
@@ -549,7 +561,7 @@ public:
 
   bool enableEarlyIfConversion() const override;
 
-  bool enableAdvancedRASplitCost() const override { return true; }
+  bool enableAdvancedRASplitCost() const override { return false; }
 
   std::unique_ptr<PBQPRAConstraint> getCustomPBQPConstraints() const override;
 

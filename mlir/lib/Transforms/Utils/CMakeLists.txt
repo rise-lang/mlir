@@ -21,7 +21,7 @@ add_mlir_library(MLIRTransformUtils
   MLIRAffine
   MLIRAnalysis
   MLIRLoopAnalysis
-  MLIRElevate
+  MLIRMemRef
   MLIRSCF
   MLIRPass
   MLIRRewrite

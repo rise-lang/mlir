@@ -20,7 +20,7 @@ add_clang_library(clangStaticAnalyzerCore
   CommonBugCategories.cpp
   ConstraintManager.cpp
   CoreEngine.cpp
-  DynamicSize.cpp
+  DynamicExtent.cpp
   DynamicType.cpp
   Environment.cpp
   ExplodedGraph.cpp
@@ -30,13 +30,16 @@ add_clang_library(clangStaticAnalyzerCore
   ExprEngineCallAndReturn.cpp
   ExprEngineObjC.cpp
   FunctionSummary.cpp
+  HTMLDiagnostics.cpp
   LoopUnrolling.cpp
   LoopWidening.cpp
   MemRegion.cpp
+  PlistDiagnostics.cpp
   ProgramState.cpp
   RangeConstraintManager.cpp
   RangedConstraintManager.cpp
   RegionStore.cpp
+  SarifDiagnostics.cpp
   SimpleConstraintManager.cpp
   SimpleSValBuilder.cpp
   SMTConstraintManager.cpp
@@ -44,6 +47,7 @@ add_clang_library(clangStaticAnalyzerCore
   SValBuilder.cpp
   SVals.cpp
   SymbolManager.cpp
+  TextDiagnostics.cpp
   WorkList.cpp
 
   LINK_LIBS

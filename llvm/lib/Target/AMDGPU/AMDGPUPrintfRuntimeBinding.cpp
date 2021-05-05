@@ -19,27 +19,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
-#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/PassManager.h"
-#include "llvm/IR/Type.h"
 #include "llvm/InitializePasses.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+
 using namespace llvm;
 
 #define DEBUG_TYPE "printfToRuntime"
@@ -195,8 +182,8 @@ bool AMDGPUPrintfRuntimeBindingImpl::lowerPrintfForGpu(Module &M) {
 
       StringRef Str("unknown");
       if (GVar && GVar->hasInitializer()) {
-        auto Init = GVar->getInitializer();
-        if (auto CA = dyn_cast<ConstantDataArray>(Init)) {
+        auto *Init = GVar->getInitializer();
+        if (auto *CA = dyn_cast<ConstantDataArray>(Init)) {
           if (CA->isString())
             Str = CA->getAsCString();
         } else if (isa<ConstantAggregateZero>(Init)) {
@@ -259,16 +246,15 @@ bool AMDGPUPrintfRuntimeBindingImpl::lowerPrintfForGpu(Module &M) {
           }
         }
         if (shouldPrintAsStr(OpConvSpecifiers[ArgCount - 1], ArgType)) {
-          if (ConstantExpr *ConstExpr = dyn_cast<ConstantExpr>(Arg)) {
-            GlobalVariable *GV =
-                dyn_cast<GlobalVariable>(ConstExpr->getOperand(0));
+          if (auto *ConstExpr = dyn_cast<ConstantExpr>(Arg)) {
+            auto *GV = dyn_cast<GlobalVariable>(ConstExpr->getOperand(0));
             if (GV && GV->hasInitializer()) {
               Constant *Init = GV->getInitializer();
-              ConstantDataArray *CA = dyn_cast<ConstantDataArray>(Init);
-              if (Init->isZeroValue() || CA->isString()) {
-                size_t SizeStr = Init->isZeroValue()
-                                     ? 1
-                                     : (strlen(CA->getAsCString().data()) + 1);
+              bool IsZeroValue = Init->isZeroValue();
+              auto *CA = dyn_cast<ConstantDataArray>(Init);
+              if (IsZeroValue || (CA && CA->isString())) {
+                size_t SizeStr =
+                    IsZeroValue ? 1 : (strlen(CA->getAsCString().data()) + 1);
                 size_t Rem = SizeStr % DWORD_ALIGN;
                 size_t NSizeStr = 0;
                 LLVM_DEBUG(dbgs() << "Printf string original size = " << SizeStr
@@ -370,8 +356,7 @@ bool AMDGPUPrintfRuntimeBindingImpl::lowerPrintfForGpu(Module &M) {
       //
       ConstantPointerNull *zeroIntPtr =
           ConstantPointerNull::get(PointerType::get(Type::getInt8Ty(Ctx), 1));
-      ICmpInst *cmp =
-          dyn_cast<ICmpInst>(Builder.CreateICmpNE(pcall, zeroIntPtr, ""));
+      auto *cmp = cast<ICmpInst>(Builder.CreateICmpNE(pcall, zeroIntPtr, ""));
       if (!CI->use_empty()) {
         Value *result =
             Builder.CreateSExt(Builder.CreateNot(cmp), I32Ty, "printf_res");
@@ -443,9 +428,10 @@ bool AMDGPUPrintfRuntimeBindingImpl::lowerPrintfForGpu(Module &M) {
               auto *GV = dyn_cast<GlobalVariable>(ConstExpr->getOperand(0));
               if (GV && GV->hasInitializer()) {
                 Constant *Init = GV->getInitializer();
-                ConstantDataArray *CA = dyn_cast<ConstantDataArray>(Init);
-                if (Init->isZeroValue() || CA->isString()) {
-                  S = Init->isZeroValue() ? "" : CA->getAsCString().data();
+                bool IsZeroValue = Init->isZeroValue();
+                auto *CA = dyn_cast<ConstantDataArray>(Init);
+                if (IsZeroValue || (CA && CA->isString())) {
+                  S = IsZeroValue ? "" : CA->getAsCString().data();
                 }
               }
             }

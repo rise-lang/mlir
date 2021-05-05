@@ -248,8 +248,8 @@ Options for ``libomptarget``
   out-of-tree builds.
 
 **LIBOMPTARGET_OPENMP_HOST_RTL_FOLDER** = ``""``
-  Path of the folder that contains ``libomp.so``.  This is required for testing
-  out-of-tree builds.
+  Path of the folder that contains ``libomp.so``, and ``libLLVMSupport.so``
+  when profiling is enabled.  This is required for testing.
 
 Options for ``NVPTX device RTL``
 --------------------------------
@@ -263,14 +263,18 @@ Options for ``NVPTX device RTL``
 **LIBOMPTARGET_NVPTX_CUDA_COMPILER** = ``""``
   Location of a CUDA compiler capable of emitting LLVM bitcode. Currently only
   the Clang compiler is supported. This is only used when building the CUDA LLVM
-  bitcode offloading device RTL. If unspecified and the CMake C compiler is
-  Clang, then Clang is used.
+  bitcode offloading device RTL. If unspecified, either the Clang from the build
+  itself is used (i.e. an in-tree build with LLVM_ENABLE_PROJECTS including
+  clang), or the Clang compiler that the build uses as C compiler
+  (CMAKE_C_COMPILER; only if it is Clang). The latter is common for a
+  stage2-build or when using -DLLVM_ENABLE_RUNTIMES=openmp.
 
 **LIBOMPTARGET_NVPTX_BC_LINKER** = ``""``
   Location of a linker capable of linking LLVM bitcode objects. This is only
-  used when building the CUDA LLVM bitcode offloading device RTL. If unspecified
-  and the CMake C compiler is Clang and there exists a llvm-link binary in the
-  directory containing Clang, then this llvm-link binary is used.
+  used when building the CUDA LLVM bitcode offloading device RTL. If
+  unspecified, either the llvm-link in that same directory as
+  LIBOMPTARGET_NVPTX_CUDA_COMPILER is used, or the llvm-link from the
+  same build (available in an in-tree build).
 
 **LIBOMPTARGET_NVPTX_ALTERNATE_HOST_COMPILER** = ``""``
   Host compiler to use with NVCC. This compiler is not going to be used to
@@ -281,7 +285,7 @@ Options for ``NVPTX device RTL``
 
  **LIBOMPTARGET_NVPTX_COMPUTE_CAPABILITIES** = ``35``
   List of CUDA compute capabilities that should be supported by the NVPTX
-  device RTL. E.g. for compute capabilities 6.0 and 7.0, the option "60,70"
+  device RTL. E.g. for compute capabilities 6.0 and 7.0, the option "60;70"
   should be used. Compute capability 3.5 is the minimum required.
 
  **LIBOMPTARGET_NVPTX_DEBUG** = ``OFF|ON``

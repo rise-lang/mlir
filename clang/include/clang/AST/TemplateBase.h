@@ -409,8 +409,8 @@ private:
     // but template arguments get canonicalized too quickly.
     NestedNameSpecifier *Qualifier;
     void *QualifierLocData;
-    unsigned TemplateNameLoc;
-    unsigned EllipsisLoc;
+    SourceLocation TemplateNameLoc;
+    SourceLocation EllipsisLoc;
   };
 
   llvm::PointerUnion<TemplateTemplateArgLocInfo *, Expr *, TypeSourceInfo *>
@@ -444,11 +444,11 @@ public:
   }
 
   SourceLocation getTemplateNameLoc() const {
-    return SourceLocation::getFromRawEncoding(getTemplate()->TemplateNameLoc);
+    return getTemplate()->TemplateNameLoc;
   }
 
   SourceLocation getTemplateEllipsisLoc() const {
-    return SourceLocation::getFromRawEncoding(getTemplate()->EllipsisLoc);
+    return getTemplate()->EllipsisLoc;
   }
 };
 
@@ -512,7 +512,8 @@ public:
   }
 
   TypeSourceInfo *getTypeSourceInfo() const {
-    assert(Argument.getKind() == TemplateArgument::Type);
+    if (Argument.getKind() != TemplateArgument::Type)
+      return nullptr;
     return LocInfo.getAsTypeSourceInfo();
   }
 
