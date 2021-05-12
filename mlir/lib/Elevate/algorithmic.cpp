@@ -26,7 +26,14 @@ RewriteResult mlir::elevate::SplitJoinRewritePattern::impl(Operation *op, Patter
   ScopedContext scope(rewriter, op->getLoc());
   rewriter.setInsertionPointAfter(applyMap);
 
-  Value result = join(mapSeq2D(mapSeqOp.t(), mapLambda->getResult(0), split(natType(n), mapInput)));
+  Value result = join(mapSeq(arrayType(n, mapSeqOp.t()), [&](Value elem) {
+        auto mapLambdaClone = scope.getBuilderRef().clone(*mapLambda);
+        return mapSeq("scf", mapSeqOp.t(), mapLambdaClone->getResult(0), elem);
+      }, split(natType(n), mapInput)));
+
+  // old version which yields problems for subsequent strategies.
+  // kept around for reference in next discussion
+//  Value result = join(mapSeq2D(mapSeqOp.t(), mapLambda->getResult(0), split(natType(n), mapInput)));
 
   return success(result.getDefiningOp());
 }
@@ -70,7 +77,7 @@ RewriteResult mlir::elevate::BetaReductionRewritePattern::impl(Operation *op, Pa
   auto apply = cast<ApplyOp>(op);
   if (!isa<LambdaOp>(apply.getOperand(0).getDefiningOp())) return Failure();
   // match success
-  llvm::dbgs() << "doing betaRed now!\n";
+//  llvm::dbgs() << "doing betaRed now!\n";
   auto lambda = cast<LambdaOp>(apply.getOperand(0).getDefiningOp());
 
   SmallVector<Value, 10> args = SmallVector<Value, 10>();
@@ -170,10 +177,6 @@ RewriteResult mlir::elevate::MapMapFBeforeTransposeRewritePattern::impl(Operatio
 
   llvm::dbgs() << "match!\n";
 
-  debug("lamA:")(lamA,rewriter);
-  debug("lamB:")(lamB,rewriter);
-
-
   auto rrLamAEtaReducible = etaReducible()(lamA.getOperation(), rewriter);
   if (std::get_if<Failure>(&rrLamAEtaReducible)) return rrLamAEtaReducible;
 
@@ -209,6 +212,7 @@ auto mlir::elevate::mapMapFBeforeTranspose() -> MapMapFBeforeTransposeRewritePat
 //    case _ => Failure(mapLastFission())
 //}
 RewriteResult mlir::elevate::MapLastFissionRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
+//  llvm::dbgs() << "fission try\n";
   if (!isa<ApplyOp>(op)) return Failure();
   auto applyMap = cast<ApplyOp>(op);
   if (!isa<mlir::rise::MapSeqOp>(applyMap.getOperand(0).getDefiningOp())) return Failure();
@@ -216,7 +220,6 @@ RewriteResult mlir::elevate::MapLastFissionRewritePattern::impl(Operation *op, P
   if (!applyMap.getOperand(1).isa<OpResult>()) return Failure();
   if (!isa<LambdaOp>(applyMap.getOperand(1).getDefiningOp())) return Failure();
   LambdaOp lambda = cast<LambdaOp>(applyMap.getOperand(1).getDefiningOp());
-//  llvm::dbgs() << "fission found applyMap\n";
   if (!isa<ApplyOp>(lambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
   auto applyLastFunction = cast<ApplyOp>(lambda.region().front().getTerminator()->getOperand(0).getDefiningOp());
   auto f = applyLastFunction.getOperand(0).getDefiningOp();
@@ -224,101 +227,38 @@ RewriteResult mlir::elevate::MapLastFissionRewritePattern::impl(Operation *op, P
   if (!isa<ApplyOp>(applyLastFunction.getOperand(applyLastFunction.getNumOperands()-1).getDefiningOp())) return Failure();
   auto applyF = cast<ApplyOp>(applyLastFunction.getOperand(applyLastFunction.getNumOperands()-1).getDefiningOp());
   // match success
-  llvm::dbgs() << "fission success\n";
   auto lastFunctionType = RiseDialect::getFunTypeOutput(lambda.getResult().getType().dyn_cast<FunType>());
 
   ScopedContext scope(rewriter, op->getLoc());
   rewriter.setInsertionPointAfter(op);
-//  RiseDialect::dumpRiseExpression(lambda.getParentOfType<FuncOp>());
-//  lambda.getParentOfType<FuncOp>().dump();
-//  f->dump();
-//  applyLastFunction.dump();
-//  applyF.dump();
-//  RiseDialect::dumpRiseExpression(lambda);
-
-//  applyF.getOperand(0).getDefiningOp()->dump(); // The Operands of this apply get messed up
-  // TODO: go through the operands and check whether they depend on bla
-  // Then replace that with the arg of the new lambda
-//  llvm::dbgs() << "size: "  << lambda.region().front().getArguments().size() << (lambda.region().front().getArgument(0) == applyF.getOperand(2)) << "\n";
   applyLastFunction.replaceAllUsesWith(applyF.getResult()); // TODO:here the blockArg for zip is somehow messed up
-//  llvm::dbgs() << "size: "  << lambda.region().front().getArguments().size() << (lambda.region().front().getArgument(0) == applyF.getOperand(2)) << "\n";
 
-//  RiseDialect::dumpRiseExpression(lambda.getParentOfType<FuncOp>());
-//  lambda.getParentOfType<FuncOp>().dump();
-//  RiseDialect::dumpRiseExpression(lambda);
-
-  // zip stays inside its mapSeq but its arguments are messed up. Check what the stuff below does. I think the mapSeq is actually replaced
-//  lambda.dump();
-//  RiseDialect::dumpRiseExpression(lambda);
   adjustLambdaType(lambda, rewriter);
-//  RiseDialect::dumpRiseExpression(lambda);
-//  lambda.dump();
-//  llvm::dbgs() << "size: "  << lambda.region().front().getArguments().size() << (lambda.region().front().getArgument(0) == applyF.getOperand(2)) << "\n";
 
-  // now build up new expr. with map
+  // build up new expr. with map
   auto newApplyMap =
       mapSeq("scf", RiseDialect::getAsDataType(applyF.getResult().getType()),
              lambda.getResult(), applyMap.getOperand(2));
-//  RiseDialect::dumpRiseExpression(lambda.getParentOfType<FuncOp>());
-//  llvm::dbgs() << "size: "  << lambda.region().front().getArguments().size() << (lambda.region().front().getArgument(0) == applyF.getOperand(2)) << "\n";
-//  llvm::dbgs() << "size: "  << lambda.region().front().getArguments().size() << (lambda.region().front().getArgument(0) == lambda.region().front().getTerminator()->getOperand(0).getDefiningOp()->getOperand(2)) << "\n";
 
   auto result = mapSeq("scf", RiseDialect::getAsDataType(applyLastFunction.getResult().getType()), [&](Value elem){
         // clone function we want to move and the according apply
         // adjust operands on the apply to the new cloned function and the new input
-//        f->moveAfter(rewriter.getBlock(), rewriter.getBlock()->front().getIterator());
     auto lastFunClone = scope.getBuilderRef().clone(*f);
 
-        f->dump();
-//        lastFunClone->dump(); // if this is a mapSeq, the lambda is not moved to it
-        applyLastFunction.getOperation()->moveBefore(lastFunClone);
-        lastFunClone->moveBefore(applyLastFunction);
-//        lastFunClone->moveBefore()
-//        auto newApply = rewriter.clone(*applyLastFunction);
-        applyLastFunction.dump();
-//    newApply->dump();
-
-//        newApply->setOperand(0, lastFunClone->getResult(0));
-//        newApply->setOperand(newApply->getNumOperands()-1, elem);
-//        for (int i = 1; i < newApply->getNumOperands(); i++) {
-//          if (!newApply->getOperand(i).isa<OpResult>()) continue;
-//            newApply->getOperand(i).getDefiningOp()->moveBefore(lastFunClone);
-//          newApply->getOperand(i).getDefiningOp()->dump();
-//            newApply->dump();
-//            // TODO: This does not always work!
-//        }
+    applyLastFunction.getOperation()->moveBefore(lastFunClone);
+    lastFunClone->moveBefore(applyLastFunction);
 
     for (int i = 1; i < applyLastFunction.getNumOperands()-1; i++) {
-      applyLastFunction.getOperand(i).dump();
       if (!applyLastFunction.getOperand(i).isa<OpResult>()) continue;
-      applyLastFunction.getOperand(i).dump();
-      llvm::dbgs() << "true";
       applyLastFunction.getOperand(i).getDefiningOp()->moveBefore(lastFunClone);
-//      applyLastFunction.getOperand(i).getDefiningOp()->moveBefore(lambda.getParentOfType<FuncOp>().getRegion().front().getTerminator());
-
-
-      //ERROR: TODO: For some reason this works perfectly for reduceSeq (moving lambda + literal)
-      // But it does not work for mapSeq (moving lambda)
-
-      // TODO: This does not always work!
     }
     applyLastFunction.setOperand(0, lastFunClone->getResult(0));
     applyLastFunction.setOperand(applyLastFunction.getNumOperands()-1, elem);
 
-        // handle other operands, which may be out of scope.
-        // TODO: maybe build a helper function to "inline" an operation
-        // maybe we recursively have to inline other stuff.
-        // see that it is inlined above the lastFunClone, bcs it has to be
-        // defined be4 the apply
-
-        return applyLastFunction.getResult();
+    return applyLastFunction.getResult();
   }, newApplyMap);
 
-//  rewriter.eraseOp(applyLastFunction);
   rewriter.eraseOp(f);
-
-//  debug("appLastFun")(applyLastFunction,rewriter);
-//  debug("lastFun")(lastFunction,rewriter);
 
   return success(result.getDefiningOp());
 }

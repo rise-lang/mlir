@@ -2,7 +2,6 @@
 // Created by martin.
 //
 
-//#include "mlir/Elevate/core.h"
 #include "mlir/Elevate2/core.h"
 #include "mlir/Dialect/Rise/Elevate2/traversal.h"
 #include "mlir/Dialect/Rise/Elevate2/algorithmic.h"
@@ -29,63 +28,44 @@ struct ElevateRewritingPass
 } // namespace
 
 //===----------------------------------------------------------------------===//
-// Pass
+// Strategies
 //===----------------------------------------------------------------------===//
 
-/// The pass:
-void ElevateRewritingPass::runOnFunction() {
-  Operation *op = getOperation();
+RewriteResult matmulBaseline(Operation *op, ElevateRewriteDriver &rewriter) {
+  RewriteResult rr = topdown(fuseReduceMap())(op, rewriter);
+  rr = flatMapSuccess(rr, normalize(topdown(betaReduction())), rewriter);
 
-  /////////////////////// tmp ///////////////////////
-  FuncOp funcOp = dyn_cast<FuncOp>(op);
-  LoweringUnitOp loweringUnit;
-  funcOp.getBody().walk([&](Operation *op) {
-    if (LoweringUnitOp loweringUnitOp = dyn_cast<LoweringUnitOp>(op))
-      loweringUnit = loweringUnitOp;
-  });
-  if (!loweringUnit) {
-    emitWarning(funcOp.getLoc()) << "No rise.lowering_unit found!";
-    return;
-  }
-  // Start at the back and find the rise.out op
-  Block &block = loweringUnit.region().front();
-  auto _outOp = std::find_if(block.rbegin(), block.rend(),
-                             [](auto &op) { return isa<OutOp>(op); });
-  if (_outOp == block.rend()) {
-    emitWarning(funcOp.getLoc()) << "Could not find rise.out operation!";
-    return;
-  }
-  OutOp outOp = dyn_cast<OutOp>(*_outOp);
-  auto lastApply = outOp.input().getDefiningOp();
-  ///////////////////////////////////////////////////
+  // complete strategy:
+  // auto matmulBaseline = seq(topdown(fuseReduceMap()), normalize(topdown(betaReduction())));
+  return rr;
+}
 
-  ElevateRewriteDriver rewriter(op->getContext());
-  RiseDialect::dumpRiseExpression(outOp);
+RewriteResult matmulBlocking(Operation *op, ElevateRewriteDriver &rewriter) {
+  // baseline
+  RewriteResult rr = topdown(fuseReduceMap())(op, rewriter);
+  rr = flatMapSuccess(rr, normalize(topdown(betaReduction())), rewriter);
 
-  RewriteResult rr_fused = topdown(fuseReduceMap())(lastApply, rewriter);
+  // blocking
+  rr = flatMapSuccess(rr, normalize(mapLastFission()), rewriter);
 
-  auto rr_betared1 = flatMapSuccess(rr_fused,
-                                    topdown(betaReduction()),
-                                    rewriter);
-  auto rr_betared2 = flatMapSuccess(rr_betared1, topdown(betaReduction()), rewriter);
-//  lastApply = outOp.input().getDefiningOp();
-//
-  RiseDialect::dumpRiseExpression(outOp);
-//  llvm::dbgs() << "\n\n";
-//
+  rr = flatMapSuccess(rr, seq(fmap( splitJoin(8)), splitJoin(4)), rewriter);
+  rr = flatMapSuccess(rr, normalize(mapLastFission()), rewriter);
 
-//
-//  RiseDialect::dumpRiseExpression(outOp);
-//  llvm::dbgs() << "\n\n";
-//
-  auto rr_fissioned = normalize(mapLastFission())(lastApply,rewriter);
-  lastApply = outOp.input().getDefiningOp();
-  RiseDialect::dumpRiseExpression(outOp);
+  // TODO: strategy incomplete
+//  rr = flatMapSuccess(rr,  argument(1, addIdAfter()), rewriter);
+//  rr = flatMapSuccess(rr,  topdown(createTransposePair()), rewriter);
 
-  auto rr_loop_blocked = seq(fmap( splitJoin(8)), splitJoin(4))(lastApply, rewriter);
-  RiseDialect::dumpRiseExpression(outOp);
+//  rr = flatMapSuccess(rr, topdown(mapMapFBeforeTranspose()), rewriter);
 
-  lastApply = outOp.input().getDefiningOp();
+  // complete strategy:
+  return rr;
+}
+
+RewriteResult fission(RewriteResult rr, PatternRewriter &rewriter) {
+  rr = flatMapSuccess(rr, topdown(mapLastFission()), rewriter);
+  return rr;
+}
+
 //  auto rr_fissione = normalize(mapLastFission())(lastApply,rewriter);
 
 
@@ -109,60 +89,70 @@ void ElevateRewritingPass::runOnFunction() {
 //
 //  auto rr_moved_transpose = topdown(seq(debug("move"), mapMapFBeforeTranspose()))(lastApply, rewriter);
 //  lastApply = outOp.input().getDefiningOp();
-  lastApply = outOp.input().getDefiningOp();
 
 //  auto rr_fissioned2 = topdown(seq(debug("fission"), mapLastFission()))(lastApply,rewriter);
 
-  if (auto _ = std::get_if<Failure>(&rr_fissioned)) {
-    llvm::dbgs() << "logic error1!\n";
-  } else {
-    llvm::dbgs() << "success!\n";
+
+//===----------------------------------------------------------------------===//
+// Helpers
+//===----------------------------------------------------------------------===//
+
+ApplyOp getLastApply(FuncOp funcOp) {
+  LoweringUnitOp loweringUnit;
+  funcOp.getBody().walk([&](Operation *op) {
+    if (LoweringUnitOp loweringUnitOp = dyn_cast<LoweringUnitOp>(op))
+      loweringUnit = loweringUnitOp;
+  });
+  if (!loweringUnit) {
+    emitWarning(funcOp.getLoc()) << "No rise.lowering_unit found!";
+    return nullptr;
   }
-//  if (auto _ = std::get_if<Failure>(&rr_betared1)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
+  // Start at the back and find the rise.out op
+  Block &block = loweringUnit.region().front();
+  auto _outOp = std::find_if(block.rbegin(), block.rend(),
+                             [](auto &op) { return isa<OutOp>(op); });
+  if (_outOp == block.rend()) {
+    emitWarning(funcOp.getLoc()) << "Could not find rise.out operation!";
+    return nullptr;
+  }
+  OutOp outOp = dyn_cast<OutOp>(*_outOp);
+  auto lastApply = outOp.input().getDefiningOp();
+
+  return dyn_cast<ApplyOp>(lastApply);
+}
+
+//===----------------------------------------------------------------------===//
+// Pass
+//===----------------------------------------------------------------------===//
+
+/// The pass:
+void ElevateRewritingPass::runOnFunction() {
+  FuncOp func = getOperation();
+  ElevateRewriteDriver rewriter(func.getContext());
+  auto lastApply = getLastApply(func);
+  if (!lastApply) return;
+  llvm::dbgs() << "initial expression:\n";
+  RiseDialect::dumpRiseExpression(lastApply);
+
+  auto rr =  elevate::id()(lastApply, rewriter);
+
+  rr = matmulBaseline(lastApply, rewriter);
+//  rr = matmulBlocking(lastApply, rewriter);
+
+//  for (int i = 0; i < 5; i++) {
+//    rr = fission(rr, rewriter);
 //  }
-//  if (auto _ = std::get_if<Failure>(&rr_betared2)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_loop_blocked)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_addid)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_double_transpose)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_fissioned)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_moved_transpose)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-//  if (auto _ = std::get_if<Failure>(&rr_fissioned2)) {
-//    llvm::dbgs() << "logic error1!\n";
-//  } else {
-//    llvm::dbgs() << "success!\n";
-//  }
-  llvm::dbgs() << "////////////// finished elevate pass! //////////////\n";
-  RiseDialect::dumpRiseExpression(outOp);
+
+  if (std::get_if<Success>(&rr)) {
+    llvm::dbgs() << "\nsuccess\n";
+  } else {
+    llvm::dbgs() << "\nfailure\n";
+  }
+
+  llvm::dbgs() << "\n////////////// finished elevate pass! //////////////\n";
+  RiseDialect::dumpRiseExpression(getLastApply(func));
   llvm::dbgs() << "\n";
-  funcOp.dump();
-//  RiseDialect::dumpRiseExpression2(&loweringUnit);
+  func.dump();
   return;
 }
 

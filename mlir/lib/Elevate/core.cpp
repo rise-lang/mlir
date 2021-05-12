@@ -12,8 +12,11 @@
 #include <memory>
 #include <stdexcept>
 #include <variant>
+#include "mlir/Dialect/Rise/IR/Dialect.h"
 
 using namespace mlir::elevate;
+
+#define DEBUG_TYPE "elevate"
 
 mlir::LogicalResult
 StrategyRewritePattern::matchAndRewrite(Operation *op,
@@ -25,6 +28,12 @@ StrategyRewritePattern::matchAndRewrite(Operation *op,
 }
 
 RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter &rewriter) const {
+  if (!op) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "Strategy called on invalid op!";
+    });
+    return Failure();
+  }
   RewriteResult rr = impl(op, rewriter);
 
   if (auto _ = std::get_if<Failure>(&rr)) return rr;
@@ -38,6 +47,7 @@ RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter 
   if (op->use_empty()) return rr;
   // Did the strategy modify the IR at all
   if (op == newOp) return rr;
+
 
   std::vector<Operation *> garbageCandidates;
   auto addOperandsToGarbageCandidates = [&](Operation *op) {
@@ -57,7 +67,7 @@ RewriteResult StrategyRewritePattern::operator()(Operation *op, PatternRewriter 
 
     addOperandsToGarbageCandidates(currentOp);
     if (currentOp->use_empty()) {
-      llvm::dbgs() << "erasing " << currentOp->getName().getStringRef() << "\n";
+//      llvm::dbgs() << "erasing " << currentOp->getName().getStringRef() << "\n";
       rewriter.eraseOp(currentOp);
     }
   } while (!garbageCandidates.empty());
