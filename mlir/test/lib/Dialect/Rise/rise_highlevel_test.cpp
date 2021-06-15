@@ -58,7 +58,7 @@ static MLIRContext &globalContext() {
   static thread_local MLIRContext context;
   static thread_local bool initOnce = [&]() {
     // clang-format off
-    context.memref.loadDialect<AffineDialect,
+    context.loadDialect<AffineDialect,
         scf::SCFDialect,
         linalg::LinalgDialect,
         math::MathDialect,
@@ -117,6 +117,56 @@ TEST_FUNC(declare_functions) {
   printMemref.erase();
   printVal.erase();
   printBinOp.erase();
+}
+
+TEST_FUNC(test_mapLastFission) {
+  int64_t M = 8;
+  int64_t N = 8;
+  int splitFactor = 4;
+
+  auto f32Type = FloatType::getF32(&globalContext());
+
+  auto f = makeFunction("mapLastFission", {},
+                        {MemRefType::get({M, N}, f32Type, {}, 0),
+                         MemRefType::get({M, N/splitFactor, splitFactor},
+                                         f32Type, {}, 0)});
+
+  OpBuilder builder(f.getBody());
+  ScopedContext scope(builder, f.getLoc());
+
+  Value input = f.getArgument(0);
+  Value output = f.getArgument(1);
+
+  makeRiseProgram(output, input)([&](Value input) {
+    input.getType().dump();
+    return mapSeq(array2DType(N/splitFactor, splitFactor, scalarF32Type()), [&](Value elem) {
+      Value chunk = split(natType(splitFactor), elem);
+      chunk.getType().dump();
+      return mapSeq2D(scalarF32Type(), [&](Value val){
+            val.getType().dump();
+            return embed1(scalarF32Type(), val, [&](Value val){
+              auto cst0 = std_constant_float(APFloat(0.0f), f32Type);
+              return std_addf(val, cst0);
+            });
+          }, chunk);
+    }, input);
+  });
+
+  std_ret();
+
+  // generate test
+  auto testFun = makeFunction("mapLastFission_test", {}, {});
+  OpBuilder test_builder(testFun.getBody());
+  ScopedContext test_scope(test_builder, testFun.getLoc());
+
+  makeRiseTest(f, {M, N/splitFactor, splitFactor},
+               getFilledMemRef({M, N}));
+  std_ret();
+
+  f.print(llvm::outs());
+  testFun.print(llvm::outs());
+  testFun.erase();
+  f.erase();
 }
 
 TEST_FUNC(build_and_lower_matrix_multiplication) {

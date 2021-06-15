@@ -5,8 +5,8 @@ func @rise_fun(%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:m
     rise.lowering_unit {
         %A = rise.in %inA : !rise.array<1024, array<1024, scalar<f32>>>
         %B = rise.in %inB : !rise.array<1024, array<1024, scalar<f32>>>
-//        %transpose = rise.transpose #rise.nat<1024> #rise.nat<1024> #rise.scalar<f32>
-//        %B_trans = rise.apply %transpose, %B
+        %transpose = rise.transpose #rise.nat<1024> #rise.nat<1024> #rise.scalar<f32>
+        %B_trans = rise.apply %transpose, %B
 
         %f1 = rise.lambda (%arow : !rise.array<1024, scalar<f32>>) -> !rise.array<1024, scalar<f32>> {
             %f2 = rise.lambda (%bcol : !rise.array<1024, scalar<f32>>) -> !rise.scalar<f32> {
@@ -47,7 +47,7 @@ func @rise_fun(%outArg:memref<1024x1024xf32>, %inA:memref<1024x1024xf32>, %inB:m
                 rise.return %result : !rise.scalar<f32>
             }
             %m2 = rise.mapSeq #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.scalar<f32>
-            %result = rise.apply %m2, %f2, %B
+            %result = rise.apply %m2, %f2, %B_trans
             rise.return %result : !rise.array<1024, scalar<f32>>
         }
         %m1 = rise.mapSeq #rise.nat<1024> #rise.array<1024, scalar<f32>> #rise.array<1024, scalar<f32>>

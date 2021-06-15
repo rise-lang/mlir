@@ -17,6 +17,7 @@ RewriteResult mlir::elevate::UsesValueRewritePattern::impl(Operation *op, Patter
     return Failure();
   return success(op);
 }
+llvm::StringRef UsesValueRewritePattern::getName() const {return llvm::StringRef("uses");}
 auto mlir::elevate::usesValue(const Value &val) -> UsesValueRewritePattern {
   return UsesValueRewritePattern(val);
 }
@@ -28,6 +29,7 @@ RewriteResult mlir::elevate::ContainsRewritePattern::impl(Operation *op, Pattern
   }
   return success(op);
 }
+llvm::StringRef ContainsRewritePattern::getName() const {return llvm::StringRef("contains");}
 auto mlir::elevate::contains(const Value &val) -> ContainsRewritePattern {
   return ContainsRewritePattern(val);
 }
@@ -35,16 +37,26 @@ auto mlir::elevate::contains(const Value &val) -> ContainsRewritePattern {
 RewriteResult mlir::elevate::EtaReducibleRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<LambdaOp>(op)) return Failure();
   auto outerLambda = cast<LambdaOp>(op);
-  if (!isa<ApplyOp>(outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp()));
-  auto apply = outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp();
+  if (!isa<ApplyOp>(outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp())) return Failure();
 
+  auto apply = outerLambda.region().front().getTerminator()->getOperand(0).getDefiningOp();
+  // check that the arg of the lambda is used in the application here
+  // might actually be multiple args
+
+  // check that the applied function does not refer to the arg again.
+
+  // TODO:
+  // wrong
   // check that region of lambda does not contain the arg of the lambda
+
+  // should be contains(lambdaArg)(f)
   auto rrContainsArg = contains(outerLambda.region().front().getArgument(0))(op, rewriter);
   if (auto _ =  std::get_if<Success>(&rrContainsArg)) {
     return Failure();
   }
   return success(op);
 }
+llvm::StringRef EtaReducibleRewritePattern::getName() const {return llvm::StringRef("etaReducible");}
 // set out identity lambda and another arg around it.
 // and pass that lambda into a map
 // BENF should remove 1 of the lambdas

@@ -9,6 +9,9 @@ using namespace mlir::elevate;
 auto mlir::elevate::argument(const int n, const StrategyRewritePattern &s) -> ArgumentRewritePattern {
   return ArgumentRewritePattern(n, s);
 }
+auto mlir::elevate::argument(const StrategyRewritePattern &s) -> ArgumentRewritePattern {
+  return ArgumentRewritePattern(-1, s);
+}
 auto mlir::elevate::function(const StrategyRewritePattern &s) -> FunctionRewritePattern {
   return FunctionRewritePattern(s);
 }
@@ -42,11 +45,16 @@ RewriteResult ArgumentRewritePattern::impl(Operation *op, PatternRewriter &rewri
     return failure();
 
   auto apply = cast<ApplyOp>(op);
-  auto fun = apply.getOperand(n).getDefiningOp();
-  auto rr = s(fun, rewriter);
+  // handle case of unspecified n (==-1)
+  int argNum = n;
+  if (argNum == -1) argNum = apply.getNumOperands()-1;
+
+  auto arg = apply.getOperand(argNum).getDefiningOp();
+  auto rr = s(arg, rewriter);
   if (std::get_if<Failure>(&rr)) return rr;
   return elevate::success(op); 
 }
+llvm::StringRef ArgumentRewritePattern::getName() const {return llvm::StringRef("arg");}
 
 RewriteResult FunctionRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<ApplyOp>(op))
@@ -58,6 +66,7 @@ RewriteResult FunctionRewritePattern::impl(Operation *op, PatternRewriter &rewri
   if (std::get_if<Failure>(&rr)) return rr;
   return elevate::success(op);
 }
+llvm::StringRef FunctionRewritePattern::getName() const {return llvm::StringRef("fun");}
 
 RewriteResult BodyRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<LambdaOp>(op) && !isa<EmbedOp>(op))
@@ -69,6 +78,7 @@ RewriteResult BodyRewritePattern::impl(Operation *op, PatternRewriter &rewriter)
   if (std::get_if<Failure>(&rr)) return rr;
   return success(op);
 }
+llvm::StringRef BodyRewritePattern::getName() const {return llvm::StringRef("body");}
 
 RewriteResult mlir::elevate::FMapRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<ApplyOp>(op))
@@ -81,6 +91,7 @@ RewriteResult mlir::elevate::FMapRewritePattern::impl(Operation *op, PatternRewr
   if (std::get_if<Failure>(&rr)) return rr;
   return success(op);
 }
+llvm::StringRef FMapRewritePattern::getName() const {return llvm::StringRef("fmap");}
 
 RewriteResult OneRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   if (!isa<ApplyOp>(op) && !isa<LambdaOp>(op) && !isa<EmbedOp>(op))
@@ -119,23 +130,30 @@ RewriteResult OneRewritePattern::impl(Operation *op, PatternRewriter &rewriter) 
   }
   return Failure();
 }
+llvm::StringRef OneRewritePattern::getName() const {return llvm::StringRef("one");}
 
 RewriteResult TopDownRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return LeftChoiceRewritePattern(s, OneRewritePattern(TopDownRewritePattern(s)))(op, rewriter);
 }
+llvm::StringRef TopDownRewritePattern::getName() const {return llvm::StringRef("topDown");}
 
 RewriteResult BottomUpRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return LeftChoiceRewritePattern(OneRewritePattern(BottomUpRewritePattern(s)), s)(op, rewriter);
 }
+llvm::StringRef BottomUpRewritePattern::getName() const {return llvm::StringRef("bottomUp");}
+
 
 RewriteResult NormalizeRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return repeat(topdown(s))(op, rewriter);
 }
+llvm::StringRef NormalizeRewritePattern::getName() const {return llvm::StringRef("normalize");}
 
 RewriteResult OutermostRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return topdown(seq(predicate, s))(op, rewriter);
 }
+llvm::StringRef OutermostRewritePattern::getName() const {return llvm::StringRef("outermost");}
 
 RewriteResult InnermostRewritePattern::impl(Operation *op, PatternRewriter &rewriter) const {
   return bottomUp(seq(predicate, s))(op, rewriter);
 }
+llvm::StringRef InnermostRewritePattern::getName() const {return llvm::StringRef("innermost");}

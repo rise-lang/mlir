@@ -22,19 +22,21 @@ class ArgumentRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   ArgumentRewritePattern(const int n, const StrategyRewritePattern &s)
       : s(s), n(n) {}
 };
 auto argument(const int n, const StrategyRewritePattern &s)
     -> ArgumentRewritePattern;
+auto argument(const StrategyRewritePattern &s)
+-> ArgumentRewritePattern;
 
 class FunctionRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   FunctionRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
@@ -44,7 +46,7 @@ class BodyRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   BodyRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
@@ -54,7 +56,7 @@ class FMapRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   FMapRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
@@ -64,7 +66,7 @@ class OneRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   OneRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
@@ -74,19 +76,20 @@ class TopDownRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   TopDownRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
 auto topdown(const StrategyRewritePattern &s) -> TopDownRewritePattern;
 
 class BottomUpRewritePattern : public StrategyRewritePattern {
-const StrategyRewritePattern &s;
+  const StrategyRewritePattern &s;
 
-RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 
 public:
-BottomUpRewritePattern(const StrategyRewritePattern &s) : s(s) {}
+  BottomUpRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
 auto bottomUp(const StrategyRewritePattern &s) -> BottomUpRewritePattern;
 
@@ -94,31 +97,31 @@ class NormalizeRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   NormalizeRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
 auto normalize(const StrategyRewritePattern &s) -> NormalizeRewritePattern;
 
 class OutermostRewritePattern : public StrategyRewritePattern {
-const StrategyRewritePattern &predicate;
-const StrategyRewritePattern &s;
+  const StrategyRewritePattern &predicate;
+  const StrategyRewritePattern &s;
 
-RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
-OutermostRewritePattern(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) : predicate(predicate), s(s) {}
+  OutermostRewritePattern(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) : predicate(predicate), s(s) {}
 };
 auto outermost(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) -> OutermostRewritePattern;
 
 class InnermostRewritePattern : public StrategyRewritePattern {
-const StrategyRewritePattern &predicate;
-const StrategyRewritePattern &s;
+  const StrategyRewritePattern &predicate;
+  const StrategyRewritePattern &s;
 
-RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
-InnermostRewritePattern(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) : predicate(predicate), s(s) {}
+  InnermostRewritePattern(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) : predicate(predicate), s(s) {}
 };
 auto innermost(const StrategyRewritePattern &predicate, const StrategyRewritePattern &s) -> InnermostRewritePattern;
 

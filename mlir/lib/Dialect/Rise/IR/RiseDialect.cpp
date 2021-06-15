@@ -236,12 +236,14 @@ void dumpRiseExpression_value(Value val, SmallVector<BlockArgument, 4> &args) {
       return;
     }
   }
+  // TODO: in this case we are inside an embed and have to substitute with the embed operands
   llvm::dbgs() << "x?";
-  emitWarning(val.getLoc()) << "Possible out of scope Value!";
+//  emitWarning(val.getLoc()) << "Possible out of scope Value!";
 }
 
-void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, bool omitApplyNodes, bool printBinderTypes, int indentLevel = 0) {
+void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &args, bool omitApplyNodes, bool inlineEmbed, bool printBinderTypes, bool insideEmbed, Value highlightValue = nullptr, std::tuple<float,float,float> highlightColor = {0,255,0}, int indentLevel = 0) {
   auto indent = [&]() -> void {
+    if (insideEmbed) return;
     llvm::dbgs() << "\n";
     for (int i = 0; i < indentLevel * 4; i++) {
       llvm::dbgs() << " ";
@@ -273,36 +275,51 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
   auto dumpOperands = [&](Operation *op) -> void {
     int firstOpToDump = 0;
     if (omitApplyNodes && isa<ApplyOp>(op)) {
-      dumpRiseExpression_recurse(op->getOperand(0).getDefiningOp(), args, omitApplyNodes, printBinderTypes, indentLevel);
+      dumpRiseExpression_recurse(op->getOperand(0).getDefiningOp(), args, omitApplyNodes, inlineEmbed, printBinderTypes, insideEmbed, highlightValue, highlightColor, indentLevel);
       llvm::dbgs() << "(";
       firstOpToDump++;
     }
     for (int i = firstOpToDump; i < op->getNumOperands(); i++) {
       if (op->getOperand(i).isa<OpResult>()) {
-        dumpRiseExpression_recurse(op->getOperand(i).getDefiningOp(), args, omitApplyNodes, printBinderTypes, indentLevel);
+        dumpRiseExpression_recurse(op->getOperand(i).getDefiningOp(), args, omitApplyNodes, inlineEmbed, printBinderTypes, insideEmbed, highlightValue, highlightColor, indentLevel);
       } else {
         dumpRiseExpression_value(op->getOperand(i), args);
       }
       if (i < op->getNumOperands()-1) llvm::dbgs() << ",";
     }
   };
+  auto toggleHighlightIfNecessary = [&](Operation *op, bool untoggle = false) -> std::string {
+    // TODO: add using of highlightColor
+//    assert(std::get<0>())
+    // r,g,b in [0,255]
+    int r = std::get<0>(highlightColor);
+    int g = std::get<1>(highlightColor);
+    int b = std::get<2>(highlightColor);
+    if (untoggle) return "\x1b[0m";
+    if (op->getNumResults() == 0) return "";
+    std::string colorString = "\x1b[38;2;";// << r << ";" << g << ";" << b << "m";
+    colorString.append(std::to_string(r)).append(";").append(std::to_string(g)).append(";").append(std::to_string(b)).append("m");
+    if (op->getResult(0) == highlightValue) return colorString;
+    return "";
+  };
+
   if (op == nullptr) return;
   if (auto out = dyn_cast<OutOp>(op)) {
     llvm::dbgs() << "out = (\n";
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(out.getOperand(1)), args, omitApplyNodes, printBinderTypes, indentLevel);
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(out.getOperand(1)), args, omitApplyNodes, inlineEmbed, printBinderTypes, insideEmbed, highlightValue, highlightColor, indentLevel);
     llvm::dbgs() << ")\n";
 
     return;
   }
   if (auto apply = dyn_cast<ApplyOp>(op)) {
-    if (!omitApplyNodes) llvm::dbgs() << "App(";
+    if (!omitApplyNodes) llvm::dbgs() << toggleHighlightIfNecessary(op) << "App(" << toggleHighlightIfNecessary(op, true);
     dumpOperands(apply);
     llvm::dbgs() << ")";
     return;
   }
   if (auto lambda = dyn_cast<LambdaOp>(op)) {
     // print args of this lambda
-    llvm::dbgs() << "λ(";
+    llvm::dbgs() << toggleHighlightIfNecessary(op) << "λ(" << toggleHighlightIfNecessary(op, true);
     for (auto arg : lambda.region().front().getArguments()) {
       args.push_back(arg);
       llvm::dbgs() << "x" << args.size()-1;
@@ -318,45 +335,67 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
 //    for (int i = 0; i < nestingLevel; i++) {
 //      llvm::dbgs() << "  ";
 //    }
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)), args, omitApplyNodes, printBinderTypes, indentLevel);
+    dumpRiseExpression_recurse(getDefiningOpOrNullptr(lambda.region().front().getTerminator()->getOperand(0)), args, omitApplyNodes, inlineEmbed, printBinderTypes, insideEmbed, highlightValue, highlightColor, indentLevel);
     llvm::dbgs() << ")";
     indentLevel--;
     indent();
     return;
   }
   if (auto embed = dyn_cast<EmbedOp>(op)) {
-    llvm::dbgs() << "embed(";
-    for (auto arg : embed.region().front().getArguments()) {
-      args.push_back(arg);
-      llvm::dbgs() << "e" << args.size()-1;
-      if (printBinderTypes) {
-        llvm::dbgs() << " : ";
-        arg.getType().print(llvm::dbgs());
+    if (!inlineEmbed) {
+      llvm::dbgs() << toggleHighlightIfNecessary(op) << "embed(" << toggleHighlightIfNecessary(op, true);
+      for (auto arg : embed.region().front().getArguments()) {
+        args.push_back(arg);
+        llvm::dbgs() << "e" << args.size() - 1;
+        if (printBinderTypes) {
+          llvm::dbgs() << " : ";
+          arg.getType().print(llvm::dbgs());
+        }
+        if (arg != embed.region().front().getArguments().back())
+          llvm::dbgs() << ",";
       }
-      if (arg != embed.region().front().getArguments().back()) llvm::dbgs() << ",";
+      llvm::dbgs() << " => {";
+      indentLevel++;
+      indent();
+      dumpRiseExpression_recurse(
+          getDefiningOpOrNullptr(
+              embed.region().front().getTerminator()->getOperand(0)),
+          args, omitApplyNodes, inlineEmbed, printBinderTypes, insideEmbed, highlightValue, highlightColor, indentLevel);
+      indent();
+      llvm::dbgs() << "}, ";
+      dumpOperands(embed);
+      llvm::dbgs() << ")";
+      indentLevel--;
+    } else {
+      // TODO: implement
+//      for (auto arg : embed.region().front().getArguments()) {
+//        args.push_back(arg); // not really needed here!
+//      }
+//
+//      dumpRiseExpression_recurse(
+//          getDefiningOpOrNullptr(
+//              embed.region().front().getTerminator()->getOperand(0)),
+//          args, omitApplyNodes, inlineEmbed, printBinderTypes, true, indentLevel);
+//      insideEmbed = false;
+//      indent();
+//      dumpOperands(embed);
+//
+//      llvm::dbgs() << ")";
+//      indentLevel--;
     }
-    llvm::dbgs() << " => {";
-    indentLevel++;
-    indent();
-    dumpRiseExpression_recurse(getDefiningOpOrNullptr(embed.region().front().getTerminator()->getOperand(0)), args, omitApplyNodes, printBinderTypes, indentLevel);
-    indent();
-    llvm::dbgs() << "}, ";
-    dumpOperands(embed);
-    llvm::dbgs() << ")";
-    indentLevel--;
     return;
   }
   if (auto split = dyn_cast<SplitOp>(op)) {
-    llvm::dbgs() << "split" << split.n().getIntValue() << ")";
+    llvm::dbgs() << toggleHighlightIfNecessary(op) <<  "split(" << split.n().getIntValue() << ")" << toggleHighlightIfNecessary(op, true);
     return;
   }
   if (auto literal = dyn_cast<LiteralOp>(op)) {
-    llvm::dbgs() << "l(" << literal.literal() << ")";
+    llvm::dbgs() << toggleHighlightIfNecessary(op) << "l(" << literal.literal() << ")" << toggleHighlightIfNecessary(op, true);
     return;
   }
   // not first class printable op from RISE
   if (isa<RiseDialect>(op->getDialect())) {
-    llvm::dbgs() << op->getName().getStringRef().drop_front(5) << "";
+    llvm::dbgs() << toggleHighlightIfNecessary(op) << op->getName().getStringRef().drop_front(5) << toggleHighlightIfNecessary(op, true) << "";
 //    dumpOperands(op);
     return;
   }
@@ -388,9 +427,11 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
 
 }
 
-void RiseDialect::dumpRiseExpression(Operation *op, bool omitApplyNodes, bool printBinderTypes) {
+void RiseDialect::dumpRiseExpression(Operation *op, bool omitApplyNodes, Value highlightValue, std::tuple<float,float,float> highlightColor, bool inlineEmbed, bool printBinderTypes) {
   SmallVector<BlockArgument, 4> args;
-  dumpRiseExpression_recurse(op, args, omitApplyNodes, printBinderTypes);
+
+  dumpRiseExpression_recurse(op, args, omitApplyNodes, inlineEmbed, printBinderTypes, false, highlightValue, highlightColor, 0);
+  llvm::dbgs() << "\n\n";
 }
 
 DataType RiseDialect::getAsDataType(Type type) {

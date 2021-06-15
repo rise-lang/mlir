@@ -22,6 +22,7 @@ class StrategyRewritePattern : public RewritePattern {
                                 PatternRewriter &rewriter) const override;
   virtual RewriteResult impl(Operation *op, PatternRewriter &rewriter) const = 0;
 public:
+  virtual llvm::StringRef getName() const = 0;
   RewriteResult operator()(Operation *op, PatternRewriter &rewriter) const;
 protected:
   StrategyRewritePattern() : RewritePattern(1, MatchAnyOpTypeTag()) {}
@@ -34,6 +35,7 @@ auto flatMapFailure(RewriteResult rr, const F &f) -> RewriteResult;
 
 class IdRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   IdRewritePattern() {}
 };
@@ -41,6 +43,7 @@ auto id() -> IdRewritePattern;
 
 class FailRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   FailRewritePattern() {}
 };
@@ -51,6 +54,7 @@ class SeqRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &ss;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   SeqRewritePattern(const StrategyRewritePattern &fs, const StrategyRewritePattern &ss) : fs(fs), ss(ss) {}
 };
@@ -59,18 +63,21 @@ auto seq(const StrategyRewritePattern &fs, const StrategyRewritePattern &ss)
 
 class DebugRewritePattern : public StrategyRewritePattern {
   const std::string msg;
+  std::tuple<float,float,float> color;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
-  DebugRewritePattern(const std::string msg) : msg(msg) {}
+  DebugRewritePattern(const std::string msg, std::tuple<float,float,float> color) : msg(msg), color(color) {}
 };
-auto debug(const std::string &msg) -> DebugRewritePattern;
+auto debug(const std::string &msg, std::tuple<float,float,float> color = {0, 255, 0}) -> DebugRewritePattern;
 
 class LeftChoiceRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &fs;
   const StrategyRewritePattern &ss;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   LeftChoiceRewritePattern(const StrategyRewritePattern &fs, const StrategyRewritePattern &ss)
       : fs(fs), ss(ss) {}
@@ -81,6 +88,7 @@ class TryRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   TryRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
@@ -90,11 +98,22 @@ class RepeatRewritePattern : public StrategyRewritePattern {
   const StrategyRewritePattern &s;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   RepeatRewritePattern(const StrategyRewritePattern &s) : s(s) {}
 };
 auto repeat(const StrategyRewritePattern &s) -> RepeatRewritePattern;
 
+class RepeatNTimesRewritePattern : public StrategyRewritePattern {
+  const StrategyRewritePattern &s;
+  const size_t n;
+
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
+public:
+  RepeatNTimesRewritePattern(size_t n, const StrategyRewritePattern &s) : n(n), s(s) {}
+};
+auto repeatNTimes(const size_t n, const StrategyRewritePattern &s) -> RepeatNTimesRewritePattern;
 
 
 }

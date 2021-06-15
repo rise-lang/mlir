@@ -34,12 +34,11 @@
 #include "mlir/Dialect/Rise/variant.hpp"
 
 namespace mlir {
-
 namespace rise {
 std::unique_ptr<OperationPass<FuncOp>> createElevateRewritingPass();
+ApplyOp getLastApply(mlir::FuncOp funcOp);
 
 using OutputPathType = mpark::variant<int, Value>;
-
 
 } // namespace rise
 } // namespace mlir

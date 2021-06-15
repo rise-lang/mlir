@@ -21,6 +21,7 @@ class SplitJoinRewritePattern : public StrategyRewritePattern {
   int n;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   SplitJoinRewritePattern(const int n) : n(n) {};
 };
@@ -28,6 +29,7 @@ auto splitJoin(const int n) -> SplitJoinRewritePattern;
 
 class FuseReduceMapRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   FuseReduceMapRewritePattern() {};
 };
@@ -35,6 +37,7 @@ auto fuseReduceMap() -> FuseReduceMapRewritePattern;
 
 class BetaReductionRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   BetaReductionRewritePattern() {};
 };
@@ -42,6 +45,7 @@ auto betaReduction() -> BetaReductionRewritePattern;
 
 class AddIdAfterRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   AddIdAfterRewritePattern() {};
 };
@@ -49,6 +53,7 @@ auto addIdAfter() -> AddIdAfterRewritePattern;
 
 class CreateTransposePairRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   CreateTransposePairRewritePattern() {};
 };
@@ -56,22 +61,25 @@ auto createTransposePair() -> CreateTransposePairRewritePattern;
 
 class RemoveTransposePairRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   RemoveTransposePairRewritePattern() {};
 };
 auto removeTransposePair() -> RemoveTransposePairRewritePattern;
 
-class MapMapFBeforeTransposeRewritePattern : public StrategyRewritePattern {
+class MoveMapMapFBeforeTransposeRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
-  MapMapFBeforeTransposeRewritePattern() {};
+  MoveMapMapFBeforeTransposeRewritePattern() {};
 };
-auto mapMapFBeforeTranspose() -> MapMapFBeforeTransposeRewritePattern;
+auto moveMapMapFBeforeTranspose() -> MoveMapMapFBeforeTransposeRewritePattern;
 
 // fission of the last function to be applied inside a map
 // *(g >> .. >> f) -> *(g >> ..) >> *f
 class MapLastFissionRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
   MapLastFissionRewritePattern() {};
 };

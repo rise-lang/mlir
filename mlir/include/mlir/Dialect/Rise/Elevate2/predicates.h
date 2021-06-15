@@ -20,7 +20,7 @@ class ContainsRewritePattern : public StrategyRewritePattern {
   const Value &val;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   ContainsRewritePattern(const Value &val) : val(val) {};
 };
@@ -30,7 +30,7 @@ class UsesValueRewritePattern : public StrategyRewritePattern {
   const Value &val;
 
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   UsesValueRewritePattern(const Value &val) : val(val) {};
 };
@@ -38,7 +38,7 @@ auto usesValue(const Value &val) -> UsesValueRewritePattern;
 
 class EtaReducibleRewritePattern : public StrategyRewritePattern {
   RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  llvm::StringRef getName() const;
 public:
   EtaReducibleRewritePattern() {};
 };
@@ -46,10 +46,10 @@ auto etaReducible() -> EtaReducibleRewritePattern;
 
 template <typename T>
 class IsaRewritePattern : public StrategyRewritePattern {
-RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
-
+  RewriteResult impl(Operation *op, PatternRewriter &rewriter) const;
+  llvm::StringRef getName() const;
 public:
-IsaRewritePattern<T>() {};
+  IsaRewritePattern<T>() {};
 };
 template <typename T>
 auto _isa() -> IsaRewritePattern<T>;

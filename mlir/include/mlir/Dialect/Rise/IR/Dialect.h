@@ -55,8 +55,10 @@ public:
   /// Hook for custom printing of Attributes
   void printAttribute(Attribute, DialectAsmPrinter &) const override;
 
-  static void dumpRiseExpression(Operation *op, bool omitApplyNode = true,
-                                 bool printBinderTypes = true);
+  static void dumpRiseExpression(
+      Operation *op, bool omitApplyNode = true, Value highlightValue = nullptr,
+      std::tuple<float, float, float> highlightColor = {0, 255, 0},
+      bool inlineEmbed = false, bool printBinderTypes = true);
   static DataType getAsDataType(Type type);
   static DataType getFunTypeOutput(FunType funType);
   void initialize();

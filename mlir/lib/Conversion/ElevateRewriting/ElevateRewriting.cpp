@@ -40,64 +40,69 @@ RewriteResult matmulBaseline(Operation *op, ElevateRewriteDriver &rewriter) {
   return rr;
 }
 
-RewriteResult matmulBlocking(Operation *op, ElevateRewriteDriver &rewriter) {
+RewriteResult matmulTile(Operation *op, FuncOp func, ElevateRewriteDriver &rewriter) {
   // baseline
   RewriteResult rr = topdown(fuseReduceMap())(op, rewriter);
-  rr = flatMapSuccess(rr, normalize(topdown(betaReduction())), rewriter);
+  rr = flatMapSuccess(rr, normalize(betaReduction()), rewriter);
 
   // blocking
+  // tile(8,4)
+  rr = seq(fmap( splitJoin(4)), splitJoin(8))(getLastApply(func), rewriter);
+
+  // interchange
+  rr = flatMapSuccess(rr, normalize(mapLastFission()), rewriter);
+  rr = flatMapSuccess(rr, argument(argument(fmap(addIdAfter()))), rewriter);
+  rr = flatMapSuccess(rr, topdown(createTransposePair()), rewriter);
+  rr = flatMapSuccess(rr, topdown(moveMapMapFBeforeTranspose()), rewriter);
+
   rr = flatMapSuccess(rr, normalize(mapLastFission()), rewriter);
 
-  rr = flatMapSuccess(rr, seq(fmap( splitJoin(8)), splitJoin(4)), rewriter);
-  rr = flatMapSuccess(rr, normalize(mapLastFission()), rewriter);
-
-  // TODO: strategy incomplete
-//  rr = flatMapSuccess(rr,  argument(1, addIdAfter()), rewriter);
-//  rr = flatMapSuccess(rr,  topdown(createTransposePair()), rewriter);
-
-//  rr = flatMapSuccess(rr, topdown(mapMapFBeforeTranspose()), rewriter);
-
-  // complete strategy:
+  // TODO: compose complete strategy in one go
   return rr;
 }
 
-RewriteResult fission(RewriteResult rr, PatternRewriter &rewriter) {
-  rr = flatMapSuccess(rr, topdown(mapLastFission()), rewriter);
-  return rr;
+//===----------------------------------------------------------------------===//
+// Pass
+//===----------------------------------------------------------------------===//
+
+/// The pass:
+void ElevateRewritingPass::runOnFunction() {
+  FuncOp func = getOperation();
+  ElevateRewriteDriver rewriter(func.getContext());
+  auto lastApply = getLastApply(func);
+  if (!lastApply) return;
+  llvm::dbgs() << "initial expression:\n";
+  RiseDialect::dumpRiseExpression(lastApply);
+
+  auto rr =  elevate::id()(lastApply, rewriter);
+
+//  rr = matmulBaseline(lastApply, rewriter);
+  rr = matmulTile(lastApply, func, rewriter);
+
+
+  if (std::get_if<Success>(&rr)) {
+    llvm::dbgs() << "\nsuccess\n";
+  } else {
+    llvm::dbgs() << "\nfailure\n";
+  }
+
+  llvm::dbgs() << "\n////////////// finished elevate pass! //////////////\n\n";
+  func->dump();
+  RiseDialect::dumpRiseExpression(getLastApply(func));
+  llvm::dbgs() << "\n";
+  return;
 }
 
-//  auto rr_fissione = normalize(mapLastFission())(lastApply,rewriter);
-
-
-//  RiseDialect::dumpRiseExpression(outOp);
-//  funcOp.dump();
-//  lastApply = outOp.input().getDefiningOp();
-//  auto test = addIdAfter()(lastApply, rewriter);
-//  auto rr_addid = argument(1,  argument(1, body( argument(2,addIdAfter()))))(lastApply, rewriter);
-//  flatMapSuccess(rr_loop_blocked, argument(1,  seq(debug("adId"), argument(1, body( argument(2,addIdAfter()))))), rewriter);
-//  lastApply = outOp.input().getDefiningOp();
-//  auto rr_double_transpose = topdown(createTransposePair())(lastApply, rewriter);
-//  lastApply = outOp.input().getDefiningOp();
-//  RiseDialect::dumpRiseExpression(outOp);
-
-
-//  auto rr_betaRed = normalize(seq(debug("betared"), betaReduction()))(lastApply, rewriter);
-//  RiseDialect::dumpRiseExpression(outOp);
-//  lastApply = outOp.input().getDefiningOp();
-//
-//  funcOp.dump();
-//
-//  auto rr_moved_transpose = topdown(seq(debug("move"), mapMapFBeforeTranspose()))(lastApply, rewriter);
-//  lastApply = outOp.input().getDefiningOp();
-
-//  auto rr_fissioned2 = topdown(seq(debug("fission"), mapLastFission()))(lastApply,rewriter);
-
+std::unique_ptr<OperationPass<FuncOp>>
+mlir::rise::createElevateRewritingPass() {
+  return std::make_unique<ElevateRewritingPass>();
+}
 
 //===----------------------------------------------------------------------===//
 // Helpers
 //===----------------------------------------------------------------------===//
 
-ApplyOp getLastApply(FuncOp funcOp) {
+ApplyOp mlir::rise::getLastApply(FuncOp funcOp) {
   LoweringUnitOp loweringUnit;
   funcOp.getBody().walk([&](Operation *op) {
     if (LoweringUnitOp loweringUnitOp = dyn_cast<LoweringUnitOp>(op))
@@ -120,48 +125,6 @@ ApplyOp getLastApply(FuncOp funcOp) {
 
   return dyn_cast<ApplyOp>(lastApply);
 }
-
-//===----------------------------------------------------------------------===//
-// Pass
-//===----------------------------------------------------------------------===//
-
-/// The pass:
-void ElevateRewritingPass::runOnFunction() {
-  FuncOp func = getOperation();
-  ElevateRewriteDriver rewriter(func.getContext());
-  auto lastApply = getLastApply(func);
-  if (!lastApply) return;
-  llvm::dbgs() << "initial expression:\n";
-  RiseDialect::dumpRiseExpression(lastApply);
-
-  auto rr =  elevate::id()(lastApply, rewriter);
-
-  rr = matmulBaseline(lastApply, rewriter);
-//  rr = matmulBlocking(lastApply, rewriter);
-
-//  for (int i = 0; i < 5; i++) {
-//    rr = fission(rr, rewriter);
-//  }
-
-  if (std::get_if<Success>(&rr)) {
-    llvm::dbgs() << "\nsuccess\n";
-  } else {
-    llvm::dbgs() << "\nfailure\n";
-  }
-
-  llvm::dbgs() << "\n////////////// finished elevate pass! //////////////\n";
-  RiseDialect::dumpRiseExpression(getLastApply(func));
-  llvm::dbgs() << "\n";
-  func.dump();
-  return;
-}
-
-std::unique_ptr<OperationPass<FuncOp>>
-mlir::rise::createElevateRewritingPass() {
-  return std::make_unique<ElevateRewritingPass>();
-}
-
-
 
 
 

@@ -620,6 +620,13 @@ public:
   /// handlers that may be listening.
   InFlightDiagnostic emitRemark(const Twine &message = {});
 
+  /// Returns true if this operation has a valid order.
+  /// moved here
+  bool hasValidOrder() { return orderIndex != kInvalidOrderIdx; }
+
+  /// Update the order index of this operation of this operation if necessary,
+  /// potentially recomputing the order of the parent block.
+  void updateOrderIfNecessary();
 private:
   //===--------------------------------------------------------------------===//
   // Ordering
@@ -633,12 +640,7 @@ private:
   /// operation.
   static constexpr unsigned kOrderStride = 5;
 
-  /// Update the order index of this operation of this operation if necessary,
-  /// potentially recomputing the order of the parent block.
-  void updateOrderIfNecessary();
 
-  /// Returns true if this operation has a valid order.
-  bool hasValidOrder() { return orderIndex != kInvalidOrderIdx; }
 
 private:
   Operation(Location location, OperationName name, unsigned numResults,
