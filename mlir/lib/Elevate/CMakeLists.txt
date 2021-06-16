@@ -16,5 +16,5 @@ add_mlir_library(MLIRElevate
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Elevate2
 
   )
-add_llvm_tool(elevate
-        core.cpp)
+#add_llvm_tool(elevate
+#        core.cpp)

@@ -57,15 +57,15 @@ module {
     return
   }
   func @mm() {
-    %0 = alloc() : memref<4x4xf32>
-    %1 = alloc() : memref<4x4xf32>
+    %0 = memref.alloc() : memref<4x4xf32>
+    %1 = memref.alloc() : memref<4x4xf32>
     %cst = constant 5.000000e+00 : f32
     linalg.fill(%1, %cst) : memref<4x4xf32>, f32
-    %2 = alloc() : memref<4x4xf32>
+    %2 = memref.alloc() : memref<4x4xf32>
     %cst_0 = constant 5.000000e+00 : f32
     linalg.fill(%2, %cst_0) : memref<4x4xf32>, f32
     call @rise_fun(%0, %1, %2) : (memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>) -> ()
-    %3 = memref_cast %0 : memref<4x4xf32> to memref<*xf32>
+    %3 = memref.cast %0 : memref<4x4xf32> to memref<*xf32>
     call @print_memref_f32(%3) : (memref<*xf32>) -> ()
     return
   }
