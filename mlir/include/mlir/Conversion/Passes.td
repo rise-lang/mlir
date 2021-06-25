@@ -90,6 +90,17 @@ def ConvertAsyncToLLVM : Pass<"convert-async-to-llvm", "ModuleOp"> {
 }
 
 //===----------------------------------------------------------------------===//
+// RiseBuilderTest
+// ===----------------------------------------------------------------------===//
+
+def RiseBuilderTest : FunctionPass<"rise-builder-test"> {
+  let summary = "";
+  let constructor = "mlir::rise::createRiseBuilderTestPass()";
+  let dependentDialects =
+    ["AffineDialect", "scf::SCFDialect", "StandardOpsDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // ElevateRewriting
 // ===----------------------------------------------------------------------===//
 

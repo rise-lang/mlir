@@ -11,6 +11,13 @@
 
 include "mlir/Pass/PassBase.td"
 
+def RiseBuilderTest
+    : FunctionPass<"rise-builder-test"> {
+  let summary = "Test Rise MLIR builders";
+  let constructor = "mlir::rise::createRiseBuilderTestPass()";
+  let dependentDialects = ["mlir::rise::RiseDialect", "scf::SCFDialect", "AffineDialect"];
+}
+
 def RiseToImperative
     : FunctionPass<"convert-rise-to-imperative"> {
   let summary = "Lower all functional primitives of the rise dialect to imperative";

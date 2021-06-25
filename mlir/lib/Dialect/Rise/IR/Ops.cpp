@@ -136,6 +136,14 @@ void LoweringUnitOp::build(
   bodyBuilder(builder, result.location);
   builder.create<rise::ReturnOp>(result.location, ValueRange{});
 }
+void LoweringUnitOp::build(
+    OpBuilder &builder, OperationState &result) {
+  Region *embedRegion = result.addRegion();
+  Block *body = new Block();
+  embedRegion->push_back(body);
+
+  builder.create<rise::ReturnOp>(result.location, ValueRange{});
+}
 
 //===----------------------------------------------------------------------===//
 // InOp

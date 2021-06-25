@@ -289,15 +289,13 @@ void dumpRiseExpression_recurse(Operation *op, SmallVector<BlockArgument, 4> &ar
     }
   };
   auto toggleHighlightIfNecessary = [&](Operation *op, bool untoggle = false) -> std::string {
-    // TODO: add using of highlightColor
-//    assert(std::get<0>())
     // r,g,b in [0,255]
     int r = std::get<0>(highlightColor);
     int g = std::get<1>(highlightColor);
     int b = std::get<2>(highlightColor);
     if (untoggle) return "\x1b[0m";
     if (op->getNumResults() == 0) return "";
-    std::string colorString = "\x1b[38;2;";// << r << ";" << g << ";" << b << "m";
+    std::string colorString = "\x1b[38;2;";
     colorString.append(std::to_string(r)).append(";").append(std::to_string(g)).append(";").append(std::to_string(b)).append("m");
     if (op->getResult(0) == highlightValue) return colorString;
     return "";

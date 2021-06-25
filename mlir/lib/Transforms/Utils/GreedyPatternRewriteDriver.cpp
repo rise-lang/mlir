@@ -25,7 +25,7 @@ using namespace mlir;
 #define DEBUG_TYPE "pattern-matcher"
 
 /// The max number of iterations scanning for pattern match.
-static unsigned maxPatternMatchIterations = 10;
+static unsigned maxPatternMatchIterations = 1;
 
 //===----------------------------------------------------------------------===//
 // GreedyPatternRewriteDriver

@@ -21,12 +21,16 @@ void populateRiseToStdConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
 void populateRiseToImpConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
+void populateRiseBuilderTestPatterns(RewritePatternSet &patterns,
+                                     MLIRContext *ctx);
 void populateElevatePatterns(OwningRewritePatternList &patterns,
                                          MLIRContext *ctx);
 #define GEN_PASS_CLASSES
 #include "mlir/Dialect/Rise/Passes.h.inc"
 
 namespace rise {
+
+std::unique_ptr<OperationPass<FuncOp>> createRiseBuilderTestPass();
 
 std::unique_ptr<OperationPass<FuncOp>> createConvertRiseToImperativePass();
 std::unique_ptr<OperationPass<FuncOp>> createElevateRewritingPass();

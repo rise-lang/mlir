@@ -117,7 +117,7 @@ def LoweringUnitOp
                     "independently of other RISE operations.";
   let regions = (region SizedRegion<1> : $region);
   let skipDefaultBuilders = 1;
-  let builders = [OpBuilder<(ins "function_ref<void(OpBuilder& , Location)>":$bodyBuilder)>];
+  let builders = [OpBuilder<(ins "function_ref<void(OpBuilder& , Location)>":$bodyBuilder)>, OpBuilder<(ins )>];
   let parser = [{ return parse$cppClass(parser, result); }];
 }
 
