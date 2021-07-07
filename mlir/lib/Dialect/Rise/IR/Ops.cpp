@@ -17,7 +17,6 @@
 #include "mlir/Dialect/Rise/IR/Ops.h"
 #include <iostream>
 
-#include "mlir/Dialect/Rise/EDSC/Builders.h"
 #include "mlir/IR/Builders.h"
 
 #include "mlir/IR/PatternMatch.h"
@@ -37,9 +36,6 @@ using llvm::SmallVector;
 using llvm::StringRef;
 using llvm::Twine;
 
-using namespace mlir::edsc;
-using namespace mlir::edsc::type;
-
 namespace mlir {
 namespace rise {
 
@@ -49,7 +45,6 @@ namespace rise {
 LogicalResult parseEmbedOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   SmallVector<OpAsmParser::OperandType, 4> operands;
   SmallVector<Type, 4> argumentTypes;
@@ -333,7 +328,6 @@ LogicalResult parseLiteralOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n;
   DataTypeAttr s, t;
@@ -344,10 +338,10 @@ LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(s, "s", result.attributes)) ||
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
-
-  result.addTypes(funType(funType(s.getValue(), t.getValue()),
-                          funType(arrayType(n.getValue(), s.getValue()),
-                                  arrayType(n.getValue(), t.getValue()))));
+  
+  result.addTypes(FunType::get(opBuilder.getContext(),FunType::get(opBuilder.getContext(),s.getValue(), t.getValue()),
+                          FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), s.getValue()),
+                                  ArrayType::get(opBuilder.getContext(),n.getValue(), t.getValue()))));
 
   return success();
 }
@@ -356,7 +350,6 @@ LogicalResult parseMapSeqOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
   NatAttr n;
   DataTypeAttr s, t;
 
@@ -367,9 +360,9 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(funType(s.getValue(), t.getValue()),
-                          funType(arrayType(n.getValue(), s.getValue()),
-                                  arrayType(n.getValue(), t.getValue()))));
+  result.addTypes(FunType::get(opBuilder.getContext(),FunType::get(opBuilder.getContext(),s.getValue(), t.getValue()),
+                          FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), s.getValue()),
+                                  ArrayType::get(opBuilder.getContext(),n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -377,7 +370,6 @@ LogicalResult parseMapParOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseMapOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n;
   DataTypeAttr s, t;
@@ -387,9 +379,9 @@ LogicalResult parseMapOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(funType(s.getValue(), t.getValue()),
-                          funType(arrayType(n.getValue(), s.getValue()),
-                                  arrayType(n.getValue(), t.getValue()))));
+  result.addTypes(FunType::get(opBuilder.getContext(),FunType::get(opBuilder.getContext(),s.getValue(), t.getValue()),
+                          FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), s.getValue()),
+                                  ArrayType::get(opBuilder.getContext(),n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -401,7 +393,6 @@ LogicalResult parseMapOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n;
   DataTypeAttr s, t;
@@ -413,10 +404,10 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(
-      funType(s.getValue(), funType(t.getValue(), t.getValue())),
-      funType(t.getValue(),
-              funType(arrayType(n.getValue(), s.getValue()), t.getValue()))));
+  result.addTypes(FunType::get(opBuilder.getContext(),
+      FunType::get(opBuilder.getContext(),s.getValue(), FunType::get(opBuilder.getContext(),t.getValue(), t.getValue())),
+      FunType::get(opBuilder.getContext(),t.getValue(),
+              FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), s.getValue()), t.getValue()))));
 
   return success();
 }
@@ -429,7 +420,6 @@ LogicalResult parseReduceSeqOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseSplitOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
   NatAttr n, m;
 
   DataTypeAttr t;
@@ -440,10 +430,10 @@ LogicalResult parseSplitOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(
-      funType(arrayType(natType(n.getValue().getIntValue() *
+      FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),Nat::get(opBuilder.getContext(),n.getValue().getIntValue() *
                                 m.getValue().getIntValue()),
                         t.getValue()),
-              array2DType(m.getValue(), n.getValue(), t.getValue())));
+                   ArrayType::get(opBuilder.getContext(), m.getValue(), ArrayType::get(opBuilder.getContext(), n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -455,7 +445,6 @@ LogicalResult parseSplitOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseJoinOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n, m;
   DataTypeAttr t;
@@ -465,8 +454,8 @@ LogicalResult parseJoinOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(array2DType(n.getValue(), m.getValue(), t.getValue()),
-                          arrayType(natType(n.getValue().getIntValue() *
+  result.addTypes(FunType::get(opBuilder.getContext(), ArrayType::get(opBuilder.getContext(),n.getValue(), ArrayType::get(opBuilder.getContext(), m.getValue(), t.getValue())),
+                          ArrayType::get(opBuilder.getContext(),Nat::get(opBuilder.getContext(),n.getValue().getIntValue() *
                                             m.getValue().getIntValue()),
                                     t.getValue())));
   return success();
@@ -480,7 +469,6 @@ LogicalResult parseJoinOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n, m;
   DataTypeAttr t;
@@ -491,8 +479,8 @@ LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(
-      funType(array2DType(n.getValue(), m.getValue(), t.getValue()),
-              array2DType(m.getValue(), n.getValue(), t.getValue())));
+      FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), ArrayType::get(opBuilder.getContext(), m.getValue(), t.getValue())),
+                   ArrayType::get(opBuilder.getContext(), m.getValue(), ArrayType::get(opBuilder.getContext(), n.getValue(), t.getValue()))));
   return success();
 }
 
@@ -504,7 +492,6 @@ LogicalResult parseTransposeOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n, sz, sp;
   DataTypeAttr t;
@@ -515,12 +502,18 @@ LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(
-      arrayType(
-          natType(sp.getValue().getIntValue() * n.getValue().getIntValue() +
-                  sz.getValue().getIntValue() - sp.getValue().getIntValue()),
+  result.addTypes(FunType::get(
+      opBuilder.getContext(),
+      ArrayType::get(
+          opBuilder.getContext(),
+          Nat::get(opBuilder.getContext(),
+                   sp.getValue().getIntValue() * n.getValue().getIntValue() +
+                       sz.getValue().getIntValue() -
+                       sp.getValue().getIntValue()),
           t.getValue()),
-      array2DType(n.getValue(), sz.getValue(), t.getValue())));
+      ArrayType::get(opBuilder.getContext(), n.getValue(),
+                     ArrayType::get(opBuilder.getContext(), sz.getValue(),
+                                    t.getValue()))));
   return success();
 }
 
@@ -532,7 +525,6 @@ LogicalResult parseSlideOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n, l, r;
   DataTypeAttr t;
@@ -543,8 +535,8 @@ LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(arrayType(n.getValue(), t.getValue()),
-                          arrayType(natType(l.getValue().getIntValue() +
+  result.addTypes(FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(), n.getValue(), t.getValue()),
+                          ArrayType::get(opBuilder.getContext(),Nat::get(opBuilder.getContext(),l.getValue().getIntValue() +
                                             n.getValue().getIntValue() +
                                             r.getValue().getIntValue()),
                                     t.getValue())));
@@ -559,7 +551,6 @@ LogicalResult parsePadOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   NatAttr n;
   DataTypeAttr s, t;
@@ -570,10 +561,10 @@ LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     return failure();
 
-  result.addTypes(funType(
-      arrayType(n.getValue(), s.getValue()),
-      funType(arrayType(n.getValue(), t.getValue()),
-              arrayType(n.getValue(), tupleType(s.getValue(), t.getValue())))));
+  result.addTypes(FunType::get(opBuilder.getContext(),
+      ArrayType::get(opBuilder.getContext(),n.getValue(), s.getValue()),
+      FunType::get(opBuilder.getContext(),ArrayType::get(opBuilder.getContext(),n.getValue(), t.getValue()),
+              ArrayType::get(opBuilder.getContext(),n.getValue(), Tuple::get(opBuilder.getContext(),s.getValue(), t.getValue())))));
   return success();
 }
 
@@ -581,7 +572,6 @@ LogicalResult parseZipOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   DataTypeAttr s, t;
 
@@ -591,8 +581,8 @@ LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
     failure();
 
   result.addTypes(
-      funType(s.getValue(),
-              funType(t.getValue(), tupleType(s.getValue(), t.getValue()))));
+      FunType::get(opBuilder.getContext(),s.getValue(),
+              FunType::get(opBuilder.getContext(),t.getValue(), Tuple::get(opBuilder.getContext(), s.getValue(), t.getValue()))));
   return success();
 }
 
@@ -600,7 +590,6 @@ LogicalResult parseTupleOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   DataTypeAttr s, t;
 
@@ -608,8 +597,8 @@ LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
   if (failed(parser.parseAttribute(s, "s", result.attributes)) ||
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
-
-  result.addTypes(funType(tupleType(s.getValue(), t.getValue()), s.getValue()));
+  
+  result.addTypes(FunType::get(opBuilder.getContext(),Tuple::get(opBuilder.getContext(),s.getValue(), t.getValue()), s.getValue()));
   return success();
 }
 
@@ -617,7 +606,6 @@ LogicalResult parseFstOp(OpAsmParser &parser, OperationState &result) {
 LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
   OpBuilder opBuilder(parser.getBuilder().getContext());
   Location loc(result.location);
-  ScopedContext scope(opBuilder, loc);
 
   DataTypeAttr s, t;
 
@@ -626,7 +614,7 @@ LogicalResult parseSndOp(OpAsmParser &parser, OperationState &result) {
       failed(parser.parseAttribute(t, "t", result.attributes)))
     failure();
 
-  result.addTypes(funType(tupleType(s.getValue(), t.getValue()), t.getValue()));
+  result.addTypes(FunType::get(opBuilder.getContext(),Tuple::get(opBuilder.getContext(),s.getValue(), t.getValue()), t.getValue()));
   return success();
 }
 

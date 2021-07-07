@@ -8,16 +8,8 @@
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
-
-#include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
-#include "mlir/Dialect/Linalg/EDSC/Builders.h"
-#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
-#include "mlir/Dialect/SCF/EDSC/Intrinsics.h"
-#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/EDSC/Builders.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -27,11 +19,9 @@
 #include "mlir/Transforms/DialectConversion.h"
 
 #include <iostream>
-#include <mlir/EDSC/Builders.h>
 
 using namespace mlir;
 using namespace mlir::rise;
-using namespace mlir::edsc;
 
 namespace {
 struct ConvertRiseToImperativePass
@@ -502,14 +492,10 @@ void lowerAndStoreReduceSeq(NatAttr n, DataTypeAttr s, DataTypeAttr t,
                             Value reductionFun, Value initializer, Value array,
                             Value out, Location loc, PatternRewriter &rewriter,
                             StringRef loweringTarget) {
-  using namespace mlir::edsc::op;
-  using namespace mlir::edsc::intrinsics;
-  OpBuilder builder(rewriter.getContext());
-  ScopedContext scope(builder, loc);
 
   // Add Continuation for array.
   auto loweredArray = lower(array, rewriter.getInsertionPoint(), rewriter);
-  auto cst_zero = std_constant_index(0);
+  auto cst_zero = rewriter.create<ConstantIndexOp>(loc, 0);
   auto contInit = lower(initializer, rewriter.getInsertionPoint(), rewriter);
 
   // Introduce a temporary to accumulate into, or accumulate direcly in the

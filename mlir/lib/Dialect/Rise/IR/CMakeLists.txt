@@ -12,7 +12,6 @@ add_mlir_dialect_library(MLIRRise
   MLIRRisePassIncGen
 
   LINK_LIBS PUBLIC
-  MLIREDSC
   MLIRIR
   MLIRLoopLikeInterface
   MLIRSideEffectInterfaces

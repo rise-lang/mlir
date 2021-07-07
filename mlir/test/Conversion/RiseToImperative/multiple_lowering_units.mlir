@@ -42,7 +42,7 @@ func @multiple() {
 
     %inputArray = memref.alloc() : memref<6xf32>
     %cst = constant 5.0 : f32
-    linalg.fill(%inputArray, %cst) : memref<6xf32>, f32
+    linalg.fill(%cst, %inputArray) : f32, memref<6xf32>
 
     call @rise_fun(%outputArray, %inputArray) : (memref<6xf32>, memref<6xf32>) -> ()
 

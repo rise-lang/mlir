@@ -61,11 +61,11 @@ func @mm() {
 
     %A = memref.alloc() : memref<4x4xf32>
     %cst_0 = constant 5.000000e+00 : f32
-    linalg.fill(%A, %cst_0) : memref<4x4xf32>, f32
+    linalg.fill(%cst_0, %A) : f32, memref<4x4xf32>
 
     %B = memref.alloc() : memref<4x4xf32>
     %cst_1 = constant 5.000000e+00 : f32
-    linalg.fill(%B, %cst_1) : memref<4x4xf32>, f32
+    linalg.fill(%cst_1, %B) : f32, memref<4x4xf32>
 
     call @rise_fun(%outputArray, %A, %B) : (memref<4x4xf32>, memref<4x4xf32>, memref<4x4xf32>) -> ()
 

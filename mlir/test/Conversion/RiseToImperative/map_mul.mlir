@@ -25,7 +25,7 @@ func @array_times_5() {
 
     %inputArray = memref.alloc() : memref<4xf32>
     %cst = constant 5.0 : f32
-    linalg.fill(%inputArray, %cst) : memref<4xf32>, f32
+    linalg.fill(%cst, %inputArray) : f32, memref<4xf32>
 
     call @rise_fun(%outputArray, %inputArray) : (memref<4xf32>, memref<4xf32>) -> ()
 

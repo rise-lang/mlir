@@ -6,6 +6,7 @@
 #define MLIR_DIALECT_RISE_PASSES_H
 
 #include "mlir/Support/LLVM.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include <memory>
 
 namespace mlir {
@@ -13,6 +14,9 @@ class ModuleOp;
 template <typename T>
 class OperationPass;
 class AffineDialect;
+namespace scf {
+class SCFDialect;
+}
 
 void populateRiseToStdConversionPatterns(RewritePatternSet &patterns,
                                          MLIRContext *ctx);
