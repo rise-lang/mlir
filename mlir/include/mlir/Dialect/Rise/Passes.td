@@ -24,7 +24,7 @@ def RiseToImperative
   let constructor = "mlir::rise::createConvertRiseToImperativePass()";
   let dependentDialects = [
     "mlir::rise::RiseDialect", "scf::SCFDialect", "AffineDialect",
-    "StandardOpsDialect", "MemRefDialect"
+    "StandardOpsDialect", "memref::MemRefDialect"
   ];
 }
 
