@@ -6,6 +6,7 @@
 #define MLIR_DIALECT_RISE_PASSES_H
 
 #include "mlir/Support/LLVM.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include <memory>
 
 namespace mlir {

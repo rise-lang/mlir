@@ -34,6 +34,11 @@ using namespace mlir;
 using namespace mlir::rise;
 using namespace mlir::edsc;
 
+
+/// TODO: describe what this pass does
+/// This pass assumes all rise.in operations are the first operations in the
+/// current lowering unit
+
 namespace {
 struct ConvertRiseToImperativePass
     : public RiseToImperativeBase<ConvertRiseToImperativePass> {

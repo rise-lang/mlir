@@ -305,8 +305,10 @@ def ConvertRiseToImperative : FunctionPass<"convert-rise-to-imperative"> {
   let summary =
       "Lower all functional primitives of the rise dialect to imperative";
   let constructor = "mlir::createConvertRiseToImperativePass()";
-  let dependentDialects =
-      ["AffineDialect", "scf::SCFDialect", "StandardOpsDialect"];
+  let dependentDialects = [
+    "AffineDialect", "scf::SCFDialect", "StandardOpsDialect",
+    "memref::MemRefDialect"
+  ];
 }
 
 //===----------------------------------------------------------------------===//

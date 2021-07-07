@@ -141,8 +141,8 @@ void LoweringUnitOp::build(
   Region *embedRegion = result.addRegion();
   Block *body = new Block();
   embedRegion->push_back(body);
-
-  builder.create<rise::ReturnOp>(result.location, ValueRange{});
+//  builder.setInsertionPointToStart(body);
+//  builder.create<rise::ReturnOp>(result.location);
 }
 
 //===----------------------------------------------------------------------===//
