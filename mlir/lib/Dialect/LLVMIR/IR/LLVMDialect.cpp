@@ -31,8 +31,12 @@
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include <iostream>
+
 using namespace mlir;
 using namespace mlir::LLVM;
+
+#include "mlir/Dialect/LLVMIR/LLVMOpsDialect.cpp.inc"
 
 static constexpr const char kVolatileAttrName[] = "volatile_";
 static constexpr const char kNonTemporalAttrName[] = "nontemporal";
@@ -132,11 +136,15 @@ static ParseResult parseCmpOp(OpAsmParser &parser, OperationState &result) {
   if (!isCompatibleType(type))
     return parser.emitError(trailingTypeLoc,
                             "expected LLVM dialect-compatible type");
-  if (LLVM::isCompatibleVectorType(type))
-    resultType = LLVM::getFixedVectorType(
-        resultType, LLVM::getVectorNumElements(type).getFixedValue());
-  assert(!type.isa<LLVM::LLVMScalableVectorType>() &&
-         "unhandled scalable vector");
+  if (LLVM::isCompatibleVectorType(type)) {
+    if (type.isa<LLVM::LLVMScalableVectorType>()) {
+      resultType = LLVM::LLVMScalableVectorType::get(
+          resultType, LLVM::getVectorNumElements(type).getKnownMinValue());
+    } else {
+      resultType = LLVM::getFixedVectorType(
+          resultType, LLVM::getVectorNumElements(type).getFixedValue());
+    }
+  }
 
   result.addTypes({resultType});
   return success();
@@ -1044,6 +1052,16 @@ static ParseResult parseExtractValueOp(OpAsmParser &parser,
   return success();
 }
 
+OpFoldResult LLVM::ExtractValueOp::fold(ArrayRef<Attribute> operands) {
+  auto insertValueOp = container().getDefiningOp<InsertValueOp>();
+  while (insertValueOp) {
+    if (position() == insertValueOp.position())
+      return insertValueOp.value();
+    insertValueOp = insertValueOp.container().getDefiningOp<InsertValueOp>();
+  }
+  return {};
+}
+
 //===----------------------------------------------------------------------===//
 // Printing/parsing for LLVM::InsertElementOp.
 //===----------------------------------------------------------------------===//
@@ -1250,8 +1268,8 @@ static StringRef getUnnamedAddrAttrName() { return "unnamed_addr"; }
 
 void GlobalOp::build(OpBuilder &builder, OperationState &result, Type type,
                      bool isConstant, Linkage linkage, StringRef name,
-                     Attribute value, unsigned addrSpace,
-                     ArrayRef<NamedAttribute> attrs) {
+                     Attribute value, uint64_t alignment, unsigned addrSpace,
+                     bool dsoLocal, ArrayRef<NamedAttribute> attrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
                       builder.getStringAttr(name));
   result.addAttribute("type", TypeAttr::get(type));
@@ -1259,6 +1277,15 @@ void GlobalOp::build(OpBuilder &builder, OperationState &result, Type type,
     result.addAttribute("constant", builder.getUnitAttr());
   if (value)
     result.addAttribute("value", value);
+  if (dsoLocal)
+    result.addAttribute("dso_local", builder.getUnitAttr());
+
+  // Only add an alignment attribute if the "alignment" input
+  // is different from 0. The value must also be a power of two, but
+  // this is tested in GlobalOp::verify, not here.
+  if (alignment != 0)
+    result.addAttribute("alignment", builder.getI64IntegerAttr(alignment));
+
   result.addAttribute(getLinkageAttrName(),
                       builder.getI64IntegerAttr(static_cast<int64_t>(linkage)));
   if (addrSpace != 0)
@@ -1278,6 +1305,9 @@ static void printGlobalOp(OpAsmPrinter &p, GlobalOp op) {
   if (auto value = op.getValueOrNull())
     p.printAttribute(value);
   p << ')';
+  // Note that the alignment attribute is printed using the
+  // default syntax here, even though it is an inherent attribute
+  // (as defined in https://mlir.llvm.org/docs/LangRef/#attributes)
   p.printOptionalAttrDict(op->getAttrs(),
                           {SymbolTable::getSymbolAttrName(), "type", "constant",
                            "value", getLinkageAttrName(),
@@ -1493,10 +1523,12 @@ static int parseOptionalKeywordAlternative(OpAsmParser &parser,
 }
 
 namespace {
-template <typename Ty> struct EnumTraits {};
+template <typename Ty>
+struct EnumTraits {};
 
 #define REGISTER_ENUM_TYPE(Ty)                                                 \
-  template <> struct EnumTraits<Ty> {                                          \
+  template <>                                                                  \
+  struct EnumTraits<Ty> {                                                      \
     static StringRef stringify(Ty value) { return stringify##Ty(value); }      \
     static unsigned getMaxEnumVal() { return getMaxEnumValFor##Ty(); }         \
   }
@@ -1521,7 +1553,8 @@ static ParseResult parseOptionalLLVMKeyword(OpAsmParser &parser,
 }
 
 // operation ::= `llvm.mlir.global` linkage? `constant`? `@` identifier
-//               `(` attribute? `)` attribute-list? (`:` type)? region?
+//               `(` attribute? `)` align? attribute-list? (`:` type)? region?
+// align     ::= `align` `=` UINT64
 //
 // The type can be omitted for string attributes, in which case it will be
 // inferred from the value of the string as [strlen(value) x i8].
@@ -1648,6 +1681,13 @@ static LogicalResult verify(GlobalOp op) {
     }
   }
 
+  Optional<uint64_t> alignAttr = op.alignment();
+  if (alignAttr.hasValue()) {
+    uint64_t value = alignAttr.getValue();
+    if (!llvm::isPowerOf2_64(value))
+      return op->emitError() << "alignment attribute is not a power of 2";
+  }
+
   return success();
 }
 
@@ -1720,7 +1760,7 @@ Block *LLVMFuncOp::addEntryBlock() {
 
 void LLVMFuncOp::build(OpBuilder &builder, OperationState &result,
                        StringRef name, Type type, LLVM::Linkage linkage,
-                       ArrayRef<NamedAttribute> attrs,
+                       bool dsoLocal, ArrayRef<NamedAttribute> attrs,
                        ArrayRef<DictionaryAttr> argAttrs) {
   result.addRegion();
   result.addAttribute(SymbolTable::getSymbolAttrName(),
@@ -1729,24 +1769,24 @@ void LLVMFuncOp::build(OpBuilder &builder, OperationState &result,
   result.addAttribute(getLinkageAttrName(),
                       builder.getI64IntegerAttr(static_cast<int64_t>(linkage)));
   result.attributes.append(attrs.begin(), attrs.end());
+  if (dsoLocal)
+    result.addAttribute("dso_local", builder.getUnitAttr());
   if (argAttrs.empty())
     return;
 
-  unsigned numInputs = type.cast<LLVMFunctionType>().getNumParams();
-  assert(numInputs == argAttrs.size() &&
+  assert(type.cast<LLVMFunctionType>().getNumParams() == argAttrs.size() &&
          "expected as many argument attribute lists as arguments");
-  SmallString<8> argAttrName;
-  for (unsigned i = 0; i < numInputs; ++i)
-    if (DictionaryAttr argDict = argAttrs[i])
-      result.addAttribute(getArgAttrName(i, argAttrName), argDict);
+  function_like_impl::addArgAndResultAttrs(builder, result, argAttrs,
+                                           /*resultAttrs=*/llvm::None);
 }
 
 // Builds an LLVM function type from the given lists of input and output types.
 // Returns a null type if any of the types provided are non-LLVM types, or if
 // there is more than one output type.
-static Type buildLLVMFunctionType(OpAsmParser &parser, llvm::SMLoc loc,
-                                  ArrayRef<Type> inputs, ArrayRef<Type> outputs,
-                                  impl::VariadicFlag variadicFlag) {
+static Type
+buildLLVMFunctionType(OpAsmParser &parser, llvm::SMLoc loc,
+                      ArrayRef<Type> inputs, ArrayRef<Type> outputs,
+                      function_like_impl::VariadicFlag variadicFlag) {
   Builder &b = parser.getBuilder();
   if (outputs.size() > 1) {
     parser.emitError(loc, "failed to construct function type: expected zero or "
@@ -1803,22 +1843,23 @@ static ParseResult parseLLVMFuncOp(OpAsmParser &parser,
   auto signatureLocation = parser.getCurrentLocation();
   if (parser.parseSymbolName(nameAttr, SymbolTable::getSymbolAttrName(),
                              result.attributes) ||
-      impl::parseFunctionSignature(parser, /*allowVariadic=*/true, entryArgs,
-                                   argTypes, argAttrs, isVariadic, resultTypes,
-                                   resultAttrs))
+      function_like_impl::parseFunctionSignature(
+          parser, /*allowVariadic=*/true, entryArgs, argTypes, argAttrs,
+          isVariadic, resultTypes, resultAttrs))
     return failure();
 
   auto type =
       buildLLVMFunctionType(parser, signatureLocation, argTypes, resultTypes,
-                            impl::VariadicFlag(isVariadic));
+                            function_like_impl::VariadicFlag(isVariadic));
   if (!type)
     return failure();
-  result.addAttribute(impl::getTypeAttrName(), TypeAttr::get(type));
+  result.addAttribute(function_like_impl::getTypeAttrName(),
+                      TypeAttr::get(type));
 
   if (failed(parser.parseOptionalAttrDictWithKeyword(result.attributes)))
     return failure();
-  impl::addArgAndResultAttrs(parser.getBuilder(), result, argAttrs,
-                             resultAttrs);
+  function_like_impl::addArgAndResultAttrs(parser.getBuilder(), result,
+                                           argAttrs, resultAttrs);
 
   auto *body = result.addRegion();
   OptionalParseResult parseResult = parser.parseOptionalRegion(
@@ -1846,9 +1887,10 @@ static void printLLVMFuncOp(OpAsmPrinter &p, LLVMFuncOp op) {
   if (!returnType.isa<LLVMVoidType>())
     resTypes.push_back(returnType);
 
-  impl::printFunctionSignature(p, op, argTypes, op.isVarArg(), resTypes);
-  impl::printFunctionAttributes(p, op, argTypes.size(), resTypes.size(),
-                                {getLinkageAttrName()});
+  function_like_impl::printFunctionSignature(p, op, argTypes, op.isVarArg(),
+                                             resTypes);
+  function_like_impl::printFunctionAttributes(
+      p, op, argTypes.size(), resTypes.size(), {getLinkageAttrName()});
 
   // Print the body if this is not an external function.
   Region &body = op.body();
@@ -1940,7 +1982,30 @@ static LogicalResult verify(LLVM::ConstantOp op) {
     }
     return success();
   }
-  if (!op.value().isa<IntegerAttr, FloatAttr, ElementsAttr>())
+  if (auto structType = op.getType().dyn_cast<LLVMStructType>()) {
+    if (structType.getBody().size() != 2 ||
+        structType.getBody()[0] != structType.getBody()[1]) {
+      return op.emitError() << "expected struct type with two elements of the "
+                               "same type, the type of a complex constant";
+    }
+
+    auto arrayAttr = op.value().dyn_cast<ArrayAttr>();
+    if (!arrayAttr || arrayAttr.size() != 2 ||
+        arrayAttr[0].getType() != arrayAttr[1].getType()) {
+      return op.emitOpError() << "expected array attribute with two elements, "
+                                 "representing a complex constant";
+    }
+
+    Type elementType = structType.getBody()[0];
+    if (!elementType
+             .isa<IntegerType, Float16Type, Float32Type, Float64Type>()) {
+      return op.emitError()
+             << "expected struct element types to be floating point type or "
+                "integer type";
+    }
+    return success();
+  }
+  if (!op.value().isa<IntegerAttr, ArrayAttr, FloatAttr, ElementsAttr>())
     return op.emitOpError()
            << "only supports integer, float, string or elements attributes";
   return success();
@@ -2306,11 +2371,11 @@ LogicalResult LLVMDialect::verifyRegionArgAttribute(Operation *op,
                                                     unsigned regionIdx,
                                                     unsigned argIdx,
                                                     NamedAttribute argAttr) {
-  // Check that llvm.noalias is a boolean attribute.
+  // Check that llvm.noalias is a unit attribute.
   if (argAttr.first == LLVMDialect::getNoAliasAttrName() &&
-      !argAttr.second.isa<BoolAttr>())
+      !argAttr.second.isa<UnitAttr>())
     return op->emitError()
-           << "llvm.noalias argument attribute of non boolean type";
+           << "expected llvm.noalias argument attribute to be a unit attribute";
   // Check that llvm.align is an integer attribute.
   if (argAttr.first == LLVMDialect::getAlignAttrName() &&
       !argAttr.second.isa<IntegerAttr>())
@@ -2339,7 +2404,7 @@ Value mlir::LLVM::createGlobalString(Location loc, OpBuilder &builder,
   auto type = LLVM::LLVMArrayType::get(IntegerType::get(ctx, 8), value.size());
   auto global = moduleBuilder.create<LLVM::GlobalOp>(
       loc, type, /*isConstant=*/true, linkage, name,
-      builder.getStringAttr(value));
+      builder.getStringAttr(value), /*alignment=*/0);
 
   // Get the pointer to the first character in the global string.
   Value globalPtr = builder.create<LLVM::AddressOfOp>(loc, global);

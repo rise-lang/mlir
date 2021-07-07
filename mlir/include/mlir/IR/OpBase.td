@@ -211,9 +211,13 @@ def IsTensorTypePred : CPred<"$_self.isa<::mlir::TensorType>()">;
 // Whether a type is a MemRefType.
 def IsMemRefTypePred : CPred<"$_self.isa<::mlir::MemRefType>()">;
 
-// Whether a type is an  IsUnrankedMemRefType
+// Whether a type is an UnrankedMemRefType
 def IsUnrankedMemRefTypePred
         : CPred<"$_self.isa<::mlir::UnrankedMemRefType>()">;
+
+// Whether a type is a BaseMemRefType
+def IsBaseMemRefTypePred
+        : CPred<"$_self.isa<::mlir::BaseMemRefType>()">;
 
 // Whether a type is a ShapedType.
 def IsShapedTypePred : CPred<"$_self.isa<::mlir::ShapedType>()">;
@@ -263,6 +267,10 @@ class Dialect {
   // If this dialect overrides the hook for materializing constants.
   bit hasConstantMaterializer = 0;
 
+  /// If the dialect definition provides a non-default destructor.
+  /// If false, a default destructor implementation will be generated.
+  bit hasNonDefaultDestructor = 0;
+
   // If this dialect overrides the hook for verifying operation attributes.
   bit hasOperationAttrVerify = 0;
 
@@ -275,6 +283,9 @@ class Dialect {
 
   // If this dialect overrides the hook for op interface fallback.
   bit hasOperationInterfaceFallback = 0;
+
+  // If this dialect overrides the hook for canonicalization patterns.
+  bit hasCanonicalizer = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -648,10 +659,13 @@ class 3DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [3]>;
 class 4DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [4]>;
 
 // Unranked Memref type
-def AnyUnrankedMemRef :
-    ShapedContainerType<[AnyType],
+class UnrankedMemRefOf<list<Type> allowedTypes> :
+    ShapedContainerType<allowedTypes,
                         IsUnrankedMemRefTypePred, "unranked.memref",
                         "::mlir::UnrankedMemRefType">;
+
+def AnyUnrankedMemRef : UnrankedMemRefOf<[AnyType]>;
+
 // Memref type.
 
 // Memrefs are blocks of data with fixed type and rank.
@@ -660,6 +674,9 @@ class MemRefOf<list<Type> allowedTypes> :
                         "::mlir::MemRefType">;
 
 def AnyMemRef : MemRefOf<[AnyType]>;
+
+class RankedOrUnrankedMemRefOf<list<Type> allowedTypes>:
+    AnyTypeOf<[UnrankedMemRefOf<allowedTypes>, MemRefOf<allowedTypes>]>;
 
 def AnyRankedOrUnrankedMemRef: AnyTypeOf<[AnyUnrankedMemRef, AnyMemRef]>;
 
@@ -2123,6 +2140,9 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
   // The mnemonic of the op.
   string opName = mnemonic;
 
+  // The C++ namespace to use for this op.
+  string cppNamespace = dialect.cppNamespace;
+
   // One-line human-readable description of what the op does.
   string summary = "";
 
@@ -2530,9 +2550,9 @@ class Pat<dag pattern, dag result, list<dag> preds = [],
 // the wrapped expression can take special placeholders listed below:
 //
 // * `$_builder` will be replaced by the current `mlir::PatternRewriter`.
-// * `$_self` will be replaced with the entity this transformer is attached to.
-//   E.g., with the definition `def transform : NativeCodeCall<"$_self...">`,
-//   `$_self` in `transform:$attr` will be replaced by the value for `$attr`.
+// * `$_self` will be replaced by the defining operation in a source pattern.
+//   E.g., `NativeCodeCall<"Foo($_self, &$0)> I32Attr:$attr)>`, `$_self` will be
+//   replaced with the defining operation of the first operand of OneArgOp.
 //
 // If used as a DAG node, i.e., `(NativeCodeCall<"..."> <arg0>, ..., <argN>)`,
 // then positional placeholders are also supported; placeholder `$N` in the
@@ -2542,7 +2562,7 @@ class NativeCodeCall<string expr> {
   string expression = expr;
 }
 
-def ConstantLikeMatcher : NativeCodeCall<"success(matchPattern($0->getResult(0), m_Constant(&$1)))">;
+def ConstantLikeMatcher : NativeCodeCall<"success(matchPattern($_self->getResult(0), m_Constant(&$0)))">;
 
 //===----------------------------------------------------------------------===//
 // Rewrite directives

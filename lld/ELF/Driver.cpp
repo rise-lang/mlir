@@ -856,12 +856,23 @@ static void readCallGraph(MemoryBufferRef mb) {
 }
 
 template <class ELFT> static void readCallGraphsFromObjectFiles() {
+  auto getIndex = [&](ObjFile<ELFT> *obj, uint32_t index) {
+    const Elf_Rel_Impl<ELFT, false> &rel = obj->cgProfileRel[index];
+    return rel.getSymbol(config->isMips64EL);
+  };
+
   for (auto file : objectFiles) {
     auto *obj = cast<ObjFile<ELFT>>(file);
-
-    for (const Elf_CGProfile_Impl<ELFT> &cgpe : obj->cgProfile) {
-      auto *fromSym = dyn_cast<Defined>(&obj->getSymbol(cgpe.cgp_from));
-      auto *toSym = dyn_cast<Defined>(&obj->getSymbol(cgpe.cgp_to));
+    if (obj->cgProfileRel.empty())
+      continue;
+    if (obj->cgProfileRel.size() != obj->cgProfile.size() * 2)
+      fatal("number of relocations doesn't match Weights");
+    for (uint32_t i = 0, size = obj->cgProfile.size(); i < size; ++i) {
+      const Elf_CGProfile_Impl<ELFT> &cgpe = obj->cgProfile[i];
+      uint32_t fromIndex = getIndex(obj, i * 2);
+      uint32_t toIndex = getIndex(obj, i * 2 + 1);
+      auto *fromSym = dyn_cast<Defined>(&obj->getSymbol(fromIndex));
+      auto *toSym = dyn_cast<Defined>(&obj->getSymbol(toIndex));
       if (!fromSym || !toSym)
         continue;
 
@@ -953,13 +964,18 @@ static void readConfigs(opt::InputArgList &args) {
                    OPT_no_allow_multiple_definition, false) ||
       hasZOption(args, "muldefs");
   config->auxiliaryList = args::getStrings(args, OPT_auxiliary);
-  config->bsymbolic = args.hasArg(OPT_Bsymbolic);
-  config->bsymbolicFunctions = args.hasArg(OPT_Bsymbolic_functions);
+  if (opt::Arg *arg = args.getLastArg(OPT_Bno_symbolic, OPT_Bsymbolic_functions,
+                                      OPT_Bsymbolic)) {
+    if (arg->getOption().matches(OPT_Bsymbolic_functions))
+      config->bsymbolicFunctions = true;
+    else if (arg->getOption().matches(OPT_Bsymbolic))
+      config->bsymbolic = true;
+  }
   config->checkSections =
       args.hasFlag(OPT_check_sections, OPT_no_check_sections, true);
   config->chroot = args.getLastArgValue(OPT_chroot);
   config->compressDebugSections = getCompressDebugSections(args);
-  config->cref = args.hasFlag(OPT_cref, OPT_no_cref, false);
+  config->cref = args.hasArg(OPT_cref);
   config->defineCommon = args.hasFlag(OPT_define_common, OPT_no_define_common,
                                       !args.hasArg(OPT_relocatable));
   config->optimizeBBJumps =
@@ -1316,8 +1332,7 @@ static void readConfigs(opt::InputArgList &args) {
   // When producing an executable, --dynamic-list specifies non-local defined
   // symbols which are required to be exported. When producing a shared object,
   // symbols not specified by --dynamic-list are non-preemptible.
-  config->symbolic =
-      args.hasArg(OPT_Bsymbolic) || args.hasArg(OPT_dynamic_list);
+  config->symbolic = config->bsymbolic || args.hasArg(OPT_dynamic_list);
   for (auto *arg : args.filtered(OPT_dynamic_list))
     if (Optional<MemoryBufferRef> buffer = readFile(arg->getValue()))
       readDynamicList(*buffer);

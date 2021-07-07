@@ -236,7 +236,6 @@ class aff {
 public:
   inline /* implicit */ aff();
   inline /* implicit */ aff(const aff &obj);
-  inline /* implicit */ aff(std::nullptr_t);
   inline explicit aff(ctx ctx, const std::string &str);
   inline explicit aff(local_space ls, val val);
   inline explicit aff(local_space ls);
@@ -247,9 +246,7 @@ public:
   inline __isl_keep isl_aff *get() const;
   inline __isl_give isl_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline aff add(aff aff2) const;
@@ -343,7 +340,6 @@ class aff_list {
 public:
   inline /* implicit */ aff_list();
   inline /* implicit */ aff_list(const aff_list &obj);
-  inline /* implicit */ aff_list(std::nullptr_t);
   inline aff_list &operator=(aff_list obj);
   inline ~aff_list();
   inline __isl_give isl_aff_list *copy() const &;
@@ -351,9 +347,7 @@ public:
   inline __isl_keep isl_aff_list *get() const;
   inline __isl_give isl_aff_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline aff_list add(aff el) const;
@@ -388,7 +382,6 @@ class ast_build {
 public:
   inline /* implicit */ ast_build();
   inline /* implicit */ ast_build(const ast_build &obj);
-  inline /* implicit */ ast_build(std::nullptr_t);
   inline explicit ast_build(ctx ctx);
   inline ast_build &operator=(ast_build obj);
   inline ~ast_build();
@@ -397,7 +390,6 @@ public:
   inline __isl_keep isl_ast_build *get() const;
   inline __isl_give isl_ast_build *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
 
   inline ast_expr access_from(multi_pw_aff mpa) const;
@@ -430,7 +422,6 @@ class ast_expr {
 public:
   inline /* implicit */ ast_expr();
   inline /* implicit */ ast_expr(const ast_expr &obj);
-  inline /* implicit */ ast_expr(std::nullptr_t);
   inline ast_expr &operator=(ast_expr obj);
   inline ~ast_expr();
   inline __isl_give isl_ast_expr *copy() const &;
@@ -438,9 +429,7 @@ public:
   inline __isl_keep isl_ast_expr *get() const;
   inline __isl_give isl_ast_expr *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline ast_expr access(ast_expr_list indices) const;
@@ -489,7 +478,6 @@ class ast_expr_list {
 public:
   inline /* implicit */ ast_expr_list();
   inline /* implicit */ ast_expr_list(const ast_expr_list &obj);
-  inline /* implicit */ ast_expr_list(std::nullptr_t);
   inline ast_expr_list &operator=(ast_expr_list obj);
   inline ~ast_expr_list();
   inline __isl_give isl_ast_expr_list *copy() const &;
@@ -497,9 +485,7 @@ public:
   inline __isl_keep isl_ast_expr_list *get() const;
   inline __isl_give isl_ast_expr_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline ast_expr_list add(ast_expr el) const;
@@ -534,7 +520,6 @@ class ast_node {
 public:
   inline /* implicit */ ast_node();
   inline /* implicit */ ast_node(const ast_node &obj);
-  inline /* implicit */ ast_node(std::nullptr_t);
   inline ast_node &operator=(ast_node obj);
   inline ~ast_node();
   inline __isl_give isl_ast_node *copy() const &;
@@ -542,9 +527,7 @@ public:
   inline __isl_keep isl_ast_node *get() const;
   inline __isl_give isl_ast_node *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   static inline ast_node alloc_user(ast_expr expr);
@@ -585,7 +568,6 @@ class ast_node_list {
 public:
   inline /* implicit */ ast_node_list();
   inline /* implicit */ ast_node_list(const ast_node_list &obj);
-  inline /* implicit */ ast_node_list(std::nullptr_t);
   inline ast_node_list &operator=(ast_node_list obj);
   inline ~ast_node_list();
   inline __isl_give isl_ast_node_list *copy() const &;
@@ -593,9 +575,7 @@ public:
   inline __isl_keep isl_ast_node_list *get() const;
   inline __isl_give isl_ast_node_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline ast_node_list add(ast_node el) const;
@@ -630,7 +610,6 @@ class basic_map {
 public:
   inline /* implicit */ basic_map();
   inline /* implicit */ basic_map(const basic_map &obj);
-  inline /* implicit */ basic_map(std::nullptr_t);
   inline explicit basic_map(ctx ctx, const std::string &str);
   inline basic_map &operator=(basic_map obj);
   inline ~basic_map();
@@ -639,9 +618,7 @@ public:
   inline __isl_keep isl_basic_map *get() const;
   inline __isl_give isl_basic_map *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline basic_map add_constraint(constraint constraint) const;
@@ -765,7 +742,6 @@ class basic_map_list {
 public:
   inline /* implicit */ basic_map_list();
   inline /* implicit */ basic_map_list(const basic_map_list &obj);
-  inline /* implicit */ basic_map_list(std::nullptr_t);
   inline basic_map_list &operator=(basic_map_list obj);
   inline ~basic_map_list();
   inline __isl_give isl_basic_map_list *copy() const &;
@@ -773,9 +749,7 @@ public:
   inline __isl_keep isl_basic_map_list *get() const;
   inline __isl_give isl_basic_map_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline basic_map_list add(basic_map el) const;
@@ -810,7 +784,6 @@ class basic_set {
 public:
   inline /* implicit */ basic_set();
   inline /* implicit */ basic_set(const basic_set &obj);
-  inline /* implicit */ basic_set(std::nullptr_t);
   inline /* implicit */ basic_set(point pnt);
   inline explicit basic_set(ctx ctx, const std::string &str);
   inline basic_set &operator=(basic_set obj);
@@ -820,9 +793,7 @@ public:
   inline __isl_keep isl_basic_set *get() const;
   inline __isl_give isl_basic_set *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline basic_set affine_hull() const;
@@ -917,7 +888,6 @@ class basic_set_list {
 public:
   inline /* implicit */ basic_set_list();
   inline /* implicit */ basic_set_list(const basic_set_list &obj);
-  inline /* implicit */ basic_set_list(std::nullptr_t);
   inline basic_set_list &operator=(basic_set_list obj);
   inline ~basic_set_list();
   inline __isl_give isl_basic_set_list *copy() const &;
@@ -925,9 +895,7 @@ public:
   inline __isl_keep isl_basic_set_list *get() const;
   inline __isl_give isl_basic_set_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline basic_set_list add(basic_set el) const;
@@ -963,7 +931,6 @@ class constraint {
 public:
   inline /* implicit */ constraint();
   inline /* implicit */ constraint(const constraint &obj);
-  inline /* implicit */ constraint(std::nullptr_t);
   inline constraint &operator=(constraint obj);
   inline ~constraint();
   inline __isl_give isl_constraint *copy() const &;
@@ -971,7 +938,6 @@ public:
   inline __isl_keep isl_constraint *get() const;
   inline __isl_give isl_constraint *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -1012,7 +978,6 @@ class constraint_list {
 public:
   inline /* implicit */ constraint_list();
   inline /* implicit */ constraint_list(const constraint_list &obj);
-  inline /* implicit */ constraint_list(std::nullptr_t);
   inline constraint_list &operator=(constraint_list obj);
   inline ~constraint_list();
   inline __isl_give isl_constraint_list *copy() const &;
@@ -1020,9 +985,7 @@ public:
   inline __isl_keep isl_constraint_list *get() const;
   inline __isl_give isl_constraint_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline constraint_list add(constraint el) const;
@@ -1057,7 +1020,6 @@ class fixed_box {
 public:
   inline /* implicit */ fixed_box();
   inline /* implicit */ fixed_box(const fixed_box &obj);
-  inline /* implicit */ fixed_box(std::nullptr_t);
   inline fixed_box &operator=(fixed_box obj);
   inline ~fixed_box();
   inline __isl_give isl_fixed_box *copy() const &;
@@ -1065,9 +1027,7 @@ public:
   inline __isl_keep isl_fixed_box *get() const;
   inline __isl_give isl_fixed_box *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_aff get_offset() const;
@@ -1091,7 +1051,6 @@ class id {
 public:
   inline /* implicit */ id();
   inline /* implicit */ id(const id &obj);
-  inline /* implicit */ id(std::nullptr_t);
   inline explicit id(ctx ctx, const std::string &str);
   inline id &operator=(id obj);
   inline ~id();
@@ -1100,9 +1059,7 @@ public:
   inline __isl_keep isl_id *get() const;
   inline __isl_give isl_id *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   static inline id alloc(ctx ctx, const std::string &name, void * user);
@@ -1126,7 +1083,6 @@ class id_list {
 public:
   inline /* implicit */ id_list();
   inline /* implicit */ id_list(const id_list &obj);
-  inline /* implicit */ id_list(std::nullptr_t);
   inline id_list &operator=(id_list obj);
   inline ~id_list();
   inline __isl_give isl_id_list *copy() const &;
@@ -1134,9 +1090,7 @@ public:
   inline __isl_keep isl_id_list *get() const;
   inline __isl_give isl_id_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline id_list add(id el) const;
@@ -1171,7 +1125,6 @@ class id_to_ast_expr {
 public:
   inline /* implicit */ id_to_ast_expr();
   inline /* implicit */ id_to_ast_expr(const id_to_ast_expr &obj);
-  inline /* implicit */ id_to_ast_expr(std::nullptr_t);
   inline id_to_ast_expr &operator=(id_to_ast_expr obj);
   inline ~id_to_ast_expr();
   inline __isl_give isl_id_to_ast_expr *copy() const &;
@@ -1179,7 +1132,6 @@ public:
   inline __isl_keep isl_id_to_ast_expr *get() const;
   inline __isl_give isl_id_to_ast_expr *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -1206,7 +1158,6 @@ class local_space {
 public:
   inline /* implicit */ local_space();
   inline /* implicit */ local_space(const local_space &obj);
-  inline /* implicit */ local_space(std::nullptr_t);
   inline explicit local_space(space space);
   inline local_space &operator=(local_space obj);
   inline ~local_space();
@@ -1215,7 +1166,6 @@ public:
   inline __isl_keep isl_local_space *get() const;
   inline __isl_give isl_local_space *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -1260,7 +1210,6 @@ class map {
 public:
   inline /* implicit */ map();
   inline /* implicit */ map(const map &obj);
-  inline /* implicit */ map(std::nullptr_t);
   inline /* implicit */ map(basic_map bmap);
   inline explicit map(ctx ctx, const std::string &str);
   inline map &operator=(map obj);
@@ -1270,9 +1219,7 @@ public:
   inline __isl_keep isl_map *get() const;
   inline __isl_give isl_map *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline map add_constraint(constraint constraint) const;
@@ -1303,6 +1250,7 @@ public:
   inline boolean domain_is_wrapping() const;
   inline map domain_map() const;
   inline map domain_product(map map2) const;
+  inline isl_size domain_tuple_dim() const;
   inline map drop_constraints_involving_dims(isl::dim type, unsigned int first, unsigned int n) const;
   inline map drop_constraints_not_involving_dims(isl::dim type, unsigned int first, unsigned int n) const;
   inline map drop_unused_params() const;
@@ -1433,6 +1381,7 @@ public:
   inline map range_map() const;
   inline map range_product(map map2) const;
   inline map range_reverse() const;
+  inline isl_size range_tuple_dim() const;
   inline map remove_dims(isl::dim type, unsigned int first, unsigned int n) const;
   inline map remove_divs() const;
   inline map remove_divs_involving_dims(isl::dim type, unsigned int first, unsigned int n) const;
@@ -1477,7 +1426,6 @@ class map_list {
 public:
   inline /* implicit */ map_list();
   inline /* implicit */ map_list(const map_list &obj);
-  inline /* implicit */ map_list(std::nullptr_t);
   inline map_list &operator=(map_list obj);
   inline ~map_list();
   inline __isl_give isl_map_list *copy() const &;
@@ -1485,9 +1433,7 @@ public:
   inline __isl_keep isl_map_list *get() const;
   inline __isl_give isl_map_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline map_list add(map el) const;
@@ -1522,7 +1468,6 @@ class mat {
 public:
   inline /* implicit */ mat();
   inline /* implicit */ mat(const mat &obj);
-  inline /* implicit */ mat(std::nullptr_t);
   inline mat &operator=(mat obj);
   inline ~mat();
   inline __isl_give isl_mat *copy() const &;
@@ -1530,7 +1475,6 @@ public:
   inline __isl_keep isl_mat *get() const;
   inline __isl_give isl_mat *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -1591,7 +1535,6 @@ class multi_aff {
 public:
   inline /* implicit */ multi_aff();
   inline /* implicit */ multi_aff(const multi_aff &obj);
-  inline /* implicit */ multi_aff(std::nullptr_t);
   inline /* implicit */ multi_aff(aff aff);
   inline explicit multi_aff(space space, aff_list list);
   inline explicit multi_aff(ctx ctx, const std::string &str);
@@ -1602,9 +1545,7 @@ public:
   inline __isl_keep isl_multi_aff *get() const;
   inline __isl_give isl_multi_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_aff add(multi_aff multi2) const;
@@ -1699,7 +1640,6 @@ class multi_id {
 public:
   inline /* implicit */ multi_id();
   inline /* implicit */ multi_id(const multi_id &obj);
-  inline /* implicit */ multi_id(std::nullptr_t);
   inline explicit multi_id(space space, id_list list);
   inline explicit multi_id(ctx ctx, const std::string &str);
   inline multi_id &operator=(multi_id obj);
@@ -1709,9 +1649,7 @@ public:
   inline __isl_keep isl_multi_id *get() const;
   inline __isl_give isl_multi_id *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_id align_params(space model) const;
@@ -1751,7 +1689,6 @@ class multi_pw_aff {
 public:
   inline /* implicit */ multi_pw_aff();
   inline /* implicit */ multi_pw_aff(const multi_pw_aff &obj);
-  inline /* implicit */ multi_pw_aff(std::nullptr_t);
   inline /* implicit */ multi_pw_aff(aff aff);
   inline /* implicit */ multi_pw_aff(multi_aff ma);
   inline /* implicit */ multi_pw_aff(pw_aff pa);
@@ -1765,9 +1702,7 @@ public:
   inline __isl_keep isl_multi_pw_aff *get() const;
   inline __isl_give isl_multi_pw_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_pw_aff add(multi_pw_aff multi2) const;
@@ -1870,7 +1805,6 @@ class multi_union_pw_aff {
 public:
   inline /* implicit */ multi_union_pw_aff();
   inline /* implicit */ multi_union_pw_aff(const multi_union_pw_aff &obj);
-  inline /* implicit */ multi_union_pw_aff(std::nullptr_t);
   inline /* implicit */ multi_union_pw_aff(multi_pw_aff mpa);
   inline /* implicit */ multi_union_pw_aff(union_pw_aff upa);
   inline explicit multi_union_pw_aff(space space, union_pw_aff_list list);
@@ -1883,9 +1817,7 @@ public:
   inline __isl_keep isl_multi_union_pw_aff *get() const;
   inline __isl_give isl_multi_union_pw_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_union_pw_aff add(multi_union_pw_aff multi2) const;
@@ -1970,7 +1902,6 @@ class multi_val {
 public:
   inline /* implicit */ multi_val();
   inline /* implicit */ multi_val(const multi_val &obj);
-  inline /* implicit */ multi_val(std::nullptr_t);
   inline explicit multi_val(space space, val_list list);
   inline explicit multi_val(ctx ctx, const std::string &str);
   inline multi_val &operator=(multi_val obj);
@@ -1980,9 +1911,7 @@ public:
   inline __isl_keep isl_multi_val *get() const;
   inline __isl_give isl_multi_val *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline multi_val add(multi_val multi2) const;
@@ -2055,7 +1984,6 @@ class point {
 public:
   inline /* implicit */ point();
   inline /* implicit */ point(const point &obj);
-  inline /* implicit */ point(std::nullptr_t);
   inline explicit point(space dim);
   inline point &operator=(point obj);
   inline ~point();
@@ -2064,9 +1992,7 @@ public:
   inline __isl_keep isl_point *get() const;
   inline __isl_give isl_point *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline point add_ui(isl::dim type, int pos, unsigned int val) const;
@@ -2092,7 +2018,6 @@ class pw_aff {
 public:
   inline /* implicit */ pw_aff();
   inline /* implicit */ pw_aff(const pw_aff &obj);
-  inline /* implicit */ pw_aff(std::nullptr_t);
   inline /* implicit */ pw_aff(aff aff);
   inline explicit pw_aff(ctx ctx, const std::string &str);
   inline explicit pw_aff(set domain, val v);
@@ -2104,9 +2029,7 @@ public:
   inline __isl_keep isl_pw_aff *get() const;
   inline __isl_give isl_pw_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_aff add(pw_aff pwaff2) const;
@@ -2218,7 +2141,6 @@ class pw_aff_list {
 public:
   inline /* implicit */ pw_aff_list();
   inline /* implicit */ pw_aff_list(const pw_aff_list &obj);
-  inline /* implicit */ pw_aff_list(std::nullptr_t);
   inline pw_aff_list &operator=(pw_aff_list obj);
   inline ~pw_aff_list();
   inline __isl_give isl_pw_aff_list *copy() const &;
@@ -2226,9 +2148,7 @@ public:
   inline __isl_keep isl_pw_aff_list *get() const;
   inline __isl_give isl_pw_aff_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_aff_list add(pw_aff el) const;
@@ -2271,7 +2191,6 @@ class pw_multi_aff {
 public:
   inline /* implicit */ pw_multi_aff();
   inline /* implicit */ pw_multi_aff(const pw_multi_aff &obj);
-  inline /* implicit */ pw_multi_aff(std::nullptr_t);
   inline /* implicit */ pw_multi_aff(multi_aff ma);
   inline /* implicit */ pw_multi_aff(pw_aff pa);
   inline explicit pw_multi_aff(ctx ctx, const std::string &str);
@@ -2282,9 +2201,7 @@ public:
   inline __isl_keep isl_pw_multi_aff *get() const;
   inline __isl_give isl_pw_multi_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_multi_aff add(pw_multi_aff pma2) const;
@@ -2381,7 +2298,6 @@ class pw_multi_aff_list {
 public:
   inline /* implicit */ pw_multi_aff_list();
   inline /* implicit */ pw_multi_aff_list(const pw_multi_aff_list &obj);
-  inline /* implicit */ pw_multi_aff_list(std::nullptr_t);
   inline pw_multi_aff_list &operator=(pw_multi_aff_list obj);
   inline ~pw_multi_aff_list();
   inline __isl_give isl_pw_multi_aff_list *copy() const &;
@@ -2389,9 +2305,7 @@ public:
   inline __isl_keep isl_pw_multi_aff_list *get() const;
   inline __isl_give isl_pw_multi_aff_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_multi_aff_list add(pw_multi_aff el) const;
@@ -2426,7 +2340,6 @@ class pw_qpolynomial {
 public:
   inline /* implicit */ pw_qpolynomial();
   inline /* implicit */ pw_qpolynomial(const pw_qpolynomial &obj);
-  inline /* implicit */ pw_qpolynomial(std::nullptr_t);
   inline explicit pw_qpolynomial(ctx ctx, const std::string &str);
   inline pw_qpolynomial &operator=(pw_qpolynomial obj);
   inline ~pw_qpolynomial();
@@ -2435,9 +2348,7 @@ public:
   inline __isl_keep isl_pw_qpolynomial *get() const;
   inline __isl_give isl_pw_qpolynomial *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_qpolynomial add(pw_qpolynomial pwqp2) const;
@@ -2507,7 +2418,6 @@ class pw_qpolynomial_fold_list {
 public:
   inline /* implicit */ pw_qpolynomial_fold_list();
   inline /* implicit */ pw_qpolynomial_fold_list(const pw_qpolynomial_fold_list &obj);
-  inline /* implicit */ pw_qpolynomial_fold_list(std::nullptr_t);
   inline pw_qpolynomial_fold_list &operator=(pw_qpolynomial_fold_list obj);
   inline ~pw_qpolynomial_fold_list();
   inline __isl_give isl_pw_qpolynomial_fold_list *copy() const &;
@@ -2515,9 +2425,7 @@ public:
   inline __isl_keep isl_pw_qpolynomial_fold_list *get() const;
   inline __isl_give isl_pw_qpolynomial_fold_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
 };
@@ -2537,7 +2445,6 @@ class pw_qpolynomial_list {
 public:
   inline /* implicit */ pw_qpolynomial_list();
   inline /* implicit */ pw_qpolynomial_list(const pw_qpolynomial_list &obj);
-  inline /* implicit */ pw_qpolynomial_list(std::nullptr_t);
   inline pw_qpolynomial_list &operator=(pw_qpolynomial_list obj);
   inline ~pw_qpolynomial_list();
   inline __isl_give isl_pw_qpolynomial_list *copy() const &;
@@ -2545,9 +2452,7 @@ public:
   inline __isl_keep isl_pw_qpolynomial_list *get() const;
   inline __isl_give isl_pw_qpolynomial_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline pw_qpolynomial_list add(pw_qpolynomial el) const;
@@ -2582,7 +2487,6 @@ class qpolynomial {
 public:
   inline /* implicit */ qpolynomial();
   inline /* implicit */ qpolynomial(const qpolynomial &obj);
-  inline /* implicit */ qpolynomial(std::nullptr_t);
   inline qpolynomial &operator=(qpolynomial obj);
   inline ~qpolynomial();
   inline __isl_give isl_qpolynomial *copy() const &;
@@ -2590,7 +2494,6 @@ public:
   inline __isl_keep isl_qpolynomial *get() const;
   inline __isl_give isl_qpolynomial *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -2651,7 +2554,6 @@ class qpolynomial_list {
 public:
   inline /* implicit */ qpolynomial_list();
   inline /* implicit */ qpolynomial_list(const qpolynomial_list &obj);
-  inline /* implicit */ qpolynomial_list(std::nullptr_t);
   inline qpolynomial_list &operator=(qpolynomial_list obj);
   inline ~qpolynomial_list();
   inline __isl_give isl_qpolynomial_list *copy() const &;
@@ -2659,9 +2561,7 @@ public:
   inline __isl_keep isl_qpolynomial_list *get() const;
   inline __isl_give isl_qpolynomial_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline qpolynomial_list add(qpolynomial el) const;
@@ -2696,7 +2596,6 @@ class schedule {
 public:
   inline /* implicit */ schedule();
   inline /* implicit */ schedule(const schedule &obj);
-  inline /* implicit */ schedule(std::nullptr_t);
   inline explicit schedule(ctx ctx, const std::string &str);
   inline schedule &operator=(schedule obj);
   inline ~schedule();
@@ -2705,9 +2604,7 @@ public:
   inline __isl_keep isl_schedule *get() const;
   inline __isl_give isl_schedule *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline schedule align_params(space space) const;
@@ -2742,7 +2639,6 @@ class schedule_constraints {
 public:
   inline /* implicit */ schedule_constraints();
   inline /* implicit */ schedule_constraints(const schedule_constraints &obj);
-  inline /* implicit */ schedule_constraints(std::nullptr_t);
   inline explicit schedule_constraints(ctx ctx, const std::string &str);
   inline schedule_constraints &operator=(schedule_constraints obj);
   inline ~schedule_constraints();
@@ -2751,9 +2647,7 @@ public:
   inline __isl_keep isl_schedule_constraints *get() const;
   inline __isl_give isl_schedule_constraints *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline schedule_constraints apply(union_map umap) const;
@@ -2788,7 +2682,6 @@ class schedule_node {
 public:
   inline /* implicit */ schedule_node();
   inline /* implicit */ schedule_node(const schedule_node &obj);
-  inline /* implicit */ schedule_node(std::nullptr_t);
   inline schedule_node &operator=(schedule_node obj);
   inline ~schedule_node();
   inline __isl_give isl_schedule_node *copy() const &;
@@ -2796,9 +2689,7 @@ public:
   inline __isl_keep isl_schedule_node *get() const;
   inline __isl_give isl_schedule_node *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline schedule_node align_params(space space) const;
@@ -2878,7 +2769,6 @@ class set {
 public:
   inline /* implicit */ set();
   inline /* implicit */ set(const set &obj);
-  inline /* implicit */ set(std::nullptr_t);
   inline /* implicit */ set(basic_set bset);
   inline /* implicit */ set(point pnt);
   inline explicit set(union_set uset);
@@ -2890,9 +2780,7 @@ public:
   inline __isl_keep isl_set *get() const;
   inline __isl_give isl_set *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline set add_constraint(constraint constraint) const;
@@ -3036,6 +2924,7 @@ public:
   inline set subtract(set set2) const;
   inline set sum(set set2) const;
   inline map translation() const;
+  inline isl_size tuple_dim() const;
   inline set unbind_params(multi_id tuple) const;
   inline map unbind_params_insert_domain(multi_id domain) const;
   inline set unite(set set2) const;
@@ -3065,7 +2954,6 @@ class set_list {
 public:
   inline /* implicit */ set_list();
   inline /* implicit */ set_list(const set_list &obj);
-  inline /* implicit */ set_list(std::nullptr_t);
   inline set_list &operator=(set_list obj);
   inline ~set_list();
   inline __isl_give isl_set_list *copy() const &;
@@ -3073,9 +2961,7 @@ public:
   inline __isl_keep isl_set_list *get() const;
   inline __isl_give isl_set_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline set_list add(set el) const;
@@ -3111,7 +2997,6 @@ class space {
 public:
   inline /* implicit */ space();
   inline /* implicit */ space(const space &obj);
-  inline /* implicit */ space(std::nullptr_t);
   inline explicit space(ctx ctx, unsigned int nparam, unsigned int n_in, unsigned int n_out);
   inline explicit space(ctx ctx, unsigned int nparam, unsigned int dim);
   inline space &operator=(space obj);
@@ -3121,9 +3006,7 @@ public:
   inline __isl_keep isl_space *get() const;
   inline __isl_give isl_space *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline space add_dims(isl::dim type, unsigned int n) const;
@@ -3217,7 +3100,6 @@ class term {
 public:
   inline /* implicit */ term();
   inline /* implicit */ term(const term &obj);
-  inline /* implicit */ term(std::nullptr_t);
   inline term &operator=(term obj);
   inline ~term();
   inline __isl_give isl_term *copy() const &;
@@ -3225,7 +3107,6 @@ public:
   inline __isl_keep isl_term *get() const;
   inline __isl_give isl_term *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
 
   inline isl_size dim(isl::dim type) const;
@@ -3249,7 +3130,6 @@ class union_access_info {
 public:
   inline /* implicit */ union_access_info();
   inline /* implicit */ union_access_info(const union_access_info &obj);
-  inline /* implicit */ union_access_info(std::nullptr_t);
   inline explicit union_access_info(union_map sink);
   inline union_access_info &operator=(union_access_info obj);
   inline ~union_access_info();
@@ -3258,9 +3138,7 @@ public:
   inline __isl_keep isl_union_access_info *get() const;
   inline __isl_give isl_union_access_info *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
 
   inline union_flow compute_flow() const;
   inline union_access_info set_kill(union_map kill) const;
@@ -3285,7 +3163,6 @@ class union_flow {
 public:
   inline /* implicit */ union_flow();
   inline /* implicit */ union_flow(const union_flow &obj);
-  inline /* implicit */ union_flow(std::nullptr_t);
   inline union_flow &operator=(union_flow obj);
   inline ~union_flow();
   inline __isl_give isl_union_flow *copy() const &;
@@ -3293,9 +3170,7 @@ public:
   inline __isl_keep isl_union_flow *get() const;
   inline __isl_give isl_union_flow *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
 
   inline union_map get_full_may_dependence() const;
   inline union_map get_full_must_dependence() const;
@@ -3320,7 +3195,6 @@ class union_map {
 public:
   inline /* implicit */ union_map();
   inline /* implicit */ union_map(const union_map &obj);
-  inline /* implicit */ union_map(std::nullptr_t);
   inline /* implicit */ union_map(basic_map bmap);
   inline /* implicit */ union_map(map map);
   inline explicit union_map(union_pw_multi_aff upma);
@@ -3332,9 +3206,7 @@ public:
   inline __isl_keep isl_union_map *get() const;
   inline __isl_give isl_union_map *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_map add_map(map map) const;
@@ -3465,7 +3337,6 @@ class union_map_list {
 public:
   inline /* implicit */ union_map_list();
   inline /* implicit */ union_map_list(const union_map_list &obj);
-  inline /* implicit */ union_map_list(std::nullptr_t);
   inline union_map_list &operator=(union_map_list obj);
   inline ~union_map_list();
   inline __isl_give isl_union_map_list *copy() const &;
@@ -3473,9 +3344,7 @@ public:
   inline __isl_keep isl_union_map_list *get() const;
   inline __isl_give isl_union_map_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_map_list add(union_map el) const;
@@ -3510,7 +3379,6 @@ class union_pw_aff {
 public:
   inline /* implicit */ union_pw_aff();
   inline /* implicit */ union_pw_aff(const union_pw_aff &obj);
-  inline /* implicit */ union_pw_aff(std::nullptr_t);
   inline /* implicit */ union_pw_aff(aff aff);
   inline /* implicit */ union_pw_aff(pw_aff pa);
   inline explicit union_pw_aff(ctx ctx, const std::string &str);
@@ -3522,9 +3390,7 @@ public:
   inline __isl_keep isl_union_pw_aff *get() const;
   inline __isl_give isl_union_pw_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_pw_aff add(union_pw_aff upa2) const;
@@ -3587,7 +3453,6 @@ class union_pw_aff_list {
 public:
   inline /* implicit */ union_pw_aff_list();
   inline /* implicit */ union_pw_aff_list(const union_pw_aff_list &obj);
-  inline /* implicit */ union_pw_aff_list(std::nullptr_t);
   inline union_pw_aff_list &operator=(union_pw_aff_list obj);
   inline ~union_pw_aff_list();
   inline __isl_give isl_union_pw_aff_list *copy() const &;
@@ -3595,9 +3460,7 @@ public:
   inline __isl_keep isl_union_pw_aff_list *get() const;
   inline __isl_give isl_union_pw_aff_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_pw_aff_list add(union_pw_aff el) const;
@@ -3632,7 +3495,6 @@ class union_pw_multi_aff {
 public:
   inline /* implicit */ union_pw_multi_aff();
   inline /* implicit */ union_pw_multi_aff(const union_pw_multi_aff &obj);
-  inline /* implicit */ union_pw_multi_aff(std::nullptr_t);
   inline /* implicit */ union_pw_multi_aff(aff aff);
   inline explicit union_pw_multi_aff(union_set uset);
   inline /* implicit */ union_pw_multi_aff(multi_aff ma);
@@ -3648,9 +3510,7 @@ public:
   inline __isl_keep isl_union_pw_multi_aff *get() const;
   inline __isl_give isl_union_pw_multi_aff *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_pw_multi_aff add(union_pw_multi_aff upma2) const;
@@ -3718,7 +3578,6 @@ class union_pw_multi_aff_list {
 public:
   inline /* implicit */ union_pw_multi_aff_list();
   inline /* implicit */ union_pw_multi_aff_list(const union_pw_multi_aff_list &obj);
-  inline /* implicit */ union_pw_multi_aff_list(std::nullptr_t);
   inline union_pw_multi_aff_list &operator=(union_pw_multi_aff_list obj);
   inline ~union_pw_multi_aff_list();
   inline __isl_give isl_union_pw_multi_aff_list *copy() const &;
@@ -3726,9 +3585,7 @@ public:
   inline __isl_keep isl_union_pw_multi_aff_list *get() const;
   inline __isl_give isl_union_pw_multi_aff_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_pw_multi_aff_list add(union_pw_multi_aff el) const;
@@ -3763,7 +3620,6 @@ class union_pw_qpolynomial {
 public:
   inline /* implicit */ union_pw_qpolynomial();
   inline /* implicit */ union_pw_qpolynomial(const union_pw_qpolynomial &obj);
-  inline /* implicit */ union_pw_qpolynomial(std::nullptr_t);
   inline explicit union_pw_qpolynomial(ctx ctx, const std::string &str);
   inline union_pw_qpolynomial &operator=(union_pw_qpolynomial obj);
   inline ~union_pw_qpolynomial();
@@ -3772,9 +3628,7 @@ public:
   inline __isl_keep isl_union_pw_qpolynomial *get() const;
   inline __isl_give isl_union_pw_qpolynomial *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
 
   inline union_pw_qpolynomial add(union_pw_qpolynomial upwqp2) const;
   inline union_pw_qpolynomial add_pw_qpolynomial(pw_qpolynomial pwqp) const;
@@ -3831,7 +3685,6 @@ class union_set {
 public:
   inline /* implicit */ union_set();
   inline /* implicit */ union_set(const union_set &obj);
-  inline /* implicit */ union_set(std::nullptr_t);
   inline /* implicit */ union_set(basic_set bset);
   inline /* implicit */ union_set(point pnt);
   inline /* implicit */ union_set(set set);
@@ -3843,9 +3696,7 @@ public:
   inline __isl_keep isl_union_set *get() const;
   inline __isl_give isl_union_set *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_set add_set(set set) const;
@@ -3926,7 +3777,6 @@ class union_set_list {
 public:
   inline /* implicit */ union_set_list();
   inline /* implicit */ union_set_list(const union_set_list &obj);
-  inline /* implicit */ union_set_list(std::nullptr_t);
   inline union_set_list &operator=(union_set_list obj);
   inline ~union_set_list();
   inline __isl_give isl_union_set_list *copy() const &;
@@ -3934,9 +3784,7 @@ public:
   inline __isl_keep isl_union_set_list *get() const;
   inline __isl_give isl_union_set_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline union_set_list add(union_set el) const;
@@ -3972,7 +3820,6 @@ class val {
 public:
   inline /* implicit */ val();
   inline /* implicit */ val(const val &obj);
-  inline /* implicit */ val(std::nullptr_t);
   inline explicit val(ctx ctx, long i);
   inline explicit val(ctx ctx, const std::string &str);
   inline val &operator=(val obj);
@@ -3982,9 +3829,7 @@ public:
   inline __isl_keep isl_val *get() const;
   inline __isl_give isl_val *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline val abs() const;
@@ -4058,7 +3903,6 @@ class val_list {
 public:
   inline /* implicit */ val_list();
   inline /* implicit */ val_list(const val_list &obj);
-  inline /* implicit */ val_list(std::nullptr_t);
   inline val_list &operator=(val_list obj);
   inline ~val_list();
   inline __isl_give isl_val_list *copy() const &;
@@ -4066,9 +3910,7 @@ public:
   inline __isl_keep isl_val_list *get() const;
   inline __isl_give isl_val_list *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
-  inline std::string to_str() const;
   inline void dump() const;
 
   inline val_list add(val el) const;
@@ -4103,7 +3945,6 @@ class vec {
 public:
   inline /* implicit */ vec();
   inline /* implicit */ vec(const vec &obj);
-  inline /* implicit */ vec(std::nullptr_t);
   inline vec &operator=(vec obj);
   inline ~vec();
   inline __isl_give isl_vec *copy() const &;
@@ -4111,7 +3952,6 @@ public:
   inline __isl_keep isl_vec *get() const;
   inline __isl_give isl_vec *release();
   inline bool is_null() const;
-  inline explicit operator bool() const;
   inline ctx get_ctx() const;
   inline void dump() const;
 
@@ -4158,8 +3998,6 @@ aff::aff(const aff &obj)
 {
   ptr = obj.copy();
 }
-aff::aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 aff::aff(__isl_take isl_aff *ptr)
@@ -4208,23 +4046,11 @@ __isl_give isl_aff *aff::release() {
 bool aff::is_null() const {
   return ptr == nullptr;
 }
-aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx aff::get_ctx() const {
   return ctx(isl_aff_get_ctx(ptr));
 }
-std::string aff::to_str() const {
-  char *Tmp = isl_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void aff::dump() const {
   isl_aff_dump(get());
@@ -4693,8 +4519,6 @@ aff_list::aff_list(const aff_list &obj)
 {
   ptr = obj.copy();
 }
-aff_list::aff_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 aff_list::aff_list(__isl_take isl_aff_list *ptr)
@@ -4728,23 +4552,11 @@ __isl_give isl_aff_list *aff_list::release() {
 bool aff_list::is_null() const {
   return ptr == nullptr;
 }
-aff_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx aff_list::get_ctx() const {
   return ctx(isl_aff_list_get_ctx(ptr));
 }
-std::string aff_list::to_str() const {
-  char *Tmp = isl_aff_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void aff_list::dump() const {
   isl_aff_list_dump(get());
@@ -4866,8 +4678,6 @@ ast_build::ast_build(const ast_build &obj)
 {
   ptr = obj.copy();
 }
-ast_build::ast_build(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 ast_build::ast_build(__isl_take isl_ast_build *ptr)
@@ -4905,9 +4715,6 @@ __isl_give isl_ast_build *ast_build::release() {
 
 bool ast_build::is_null() const {
   return ptr == nullptr;
-}
-ast_build::operator bool() const {
-  return !is_null();
 }
 
 
@@ -5011,8 +4818,6 @@ ast_expr::ast_expr(const ast_expr &obj)
 {
   ptr = obj.copy();
 }
-ast_expr::ast_expr(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 ast_expr::ast_expr(__isl_take isl_ast_expr *ptr)
@@ -5046,23 +4851,11 @@ __isl_give isl_ast_expr *ast_expr::release() {
 bool ast_expr::is_null() const {
   return ptr == nullptr;
 }
-ast_expr::operator bool() const {
-  return !is_null();
-}
 
 
 ctx ast_expr::get_ctx() const {
   return ctx(isl_ast_expr_get_ctx(ptr));
 }
-std::string ast_expr::to_str() const {
-  char *Tmp = isl_ast_expr_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void ast_expr::dump() const {
   isl_ast_expr_dump(get());
@@ -5262,8 +5055,6 @@ ast_expr_list::ast_expr_list(const ast_expr_list &obj)
 {
   ptr = obj.copy();
 }
-ast_expr_list::ast_expr_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 ast_expr_list::ast_expr_list(__isl_take isl_ast_expr_list *ptr)
@@ -5297,23 +5088,11 @@ __isl_give isl_ast_expr_list *ast_expr_list::release() {
 bool ast_expr_list::is_null() const {
   return ptr == nullptr;
 }
-ast_expr_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx ast_expr_list::get_ctx() const {
   return ctx(isl_ast_expr_list_get_ctx(ptr));
 }
-std::string ast_expr_list::to_str() const {
-  char *Tmp = isl_ast_expr_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void ast_expr_list::dump() const {
   isl_ast_expr_list_dump(get());
@@ -5435,8 +5214,6 @@ ast_node::ast_node(const ast_node &obj)
 {
   ptr = obj.copy();
 }
-ast_node::ast_node(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 ast_node::ast_node(__isl_take isl_ast_node *ptr)
@@ -5470,23 +5247,11 @@ __isl_give isl_ast_node *ast_node::release() {
 bool ast_node::is_null() const {
   return ptr == nullptr;
 }
-ast_node::operator bool() const {
-  return !is_null();
-}
 
 
 ctx ast_node::get_ctx() const {
   return ctx(isl_ast_node_get_ctx(ptr));
 }
-std::string ast_node::to_str() const {
-  char *Tmp = isl_ast_node_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void ast_node::dump() const {
   isl_ast_node_dump(get());
@@ -5638,8 +5403,6 @@ ast_node_list::ast_node_list(const ast_node_list &obj)
 {
   ptr = obj.copy();
 }
-ast_node_list::ast_node_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 ast_node_list::ast_node_list(__isl_take isl_ast_node_list *ptr)
@@ -5673,23 +5436,11 @@ __isl_give isl_ast_node_list *ast_node_list::release() {
 bool ast_node_list::is_null() const {
   return ptr == nullptr;
 }
-ast_node_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx ast_node_list::get_ctx() const {
   return ctx(isl_ast_node_list_get_ctx(ptr));
 }
-std::string ast_node_list::to_str() const {
-  char *Tmp = isl_ast_node_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void ast_node_list::dump() const {
   isl_ast_node_list_dump(get());
@@ -5811,8 +5562,6 @@ basic_map::basic_map(const basic_map &obj)
 {
   ptr = obj.copy();
 }
-basic_map::basic_map(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 basic_map::basic_map(__isl_take isl_basic_map *ptr)
@@ -5851,23 +5600,11 @@ __isl_give isl_basic_map *basic_map::release() {
 bool basic_map::is_null() const {
   return ptr == nullptr;
 }
-basic_map::operator bool() const {
-  return !is_null();
-}
 
 
 ctx basic_map::get_ctx() const {
   return ctx(isl_basic_map_get_ctx(ptr));
 }
-std::string basic_map::to_str() const {
-  char *Tmp = isl_basic_map_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void basic_map::dump() const {
   isl_basic_map_dump(get());
@@ -6525,8 +6262,6 @@ basic_map_list::basic_map_list(const basic_map_list &obj)
 {
   ptr = obj.copy();
 }
-basic_map_list::basic_map_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 basic_map_list::basic_map_list(__isl_take isl_basic_map_list *ptr)
@@ -6560,23 +6295,11 @@ __isl_give isl_basic_map_list *basic_map_list::release() {
 bool basic_map_list::is_null() const {
   return ptr == nullptr;
 }
-basic_map_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx basic_map_list::get_ctx() const {
   return ctx(isl_basic_map_list_get_ctx(ptr));
 }
-std::string basic_map_list::to_str() const {
-  char *Tmp = isl_basic_map_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void basic_map_list::dump() const {
   isl_basic_map_list_dump(get());
@@ -6698,8 +6421,6 @@ basic_set::basic_set(const basic_set &obj)
 {
   ptr = obj.copy();
 }
-basic_set::basic_set(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 basic_set::basic_set(__isl_take isl_basic_set *ptr)
@@ -6743,23 +6464,11 @@ __isl_give isl_basic_set *basic_set::release() {
 bool basic_set::is_null() const {
   return ptr == nullptr;
 }
-basic_set::operator bool() const {
-  return !is_null();
-}
 
 
 ctx basic_set::get_ctx() const {
   return ctx(isl_basic_set_get_ctx(ptr));
 }
-std::string basic_set::to_str() const {
-  char *Tmp = isl_basic_set_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void basic_set::dump() const {
   isl_basic_set_dump(get());
@@ -7251,8 +6960,6 @@ basic_set_list::basic_set_list(const basic_set_list &obj)
 {
   ptr = obj.copy();
 }
-basic_set_list::basic_set_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 basic_set_list::basic_set_list(__isl_take isl_basic_set_list *ptr)
@@ -7286,23 +6993,11 @@ __isl_give isl_basic_set_list *basic_set_list::release() {
 bool basic_set_list::is_null() const {
   return ptr == nullptr;
 }
-basic_set_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx basic_set_list::get_ctx() const {
   return ctx(isl_basic_set_list_get_ctx(ptr));
 }
-std::string basic_set_list::to_str() const {
-  char *Tmp = isl_basic_set_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void basic_set_list::dump() const {
   isl_basic_set_list_dump(get());
@@ -7430,8 +7125,6 @@ constraint::constraint(const constraint &obj)
 {
   ptr = obj.copy();
 }
-constraint::constraint(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 constraint::constraint(__isl_take isl_constraint *ptr)
@@ -7464,9 +7157,6 @@ __isl_give isl_constraint *constraint::release() {
 
 bool constraint::is_null() const {
   return ptr == nullptr;
-}
-constraint::operator bool() const {
-  return !is_null();
 }
 
 
@@ -7617,8 +7307,6 @@ constraint_list::constraint_list(const constraint_list &obj)
 {
   ptr = obj.copy();
 }
-constraint_list::constraint_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 constraint_list::constraint_list(__isl_take isl_constraint_list *ptr)
@@ -7652,23 +7340,11 @@ __isl_give isl_constraint_list *constraint_list::release() {
 bool constraint_list::is_null() const {
   return ptr == nullptr;
 }
-constraint_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx constraint_list::get_ctx() const {
   return ctx(isl_constraint_list_get_ctx(ptr));
 }
-std::string constraint_list::to_str() const {
-  char *Tmp = isl_constraint_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void constraint_list::dump() const {
   isl_constraint_list_dump(get());
@@ -7790,8 +7466,6 @@ fixed_box::fixed_box(const fixed_box &obj)
 {
   ptr = obj.copy();
 }
-fixed_box::fixed_box(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 fixed_box::fixed_box(__isl_take isl_fixed_box *ptr)
@@ -7825,23 +7499,11 @@ __isl_give isl_fixed_box *fixed_box::release() {
 bool fixed_box::is_null() const {
   return ptr == nullptr;
 }
-fixed_box::operator bool() const {
-  return !is_null();
-}
 
 
 ctx fixed_box::get_ctx() const {
   return ctx(isl_fixed_box_get_ctx(ptr));
 }
-std::string fixed_box::to_str() const {
-  char *Tmp = isl_fixed_box_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void fixed_box::dump() const {
   isl_fixed_box_dump(get());
@@ -7889,8 +7551,6 @@ id::id(const id &obj)
 {
   ptr = obj.copy();
 }
-id::id(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 id::id(__isl_take isl_id *ptr)
@@ -7929,23 +7589,11 @@ __isl_give isl_id *id::release() {
 bool id::is_null() const {
   return ptr == nullptr;
 }
-id::operator bool() const {
-  return !is_null();
-}
 
 
 ctx id::get_ctx() const {
   return ctx(isl_id_get_ctx(ptr));
 }
-std::string id::to_str() const {
-  char *Tmp = isl_id_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void id::dump() const {
   isl_id_dump(get());
@@ -7994,8 +7642,6 @@ id_list::id_list(const id_list &obj)
 {
   ptr = obj.copy();
 }
-id_list::id_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 id_list::id_list(__isl_take isl_id_list *ptr)
@@ -8029,23 +7675,11 @@ __isl_give isl_id_list *id_list::release() {
 bool id_list::is_null() const {
   return ptr == nullptr;
 }
-id_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx id_list::get_ctx() const {
   return ctx(isl_id_list_get_ctx(ptr));
 }
-std::string id_list::to_str() const {
-  char *Tmp = isl_id_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void id_list::dump() const {
   isl_id_list_dump(get());
@@ -8167,8 +7801,6 @@ id_to_ast_expr::id_to_ast_expr(const id_to_ast_expr &obj)
 {
   ptr = obj.copy();
 }
-id_to_ast_expr::id_to_ast_expr(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 id_to_ast_expr::id_to_ast_expr(__isl_take isl_id_to_ast_expr *ptr)
@@ -8201,9 +7833,6 @@ __isl_give isl_id_to_ast_expr *id_to_ast_expr::release() {
 
 bool id_to_ast_expr::is_null() const {
   return ptr == nullptr;
-}
-id_to_ast_expr::operator bool() const {
-  return !is_null();
 }
 
 
@@ -8277,8 +7906,6 @@ local_space::local_space(const local_space &obj)
 {
   ptr = obj.copy();
 }
-local_space::local_space(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 local_space::local_space(__isl_take isl_local_space *ptr)
@@ -8316,9 +7943,6 @@ __isl_give isl_local_space *local_space::release() {
 
 bool local_space::is_null() const {
   return ptr == nullptr;
-}
-local_space::operator bool() const {
-  return !is_null();
 }
 
 
@@ -8493,8 +8117,6 @@ map::map(const map &obj)
 {
   ptr = obj.copy();
 }
-map::map(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 map::map(__isl_take isl_map *ptr)
@@ -8538,23 +8160,11 @@ __isl_give isl_map *map::release() {
 bool map::is_null() const {
   return ptr == nullptr;
 }
-map::operator bool() const {
-  return !is_null();
-}
 
 
 ctx map::get_ctx() const {
   return ctx(isl_map_get_ctx(ptr));
 }
-std::string map::to_str() const {
-  char *Tmp = isl_map_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void map::dump() const {
   isl_map_dump(get());
@@ -8727,6 +8337,12 @@ map map::domain_product(map map2) const
 {
   auto res = isl_map_domain_product(copy(), map2.release());
   return manage(res);
+}
+
+isl_size map::domain_tuple_dim() const
+{
+  auto res = isl_map_domain_tuple_dim(get());
+  return res;
 }
 
 map map::drop_constraints_involving_dims(isl::dim type, unsigned int first, unsigned int n) const
@@ -9519,6 +9135,12 @@ map map::range_reverse() const
   return manage(res);
 }
 
+isl_size map::range_tuple_dim() const
+{
+  auto res = isl_map_range_tuple_dim(get());
+  return res;
+}
+
 map map::remove_dims(isl::dim type, unsigned int first, unsigned int n) const
 {
   auto res = isl_map_remove_dims(copy(), static_cast<enum isl_dim_type>(type), first, n);
@@ -9698,8 +9320,6 @@ map_list::map_list(const map_list &obj)
 {
   ptr = obj.copy();
 }
-map_list::map_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 map_list::map_list(__isl_take isl_map_list *ptr)
@@ -9733,23 +9353,11 @@ __isl_give isl_map_list *map_list::release() {
 bool map_list::is_null() const {
   return ptr == nullptr;
 }
-map_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx map_list::get_ctx() const {
   return ctx(isl_map_list_get_ctx(ptr));
 }
-std::string map_list::to_str() const {
-  char *Tmp = isl_map_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void map_list::dump() const {
   isl_map_list_dump(get());
@@ -9871,8 +9479,6 @@ mat::mat(const mat &obj)
 {
   ptr = obj.copy();
 }
-mat::mat(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 mat::mat(__isl_take isl_mat *ptr)
@@ -9905,9 +9511,6 @@ __isl_give isl_mat *mat::release() {
 
 bool mat::is_null() const {
   return ptr == nullptr;
-}
-mat::operator bool() const {
-  return !is_null();
 }
 
 
@@ -10177,8 +9780,6 @@ multi_aff::multi_aff(const multi_aff &obj)
 {
   ptr = obj.copy();
 }
-multi_aff::multi_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 multi_aff::multi_aff(__isl_take isl_multi_aff *ptr)
@@ -10227,23 +9828,11 @@ __isl_give isl_multi_aff *multi_aff::release() {
 bool multi_aff::is_null() const {
   return ptr == nullptr;
 }
-multi_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx multi_aff::get_ctx() const {
   return ctx(isl_multi_aff_get_ctx(ptr));
 }
-std::string multi_aff::to_str() const {
-  char *Tmp = isl_multi_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void multi_aff::dump() const {
   isl_multi_aff_dump(get());
@@ -10718,8 +10307,6 @@ multi_id::multi_id(const multi_id &obj)
 {
   ptr = obj.copy();
 }
-multi_id::multi_id(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 multi_id::multi_id(__isl_take isl_multi_id *ptr)
@@ -10763,23 +10350,11 @@ __isl_give isl_multi_id *multi_id::release() {
 bool multi_id::is_null() const {
   return ptr == nullptr;
 }
-multi_id::operator bool() const {
-  return !is_null();
-}
 
 
 ctx multi_id::get_ctx() const {
   return ctx(isl_multi_id_get_ctx(ptr));
 }
-std::string multi_id::to_str() const {
-  char *Tmp = isl_multi_id_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void multi_id::dump() const {
   isl_multi_id_dump(get());
@@ -10923,8 +10498,6 @@ multi_pw_aff::multi_pw_aff(const multi_pw_aff &obj)
 {
   ptr = obj.copy();
 }
-multi_pw_aff::multi_pw_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 multi_pw_aff::multi_pw_aff(__isl_take isl_multi_pw_aff *ptr)
@@ -10988,23 +10561,11 @@ __isl_give isl_multi_pw_aff *multi_pw_aff::release() {
 bool multi_pw_aff::is_null() const {
   return ptr == nullptr;
 }
-multi_pw_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx multi_pw_aff::get_ctx() const {
   return ctx(isl_multi_pw_aff_get_ctx(ptr));
 }
-std::string multi_pw_aff::to_str() const {
-  char *Tmp = isl_multi_pw_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void multi_pw_aff::dump() const {
   isl_multi_pw_aff_dump(get());
@@ -11527,8 +11088,6 @@ multi_union_pw_aff::multi_union_pw_aff(const multi_union_pw_aff &obj)
 {
   ptr = obj.copy();
 }
-multi_union_pw_aff::multi_union_pw_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 multi_union_pw_aff::multi_union_pw_aff(__isl_take isl_multi_union_pw_aff *ptr)
@@ -11587,23 +11146,11 @@ __isl_give isl_multi_union_pw_aff *multi_union_pw_aff::release() {
 bool multi_union_pw_aff::is_null() const {
   return ptr == nullptr;
 }
-multi_union_pw_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx multi_union_pw_aff::get_ctx() const {
   return ctx(isl_multi_union_pw_aff_get_ctx(ptr));
 }
-std::string multi_union_pw_aff::to_str() const {
-  char *Tmp = isl_multi_union_pw_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void multi_union_pw_aff::dump() const {
   isl_multi_union_pw_aff_dump(get());
@@ -12018,8 +11565,6 @@ multi_val::multi_val(const multi_val &obj)
 {
   ptr = obj.copy();
 }
-multi_val::multi_val(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 multi_val::multi_val(__isl_take isl_multi_val *ptr)
@@ -12063,23 +11608,11 @@ __isl_give isl_multi_val *multi_val::release() {
 bool multi_val::is_null() const {
   return ptr == nullptr;
 }
-multi_val::operator bool() const {
-  return !is_null();
-}
 
 
 ctx multi_val::get_ctx() const {
   return ctx(isl_multi_val_get_ctx(ptr));
 }
-std::string multi_val::to_str() const {
-  char *Tmp = isl_multi_val_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void multi_val::dump() const {
   isl_multi_val_dump(get());
@@ -12422,8 +11955,6 @@ point::point(const point &obj)
 {
   ptr = obj.copy();
 }
-point::point(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 point::point(__isl_take isl_point *ptr)
@@ -12462,23 +11993,11 @@ __isl_give isl_point *point::release() {
 bool point::is_null() const {
   return ptr == nullptr;
 }
-point::operator bool() const {
-  return !is_null();
-}
 
 
 ctx point::get_ctx() const {
   return ctx(isl_point_get_ctx(ptr));
 }
-std::string point::to_str() const {
-  char *Tmp = isl_point_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void point::dump() const {
   isl_point_dump(get());
@@ -12538,8 +12057,6 @@ pw_aff::pw_aff(const pw_aff &obj)
 {
   ptr = obj.copy();
 }
-pw_aff::pw_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_aff::pw_aff(__isl_take isl_pw_aff *ptr)
@@ -12593,23 +12110,11 @@ __isl_give isl_pw_aff *pw_aff::release() {
 bool pw_aff::is_null() const {
   return ptr == nullptr;
 }
-pw_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_aff::get_ctx() const {
   return ctx(isl_pw_aff_get_ctx(ptr));
 }
-std::string pw_aff::to_str() const {
-  char *Tmp = isl_pw_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_aff::dump() const {
   isl_pw_aff_dump(get());
@@ -13194,8 +12699,6 @@ pw_aff_list::pw_aff_list(const pw_aff_list &obj)
 {
   ptr = obj.copy();
 }
-pw_aff_list::pw_aff_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_aff_list::pw_aff_list(__isl_take isl_pw_aff_list *ptr)
@@ -13229,23 +12732,11 @@ __isl_give isl_pw_aff_list *pw_aff_list::release() {
 bool pw_aff_list::is_null() const {
   return ptr == nullptr;
 }
-pw_aff_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_aff_list::get_ctx() const {
   return ctx(isl_pw_aff_list_get_ctx(ptr));
 }
-std::string pw_aff_list::to_str() const {
-  char *Tmp = isl_pw_aff_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_aff_list::dump() const {
   isl_pw_aff_list_dump(get());
@@ -13415,8 +12906,6 @@ pw_multi_aff::pw_multi_aff(const pw_multi_aff &obj)
 {
   ptr = obj.copy();
 }
-pw_multi_aff::pw_multi_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_multi_aff::pw_multi_aff(__isl_take isl_pw_multi_aff *ptr)
@@ -13465,23 +12954,11 @@ __isl_give isl_pw_multi_aff *pw_multi_aff::release() {
 bool pw_multi_aff::is_null() const {
   return ptr == nullptr;
 }
-pw_multi_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_multi_aff::get_ctx() const {
   return ctx(isl_pw_multi_aff_get_ctx(ptr));
 }
-std::string pw_multi_aff::to_str() const {
-  char *Tmp = isl_pw_multi_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_multi_aff::dump() const {
   isl_pw_multi_aff_dump(get());
@@ -13977,8 +13454,6 @@ pw_multi_aff_list::pw_multi_aff_list(const pw_multi_aff_list &obj)
 {
   ptr = obj.copy();
 }
-pw_multi_aff_list::pw_multi_aff_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_multi_aff_list::pw_multi_aff_list(__isl_take isl_pw_multi_aff_list *ptr)
@@ -14012,23 +13487,11 @@ __isl_give isl_pw_multi_aff_list *pw_multi_aff_list::release() {
 bool pw_multi_aff_list::is_null() const {
   return ptr == nullptr;
 }
-pw_multi_aff_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_multi_aff_list::get_ctx() const {
   return ctx(isl_pw_multi_aff_list_get_ctx(ptr));
 }
-std::string pw_multi_aff_list::to_str() const {
-  char *Tmp = isl_pw_multi_aff_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_multi_aff_list::dump() const {
   isl_pw_multi_aff_list_dump(get());
@@ -14150,8 +13613,6 @@ pw_qpolynomial::pw_qpolynomial(const pw_qpolynomial &obj)
 {
   ptr = obj.copy();
 }
-pw_qpolynomial::pw_qpolynomial(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_qpolynomial::pw_qpolynomial(__isl_take isl_pw_qpolynomial *ptr)
@@ -14190,23 +13651,11 @@ __isl_give isl_pw_qpolynomial *pw_qpolynomial::release() {
 bool pw_qpolynomial::is_null() const {
   return ptr == nullptr;
 }
-pw_qpolynomial::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_qpolynomial::get_ctx() const {
   return ctx(isl_pw_qpolynomial_get_ctx(ptr));
 }
-std::string pw_qpolynomial::to_str() const {
-  char *Tmp = isl_pw_qpolynomial_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_qpolynomial::dump() const {
   isl_pw_qpolynomial_dump(get());
@@ -14538,8 +13987,6 @@ pw_qpolynomial_fold_list::pw_qpolynomial_fold_list(const pw_qpolynomial_fold_lis
 {
   ptr = obj.copy();
 }
-pw_qpolynomial_fold_list::pw_qpolynomial_fold_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_qpolynomial_fold_list::pw_qpolynomial_fold_list(__isl_take isl_pw_qpolynomial_fold_list *ptr)
@@ -14573,23 +14020,11 @@ __isl_give isl_pw_qpolynomial_fold_list *pw_qpolynomial_fold_list::release() {
 bool pw_qpolynomial_fold_list::is_null() const {
   return ptr == nullptr;
 }
-pw_qpolynomial_fold_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_qpolynomial_fold_list::get_ctx() const {
   return ctx(isl_pw_qpolynomial_fold_list_get_ctx(ptr));
 }
-std::string pw_qpolynomial_fold_list::to_str() const {
-  char *Tmp = isl_pw_qpolynomial_fold_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_qpolynomial_fold_list::dump() const {
   isl_pw_qpolynomial_fold_list_dump(get());
@@ -14614,8 +14049,6 @@ pw_qpolynomial_list::pw_qpolynomial_list(const pw_qpolynomial_list &obj)
 {
   ptr = obj.copy();
 }
-pw_qpolynomial_list::pw_qpolynomial_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 pw_qpolynomial_list::pw_qpolynomial_list(__isl_take isl_pw_qpolynomial_list *ptr)
@@ -14649,23 +14082,11 @@ __isl_give isl_pw_qpolynomial_list *pw_qpolynomial_list::release() {
 bool pw_qpolynomial_list::is_null() const {
   return ptr == nullptr;
 }
-pw_qpolynomial_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx pw_qpolynomial_list::get_ctx() const {
   return ctx(isl_pw_qpolynomial_list_get_ctx(ptr));
 }
-std::string pw_qpolynomial_list::to_str() const {
-  char *Tmp = isl_pw_qpolynomial_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void pw_qpolynomial_list::dump() const {
   isl_pw_qpolynomial_list_dump(get());
@@ -14787,8 +14208,6 @@ qpolynomial::qpolynomial(const qpolynomial &obj)
 {
   ptr = obj.copy();
 }
-qpolynomial::qpolynomial(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 qpolynomial::qpolynomial(__isl_take isl_qpolynomial *ptr)
@@ -14821,9 +14240,6 @@ __isl_give isl_qpolynomial *qpolynomial::release() {
 
 bool qpolynomial::is_null() const {
   return ptr == nullptr;
-}
-qpolynomial::operator bool() const {
-  return !is_null();
 }
 
 
@@ -15109,8 +14525,6 @@ qpolynomial_list::qpolynomial_list(const qpolynomial_list &obj)
 {
   ptr = obj.copy();
 }
-qpolynomial_list::qpolynomial_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 qpolynomial_list::qpolynomial_list(__isl_take isl_qpolynomial_list *ptr)
@@ -15144,23 +14558,11 @@ __isl_give isl_qpolynomial_list *qpolynomial_list::release() {
 bool qpolynomial_list::is_null() const {
   return ptr == nullptr;
 }
-qpolynomial_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx qpolynomial_list::get_ctx() const {
   return ctx(isl_qpolynomial_list_get_ctx(ptr));
 }
-std::string qpolynomial_list::to_str() const {
-  char *Tmp = isl_qpolynomial_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void qpolynomial_list::dump() const {
   isl_qpolynomial_list_dump(get());
@@ -15282,8 +14684,6 @@ schedule::schedule(const schedule &obj)
 {
   ptr = obj.copy();
 }
-schedule::schedule(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 schedule::schedule(__isl_take isl_schedule *ptr)
@@ -15322,23 +14722,11 @@ __isl_give isl_schedule *schedule::release() {
 bool schedule::is_null() const {
   return ptr == nullptr;
 }
-schedule::operator bool() const {
-  return !is_null();
-}
 
 
 ctx schedule::get_ctx() const {
   return ctx(isl_schedule_get_ctx(ptr));
 }
-std::string schedule::to_str() const {
-  char *Tmp = isl_schedule_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void schedule::dump() const {
   isl_schedule_dump(get());
@@ -15452,8 +14840,6 @@ schedule_constraints::schedule_constraints(const schedule_constraints &obj)
 {
   ptr = obj.copy();
 }
-schedule_constraints::schedule_constraints(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 schedule_constraints::schedule_constraints(__isl_take isl_schedule_constraints *ptr)
@@ -15492,23 +14878,11 @@ __isl_give isl_schedule_constraints *schedule_constraints::release() {
 bool schedule_constraints::is_null() const {
   return ptr == nullptr;
 }
-schedule_constraints::operator bool() const {
-  return !is_null();
-}
 
 
 ctx schedule_constraints::get_ctx() const {
   return ctx(isl_schedule_constraints_get_ctx(ptr));
 }
-std::string schedule_constraints::to_str() const {
-  char *Tmp = isl_schedule_constraints_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void schedule_constraints::dump() const {
   isl_schedule_constraints_dump(get());
@@ -15622,8 +14996,6 @@ schedule_node::schedule_node(const schedule_node &obj)
 {
   ptr = obj.copy();
 }
-schedule_node::schedule_node(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 schedule_node::schedule_node(__isl_take isl_schedule_node *ptr)
@@ -15657,23 +15029,11 @@ __isl_give isl_schedule_node *schedule_node::release() {
 bool schedule_node::is_null() const {
   return ptr == nullptr;
 }
-schedule_node::operator bool() const {
-  return !is_null();
-}
 
 
 ctx schedule_node::get_ctx() const {
   return ctx(isl_schedule_node_get_ctx(ptr));
 }
-std::string schedule_node::to_str() const {
-  char *Tmp = isl_schedule_node_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void schedule_node::dump() const {
   isl_schedule_node_dump(get());
@@ -16065,8 +15425,6 @@ set::set(const set &obj)
 {
   ptr = obj.copy();
 }
-set::set(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 set::set(__isl_take isl_set *ptr)
@@ -16120,23 +15478,11 @@ __isl_give isl_set *set::release() {
 bool set::is_null() const {
   return ptr == nullptr;
 }
-set::operator bool() const {
-  return !is_null();
-}
 
 
 ctx set::get_ctx() const {
   return ctx(isl_set_get_ctx(ptr));
 }
-std::string set::to_str() const {
-  char *Tmp = isl_set_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void set::dump() const {
   isl_set_dump(get());
@@ -17007,6 +16353,12 @@ map set::translation() const
   return manage(res);
 }
 
+isl_size set::tuple_dim() const
+{
+  auto res = isl_set_tuple_dim(get());
+  return res;
+}
+
 set set::unbind_params(multi_id tuple) const
 {
   auto res = isl_set_unbind_params(copy(), tuple.release());
@@ -17096,8 +16448,6 @@ set_list::set_list(const set_list &obj)
 {
   ptr = obj.copy();
 }
-set_list::set_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 set_list::set_list(__isl_take isl_set_list *ptr)
@@ -17131,23 +16481,11 @@ __isl_give isl_set_list *set_list::release() {
 bool set_list::is_null() const {
   return ptr == nullptr;
 }
-set_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx set_list::get_ctx() const {
   return ctx(isl_set_list_get_ctx(ptr));
 }
-std::string set_list::to_str() const {
-  char *Tmp = isl_set_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void set_list::dump() const {
   isl_set_list_dump(get());
@@ -17275,8 +16613,6 @@ space::space(const space &obj)
 {
   ptr = obj.copy();
 }
-space::space(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 space::space(__isl_take isl_space *ptr)
@@ -17320,23 +16656,11 @@ __isl_give isl_space *space::release() {
 bool space::is_null() const {
   return ptr == nullptr;
 }
-space::operator bool() const {
-  return !is_null();
-}
 
 
 ctx space::get_ctx() const {
   return ctx(isl_space_get_ctx(ptr));
 }
-std::string space::to_str() const {
-  char *Tmp = isl_space_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void space::dump() const {
   isl_space_dump(get());
@@ -17806,8 +17130,6 @@ term::term(const term &obj)
 {
   ptr = obj.copy();
 }
-term::term(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 term::term(__isl_take isl_term *ptr)
@@ -17840,9 +17162,6 @@ __isl_give isl_term *term::release() {
 
 bool term::is_null() const {
   return ptr == nullptr;
-}
-term::operator bool() const {
-  return !is_null();
 }
 
 
@@ -17892,8 +17211,6 @@ union_access_info::union_access_info(const union_access_info &obj)
 {
   ptr = obj.copy();
 }
-union_access_info::union_access_info(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_access_info::union_access_info(__isl_take isl_union_access_info *ptr)
@@ -17932,23 +17249,11 @@ __isl_give isl_union_access_info *union_access_info::release() {
 bool union_access_info::is_null() const {
   return ptr == nullptr;
 }
-union_access_info::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_access_info::get_ctx() const {
   return ctx(isl_union_access_info_get_ctx(ptr));
 }
-std::string union_access_info::to_str() const {
-  char *Tmp = isl_union_access_info_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 
 union_flow union_access_info::compute_flow() const
@@ -18004,8 +17309,6 @@ union_flow::union_flow(const union_flow &obj)
 {
   ptr = obj.copy();
 }
-union_flow::union_flow(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_flow::union_flow(__isl_take isl_union_flow *ptr)
@@ -18039,23 +17342,11 @@ __isl_give isl_union_flow *union_flow::release() {
 bool union_flow::is_null() const {
   return ptr == nullptr;
 }
-union_flow::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_flow::get_ctx() const {
   return ctx(isl_union_flow_get_ctx(ptr));
 }
-std::string union_flow::to_str() const {
-  char *Tmp = isl_union_flow_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 
 union_map union_flow::get_full_may_dependence() const
@@ -18111,8 +17402,6 @@ union_map::union_map(const union_map &obj)
 {
   ptr = obj.copy();
 }
-union_map::union_map(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_map::union_map(__isl_take isl_union_map *ptr)
@@ -18166,23 +17455,11 @@ __isl_give isl_union_map *union_map::release() {
 bool union_map::is_null() const {
   return ptr == nullptr;
 }
-union_map::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_map::get_ctx() const {
   return ctx(isl_union_map_get_ctx(ptr));
 }
-std::string union_map::to_str() const {
-  char *Tmp = isl_union_map_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_map::dump() const {
   isl_union_map_dump(get());
@@ -18880,8 +18157,6 @@ union_map_list::union_map_list(const union_map_list &obj)
 {
   ptr = obj.copy();
 }
-union_map_list::union_map_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_map_list::union_map_list(__isl_take isl_union_map_list *ptr)
@@ -18915,23 +18190,11 @@ __isl_give isl_union_map_list *union_map_list::release() {
 bool union_map_list::is_null() const {
   return ptr == nullptr;
 }
-union_map_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_map_list::get_ctx() const {
   return ctx(isl_union_map_list_get_ctx(ptr));
 }
-std::string union_map_list::to_str() const {
-  char *Tmp = isl_union_map_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_map_list::dump() const {
   isl_union_map_list_dump(get());
@@ -19053,8 +18316,6 @@ union_pw_aff::union_pw_aff(const union_pw_aff &obj)
 {
   ptr = obj.copy();
 }
-union_pw_aff::union_pw_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_pw_aff::union_pw_aff(__isl_take isl_union_pw_aff *ptr)
@@ -19108,23 +18369,11 @@ __isl_give isl_union_pw_aff *union_pw_aff::release() {
 bool union_pw_aff::is_null() const {
   return ptr == nullptr;
 }
-union_pw_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_pw_aff::get_ctx() const {
   return ctx(isl_union_pw_aff_get_ctx(ptr));
 }
-std::string union_pw_aff::to_str() const {
-  char *Tmp = isl_union_pw_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_pw_aff::dump() const {
   isl_union_pw_aff_dump(get());
@@ -19414,8 +18663,6 @@ union_pw_aff_list::union_pw_aff_list(const union_pw_aff_list &obj)
 {
   ptr = obj.copy();
 }
-union_pw_aff_list::union_pw_aff_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_pw_aff_list::union_pw_aff_list(__isl_take isl_union_pw_aff_list *ptr)
@@ -19449,23 +18696,11 @@ __isl_give isl_union_pw_aff_list *union_pw_aff_list::release() {
 bool union_pw_aff_list::is_null() const {
   return ptr == nullptr;
 }
-union_pw_aff_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_pw_aff_list::get_ctx() const {
   return ctx(isl_union_pw_aff_list_get_ctx(ptr));
 }
-std::string union_pw_aff_list::to_str() const {
-  char *Tmp = isl_union_pw_aff_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_pw_aff_list::dump() const {
   isl_union_pw_aff_list_dump(get());
@@ -19587,8 +18822,6 @@ union_pw_multi_aff::union_pw_multi_aff(const union_pw_multi_aff &obj)
 {
   ptr = obj.copy();
 }
-union_pw_multi_aff::union_pw_multi_aff(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_pw_multi_aff::union_pw_multi_aff(__isl_take isl_union_pw_multi_aff *ptr)
@@ -19662,23 +18895,11 @@ __isl_give isl_union_pw_multi_aff *union_pw_multi_aff::release() {
 bool union_pw_multi_aff::is_null() const {
   return ptr == nullptr;
 }
-union_pw_multi_aff::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_pw_multi_aff::get_ctx() const {
   return ctx(isl_union_pw_multi_aff_get_ctx(ptr));
 }
-std::string union_pw_multi_aff::to_str() const {
-  char *Tmp = isl_union_pw_multi_aff_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_pw_multi_aff::dump() const {
   isl_union_pw_multi_aff_dump(get());
@@ -19998,8 +19219,6 @@ union_pw_multi_aff_list::union_pw_multi_aff_list(const union_pw_multi_aff_list &
 {
   ptr = obj.copy();
 }
-union_pw_multi_aff_list::union_pw_multi_aff_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_pw_multi_aff_list::union_pw_multi_aff_list(__isl_take isl_union_pw_multi_aff_list *ptr)
@@ -20033,23 +19252,11 @@ __isl_give isl_union_pw_multi_aff_list *union_pw_multi_aff_list::release() {
 bool union_pw_multi_aff_list::is_null() const {
   return ptr == nullptr;
 }
-union_pw_multi_aff_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_pw_multi_aff_list::get_ctx() const {
   return ctx(isl_union_pw_multi_aff_list_get_ctx(ptr));
 }
-std::string union_pw_multi_aff_list::to_str() const {
-  char *Tmp = isl_union_pw_multi_aff_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_pw_multi_aff_list::dump() const {
   isl_union_pw_multi_aff_list_dump(get());
@@ -20171,8 +19378,6 @@ union_pw_qpolynomial::union_pw_qpolynomial(const union_pw_qpolynomial &obj)
 {
   ptr = obj.copy();
 }
-union_pw_qpolynomial::union_pw_qpolynomial(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_pw_qpolynomial::union_pw_qpolynomial(__isl_take isl_union_pw_qpolynomial *ptr)
@@ -20211,23 +19416,11 @@ __isl_give isl_union_pw_qpolynomial *union_pw_qpolynomial::release() {
 bool union_pw_qpolynomial::is_null() const {
   return ptr == nullptr;
 }
-union_pw_qpolynomial::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_pw_qpolynomial::get_ctx() const {
   return ctx(isl_union_pw_qpolynomial_get_ctx(ptr));
 }
-std::string union_pw_qpolynomial::to_str() const {
-  char *Tmp = isl_union_pw_qpolynomial_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 
 union_pw_qpolynomial union_pw_qpolynomial::add(union_pw_qpolynomial upwqp2) const
@@ -20483,8 +19676,6 @@ union_set::union_set(const union_set &obj)
 {
   ptr = obj.copy();
 }
-union_set::union_set(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_set::union_set(__isl_take isl_union_set *ptr)
@@ -20538,23 +19729,11 @@ __isl_give isl_union_set *union_set::release() {
 bool union_set::is_null() const {
   return ptr == nullptr;
 }
-union_set::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_set::get_ctx() const {
   return ctx(isl_union_set_get_ctx(ptr));
 }
-std::string union_set::to_str() const {
-  char *Tmp = isl_union_set_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_set::dump() const {
   isl_union_set_dump(get());
@@ -20960,8 +20139,6 @@ union_set_list::union_set_list(const union_set_list &obj)
 {
   ptr = obj.copy();
 }
-union_set_list::union_set_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 union_set_list::union_set_list(__isl_take isl_union_set_list *ptr)
@@ -20995,23 +20172,11 @@ __isl_give isl_union_set_list *union_set_list::release() {
 bool union_set_list::is_null() const {
   return ptr == nullptr;
 }
-union_set_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx union_set_list::get_ctx() const {
   return ctx(isl_union_set_list_get_ctx(ptr));
 }
-std::string union_set_list::to_str() const {
-  char *Tmp = isl_union_set_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void union_set_list::dump() const {
   isl_union_set_list_dump(get());
@@ -21139,8 +20304,6 @@ val::val(const val &obj)
 {
   ptr = obj.copy();
 }
-val::val(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 val::val(__isl_take isl_val *ptr)
@@ -21184,23 +20347,11 @@ __isl_give isl_val *val::release() {
 bool val::is_null() const {
   return ptr == nullptr;
 }
-val::operator bool() const {
-  return !is_null();
-}
 
 
 ctx val::get_ctx() const {
   return ctx(isl_val_get_ctx(ptr));
 }
-std::string val::to_str() const {
-  char *Tmp = isl_val_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void val::dump() const {
   isl_val_dump(get());
@@ -21548,8 +20699,6 @@ val_list::val_list(const val_list &obj)
 {
   ptr = obj.copy();
 }
-val_list::val_list(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 val_list::val_list(__isl_take isl_val_list *ptr)
@@ -21583,23 +20732,11 @@ __isl_give isl_val_list *val_list::release() {
 bool val_list::is_null() const {
   return ptr == nullptr;
 }
-val_list::operator bool() const {
-  return !is_null();
-}
 
 
 ctx val_list::get_ctx() const {
   return ctx(isl_val_list_get_ctx(ptr));
 }
-std::string val_list::to_str() const {
-  char *Tmp = isl_val_list_to_str(get());
-  if (!Tmp)
-    return "";
-  std::string S(Tmp);
-  free(Tmp);
-  return S;
-}
-
 
 void val_list::dump() const {
   isl_val_list_dump(get());
@@ -21721,8 +20858,6 @@ vec::vec(const vec &obj)
 {
   ptr = obj.copy();
 }
-vec::vec(std::nullptr_t)
-    : ptr(nullptr) {}
 
 
 vec::vec(__isl_take isl_vec *ptr)
@@ -21755,9 +20890,6 @@ __isl_give isl_vec *vec::release() {
 
 bool vec::is_null() const {
   return ptr == nullptr;
-}
-vec::operator bool() const {
-  return !is_null();
 }
 
 

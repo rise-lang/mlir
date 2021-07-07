@@ -21,6 +21,7 @@
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/Dialect/GPU/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
@@ -35,7 +36,6 @@
 #include "mlir/Dialect/Quant/QuantOps.h"
 #include "mlir/Dialect/Rise/IR/Dialect.h"
 #include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/SDBM/SDBMDialect.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
@@ -58,6 +58,7 @@ inline void registerAllDialects(DialectRegistry &registry) {
                   async::AsyncDialect,
                   complex::ComplexDialect,
                   DLTIDialect,
+                  emitc::EmitCDialect,
                   gpu::GPUDialect,
                   LLVM::LLVMDialect,
                   linalg::LinalgDialect,
@@ -75,7 +76,6 @@ inline void registerAllDialects(DialectRegistry &registry) {
                   vector::VectorDialect,
                   NVVM::NVVMDialect,
                   ROCDL::ROCDLDialect,
-                  SDBMDialect,
                   shape::ShapeDialect,
                   sparse_tensor::SparseTensorDialect,
                   tensor::TensorDialect,

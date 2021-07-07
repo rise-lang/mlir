@@ -658,7 +658,8 @@ ClangExpressionParser::ClangExpressionParser(
   //
   // FIXME: We shouldn't need to do this, the target should be immutable once
   // created. This complexity should be lifted elsewhere.
-  m_compiler->getTarget().adjust(m_compiler->getLangOpts());
+  m_compiler->getTarget().adjust(m_compiler->getDiagnostics(),
+		                 m_compiler->getLangOpts());
 
   // 6. Set up the diagnostic buffer for reporting errors
 
@@ -687,11 +688,11 @@ ClangExpressionParser::ClangExpressionParser(
     break;
   }
 
-  if (ClangModulesDeclVendor *decl_vendor =
-          target_sp->GetClangModulesDeclVendor()) {
-    if (auto *clang_persistent_vars = llvm::cast<ClangPersistentVariables>(
-            target_sp->GetPersistentExpressionStateForLanguage(
-                lldb::eLanguageTypeC))) {
+  if (auto *clang_persistent_vars = llvm::cast<ClangPersistentVariables>(
+          target_sp->GetPersistentExpressionStateForLanguage(
+              lldb::eLanguageTypeC))) {
+    if (std::shared_ptr<ClangModulesDeclVendor> decl_vendor =
+            clang_persistent_vars->GetClangModulesDeclVendor()) {
       std::unique_ptr<PPCallbacks> pp_callbacks(
           new LLDBPreprocessorCallbacks(*decl_vendor, *clang_persistent_vars,
                                         m_compiler->getSourceManager()));
@@ -724,7 +725,7 @@ ClangExpressionParser::ClangExpressionParser(
       m_compiler->getCodeGenOpts(), *m_llvm_context));
 }
 
-ClangExpressionParser::~ClangExpressionParser() {}
+ClangExpressionParser::~ClangExpressionParser() = default;
 
 namespace {
 

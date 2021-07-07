@@ -356,9 +356,8 @@ public:
     return getTLI()->isTypeLegal(VT);
   }
 
-  unsigned getRegUsageForType(Type *Ty) {
-    InstructionCost::CostType Val =
-        *getTLI()->getTypeLegalizationCost(DL, Ty).first.getValue();
+  InstructionCost getRegUsageForType(Type *Ty) {
+    InstructionCost Val = getTLI()->getTypeLegalizationCost(DL, Ty).first;
     assert(Val >= 0 && "Negative cost!");
     return Val;
   }
@@ -448,6 +447,11 @@ public:
 
     Triple TargetTriple = TM.getTargetTriple();
     if (!TargetTriple.isArch64Bit())
+      return false;
+
+    // TODO: Triggers issues on aarch64 on darwin, so temporarily disable it
+    // there.
+    if (TargetTriple.getArch() == Triple::aarch64 && TargetTriple.isOSDarwin())
       return false;
 
     return true;
@@ -772,18 +776,22 @@ public:
       return LT.first * 2 * OpCost;
     }
 
+    // We cannot scalarize scalable vectors, so return Invalid.
+    if (isa<ScalableVectorType>(Ty))
+      return InstructionCost::getInvalid();
+
     // Else, assume that we need to scalarize this op.
     // TODO: If one of the types get legalized by splitting, handle this
     // similarly to what getCastInstrCost() does.
-    if (auto *VTy = dyn_cast<VectorType>(Ty)) {
-      unsigned Num = cast<FixedVectorType>(VTy)->getNumElements();
+    if (auto *VTy = dyn_cast<FixedVectorType>(Ty)) {
       InstructionCost Cost = thisT()->getArithmeticInstrCost(
           Opcode, VTy->getScalarType(), CostKind, Opd1Info, Opd2Info,
           Opd1PropInfo, Opd2PropInfo, Args, CxtI);
       // Return the cost of multiple scalar invocation plus the cost of
       // inserting and extracting the values.
       SmallVector<Type *> Tys(Args.size(), Ty);
-      return getScalarizationOverhead(VTy, Args, Tys) + Num * Cost;
+      return getScalarizationOverhead(VTy, Args, Tys) +
+             VTy->getNumElements() * Cost;
     }
 
     // We don't know anything about this scalar instruction.
@@ -817,6 +825,7 @@ public:
     case TTI::SK_Transpose:
     case TTI::SK_InsertSubvector:
     case TTI::SK_ExtractSubvector:
+    case TTI::SK_Splice:
       break;
     }
     return Kind;
@@ -830,6 +839,7 @@ public:
     case TTI::SK_Broadcast:
       return getBroadcastShuffleOverhead(cast<FixedVectorType>(Tp));
     case TTI::SK_Select:
+    case TTI::SK_Splice:
     case TTI::SK_Reverse:
     case TTI::SK_Transpose:
     case TTI::SK_PermuteSingleSrc:
@@ -1363,6 +1373,12 @@ public:
                                      cast<VectorType>(Args[0]->getType()), None,
                                      0, cast<VectorType>(RetTy));
     }
+    case Intrinsic::experimental_vector_splice: {
+      unsigned Index = cast<ConstantInt>(Args[2])->getZExtValue();
+      return thisT()->getShuffleCost(TTI::SK_Splice,
+                                     cast<VectorType>(Args[0]->getType()), None,
+                                     Index, cast<VectorType>(RetTy));
+    }
     case Intrinsic::vector_reduce_add:
     case Intrinsic::vector_reduce_mul:
     case Intrinsic::vector_reduce_and:
@@ -1601,6 +1617,7 @@ public:
     case Intrinsic::lifetime_end:
     case Intrinsic::sideeffect:
     case Intrinsic::pseudoprobe:
+    case Intrinsic::arithmetic_fence:
       return 0;
     case Intrinsic::masked_store: {
       Type *Ty = Tys[0];

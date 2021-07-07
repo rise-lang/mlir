@@ -1462,6 +1462,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Stmt::OMPSectionsDirectiveClass:
   case Stmt::OMPSimdDirectiveClass:
   case Stmt::OMPTileDirectiveClass:
+  case Stmt::OMPUnrollDirectiveClass:
   case Stmt::OMPSingleDirectiveClass:
   case Stmt::OMPTargetDataDirectiveClass:
   case Stmt::OMPTargetDirectiveClass:
@@ -1575,6 +1576,8 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
     return mergeCanThrow(CT, canThrow(TS->getTryBody()));
   }
 
+  case Stmt::SYCLUniqueStableNameExprClass:
+    return CT_Cannot;
   case Stmt::NoStmtClass:
     llvm_unreachable("Invalid class for statement");
   }

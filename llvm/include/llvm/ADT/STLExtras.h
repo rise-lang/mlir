@@ -1299,6 +1299,58 @@ using is_one_of = disjunction<std::is_same<T, Ts>...>;
 template <typename T, typename... Ts>
 using are_base_of = conjunction<std::is_base_of<T, Ts>...>;
 
+namespace detail {
+template <typename... Ts> struct Visitor;
+
+template <typename HeadT, typename... TailTs>
+struct Visitor<HeadT, TailTs...> : remove_cvref_t<HeadT>, Visitor<TailTs...> {
+  explicit constexpr Visitor(HeadT &&Head, TailTs &&...Tail)
+      : remove_cvref_t<HeadT>(std::forward<HeadT>(Head)),
+        Visitor<TailTs...>(std::forward<TailTs>(Tail)...) {}
+  using remove_cvref_t<HeadT>::operator();
+  using Visitor<TailTs...>::operator();
+};
+
+template <typename HeadT> struct Visitor<HeadT> : remove_cvref_t<HeadT> {
+  explicit constexpr Visitor(HeadT &&Head)
+      : remove_cvref_t<HeadT>(std::forward<HeadT>(Head)) {}
+  using remove_cvref_t<HeadT>::operator();
+};
+} // namespace detail
+
+/// Returns an opaquely-typed Callable object whose operator() overload set is
+/// the sum of the operator() overload sets of each CallableT in CallableTs.
+///
+/// The type of the returned object derives from each CallableT in CallableTs.
+/// The returned object is constructed by invoking the appropriate copy or move
+/// constructor of each CallableT, as selected by overload resolution on the
+/// corresponding argument to makeVisitor.
+///
+/// Example:
+///
+/// \code
+/// auto visitor = makeVisitor([](auto) { return "unhandled type"; },
+///                            [](int i) { return "int"; },
+///                            [](std::string s) { return "str"; });
+/// auto a = visitor(42);    // `a` is now "int".
+/// auto b = visitor("foo"); // `b` is now "str".
+/// auto c = visitor(3.14f); // `c` is now "unhandled type".
+/// \endcode
+///
+/// Example of making a visitor with a lambda which captures a move-only type:
+///
+/// \code
+/// std::unique_ptr<FooHandler> FH = /* ... */;
+/// auto visitor = makeVisitor(
+///     [FH{std::move(FH)}](Foo F) { return FH->handle(F); },
+///     [](int i) { return i; },
+///     [](std::string s) { return atoi(s); });
+/// \endcode
+template <typename... CallableTs>
+constexpr decltype(auto) makeVisitor(CallableTs &&...Callables) {
+  return detail::Visitor<CallableTs...>(std::forward<CallableTs>(Callables)...);
+}
+
 //===----------------------------------------------------------------------===//
 //     Extra additions for arrays
 //===----------------------------------------------------------------------===//
@@ -1629,6 +1681,11 @@ template <typename R, typename Predicate,
           typename Val = decltype(*adl_begin(std::declval<R>()))>
 auto partition_point(R &&Range, Predicate P) {
   return std::partition_point(adl_begin(Range), adl_end(Range), P);
+}
+
+template<typename Range, typename Predicate>
+auto unique(Range &&R, Predicate P) {
+  return std::unique(adl_begin(R), adl_end(R), P);
 }
 
 /// Wrapper function around std::equal to detect if all elements

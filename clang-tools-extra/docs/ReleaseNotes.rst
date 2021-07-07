@@ -95,11 +95,25 @@ New checks
   Finds ``pthread_setcanceltype`` function calls where a thread's cancellation
   type is set to asynchronous.
 
+- New :doc:`altera-id-dependent-backward-branch
+  <clang-tidy/checks/altera-id-dependent-backward-branch>` check.
+
+  Finds ID-dependent variables and fields that are used within loops. This
+  causes branches to occur inside the loops, and thus leads to performance
+  degradation.
+
 - New :doc:`altera-unroll-loops
   <clang-tidy/checks/altera-unroll-loops>` check.
 
   Finds inner loops that have not been unrolled, as well as fully unrolled
   loops with unknown loops bounds or a large number of iterations.
+
+- New :doc:`bugprone-easily-swappable-parameters
+  <clang-tidy/checks/bugprone-easily-swappable-parameters>` check.
+
+  Finds function definitions where parameters of convertible types follow each
+  other directly, making call sites prone to calling the function with
+  swapped (or badly ordered) arguments.
 
 - New :doc:`cppcoreguidelines-prefer-member-initializer
   <clang-tidy/checks/cppcoreguidelines-prefer-member-initializer>` check.

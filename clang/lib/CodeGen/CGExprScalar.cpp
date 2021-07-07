@@ -486,6 +486,8 @@ public:
     return CGF.EmitPseudoObjectRValue(E).getScalarVal();
   }
 
+  Value *VisitSYCLUniqueStableNameExpr(SYCLUniqueStableNameExpr *E);
+
   Value *VisitOpaqueValueExpr(OpaqueValueExpr *E) {
     if (E->isGLValue())
       return EmitLoadOfLValue(CGF.getOrCreateOpaqueLValueMapping(E),
@@ -1581,6 +1583,25 @@ Value *ScalarExprEmitter::VisitExpr(Expr *E) {
   return llvm::UndefValue::get(CGF.ConvertType(E->getType()));
 }
 
+Value *
+ScalarExprEmitter::VisitSYCLUniqueStableNameExpr(SYCLUniqueStableNameExpr *E) {
+  ASTContext &Context = CGF.getContext();
+  llvm::Optional<LangAS> GlobalAS =
+      Context.getTargetInfo().getConstantAddressSpace();
+  llvm::Constant *GlobalConstStr = Builder.CreateGlobalStringPtr(
+      E->ComputeName(Context), "__usn_str",
+      static_cast<unsigned>(GlobalAS.getValueOr(LangAS::Default)));
+
+  unsigned ExprAS = Context.getTargetAddressSpace(E->getType());
+
+  if (GlobalConstStr->getType()->getPointerAddressSpace() == ExprAS)
+    return GlobalConstStr;
+
+  llvm::Type *EltTy = GlobalConstStr->getType()->getPointerElementType();
+  llvm::PointerType *NewPtrTy = llvm::PointerType::get(EltTy, ExprAS);
+  return Builder.CreateAddrSpaceCast(GlobalConstStr, NewPtrTy, "usn_addr_cast");
+}
+
 Value *ScalarExprEmitter::VisitShuffleVectorExpr(ShuffleVectorExpr *E) {
   // Vector Mask Case
   if (E->getNumSubExprs() == 2) {
@@ -1944,7 +1965,7 @@ bool CodeGenFunction::ShouldNullCheckClassCastValue(const CastExpr *CE) {
 
   if (const ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(CE)) {
     // And that glvalue casts are never null.
-    if (ICE->getValueKind() != VK_RValue)
+    if (ICE->getValueKind() != VK_PRValue)
       return false;
   }
 
@@ -2074,24 +2095,11 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
          isa<llvm::ScalableVectorType>(DstTy)) ||
         (isa<llvm::ScalableVectorType>(SrcTy) &&
          isa<llvm::FixedVectorType>(DstTy))) {
-      if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
-        // Call expressions can't have a scalar return unless the return type
-        // is a reference type so an lvalue can't be emitted. Create a temp
-        // alloca to store the call, bitcast the address then load.
-        QualType RetTy = CE->getCallReturnType(CGF.getContext());
-        Address Addr =
-            CGF.CreateDefaultAlignTempAlloca(SrcTy, "saved-call-rvalue");
-        LValue LV = CGF.MakeAddrLValue(Addr, RetTy);
-        CGF.EmitStoreOfScalar(Src, LV);
-        Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy),
-                                            "castFixedSve");
-        LValue DestLV = CGF.MakeAddrLValue(Addr, DestTy);
-        DestLV.setTBAAInfo(TBAAAccessInfo::getMayAliasInfo());
-        return EmitLoadOfLValue(DestLV, CE->getExprLoc());
-      }
-
-      Address Addr = EmitLValue(E).getAddress(CGF);
-      Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy));
+      Address Addr = CGF.CreateDefaultAlignTempAlloca(SrcTy, "saved-value");
+      LValue LV = CGF.MakeAddrLValue(Addr, E->getType());
+      CGF.EmitStoreOfScalar(Src, LV);
+      Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy),
+                                          "castFixedSve");
       LValue DestLV = CGF.MakeAddrLValue(Addr, DestTy);
       DestLV.setTBAAInfo(TBAAAccessInfo::getMayAliasInfo());
       return EmitLoadOfLValue(DestLV, CE->getExprLoc());
@@ -4833,7 +4841,7 @@ LValue CodeGenFunction::EmitObjCIsaExpr(const ObjCIsaExpr *E) {
 
   Expr *BaseExpr = E->getBase();
   Address Addr = Address::invalid();
-  if (BaseExpr->isRValue()) {
+  if (BaseExpr->isPRValue()) {
     Addr = Address(EmitScalarExpr(BaseExpr), getPointerAlign());
   } else {
     Addr = EmitLValue(BaseExpr).getAddress(*this);

@@ -571,7 +571,9 @@ BackendConsumer::StackSizeDiagHandler(const llvm::DiagnosticInfoStackSize &D) {
     // FIXME: Shouldn't need to truncate to uint32_t
     Diags.Report(ND->getASTContext().getFullLoc(ND->getLocation()),
                  diag::warn_fe_frame_larger_than)
-      << static_cast<uint32_t>(D.getStackSize()) << Decl::castToDeclContext(ND);
+        << static_cast<uint32_t>(D.getStackSize())
+        << static_cast<uint32_t>(D.getStackLimit())
+        << Decl::castToDeclContext(ND);
     return true;
   }
 
@@ -883,6 +885,10 @@ std::unique_ptr<llvm::Module> CodeGenAction::takeModule() {
 llvm::LLVMContext *CodeGenAction::takeLLVMContext() {
   OwnsVMContext = false;
   return VMContext;
+}
+
+CodeGenerator *CodeGenAction::getCodeGenerator() const {
+  return BEConsumer->getCodeGenerator();
 }
 
 static std::unique_ptr<raw_pwrite_stream>

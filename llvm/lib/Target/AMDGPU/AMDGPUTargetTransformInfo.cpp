@@ -19,6 +19,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/KnownBits.h"
 
@@ -836,10 +837,6 @@ InstructionCost GCNTTIImpl::getCFInstrCost(unsigned Opcode,
   }
   case Instruction::Ret:
     return SCost ? 1 : 10;
-  case Instruction::PHI:
-    // TODO: 1. A prediction phi won't be eliminated?
-    //       2. Estimate data copy instructions in this case.
-    return 1;
   }
   return BaseT::getCFInstrCost(Opcode, CostKind, I);
 }

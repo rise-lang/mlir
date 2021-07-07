@@ -12,6 +12,7 @@
 #include "Diagnostics.h"
 #include "DraftStore.h"
 #include "DumpAST.h"
+#include "Features.h"
 #include "GlobalCompilationDatabase.h"
 #include "LSPBinder.h"
 #include "Protocol.h"
@@ -24,7 +25,6 @@
 #include "support/MemoryTree.h"
 #include "support/Trace.h"
 #include "clang/AST/ASTContext.h"
-#include "clang/Basic/Version.h"
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
@@ -620,7 +620,8 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
   llvm::json::Object Result{
       {{"serverInfo",
         llvm::json::Object{{"name", "clangd"},
-                           {"version", getClangToolFullVersion("clangd")}}},
+                           {"version", llvm::formatv("{0} {1}", versionString(),
+                                                     featureString())}}},
        {"capabilities", std::move(ServerCaps)}}};
   if (Opts.Encoding)
     Result["offsetEncoding"] = *Opts.Encoding;
@@ -748,9 +749,8 @@ void ClangdLSPServer::onCommandApplyTweak(const TweakArgs &Args,
       return Reply(std::move(Err));
 
     WorkspaceEdit WE;
-    WE.changes.emplace();
     for (const auto &It : R->ApplyEdits) {
-      (*WE.changes)[URI::createFile(It.first()).toString()] =
+      WE.changes[URI::createFile(It.first()).toString()] =
           It.second.asTextEdits();
     }
     // ApplyEdit will take care of calling Reply().
@@ -813,22 +813,20 @@ void ClangdLSPServer::onRename(const RenameParams &Params,
   if (!Server->getDraft(File))
     return Reply(llvm::make_error<LSPError>(
         "onRename called for non-added file", ErrorCode::InvalidParams));
-  Server->rename(
-      File, Params.position, Params.newName, Opts.Rename,
-      [File, Params, Reply = std::move(Reply),
-       this](llvm::Expected<RenameResult> R) mutable {
-        if (!R)
-          return Reply(R.takeError());
-        if (auto Err = validateEdits(*Server, R->GlobalChanges))
-          return Reply(std::move(Err));
-        WorkspaceEdit Result;
-        Result.changes.emplace();
-        for (const auto &Rep : R->GlobalChanges) {
-          (*Result.changes)[URI::createFile(Rep.first()).toString()] =
-              Rep.second.asTextEdits();
-        }
-        Reply(Result);
-      });
+  Server->rename(File, Params.position, Params.newName, Opts.Rename,
+                 [File, Params, Reply = std::move(Reply),
+                  this](llvm::Expected<RenameResult> R) mutable {
+                   if (!R)
+                     return Reply(R.takeError());
+                   if (auto Err = validateEdits(*Server, R->GlobalChanges))
+                     return Reply(std::move(Err));
+                   WorkspaceEdit Result;
+                   for (const auto &Rep : R->GlobalChanges) {
+                     Result.changes[URI::createFile(Rep.first()).toString()] =
+                         Rep.second.asTextEdits();
+                   }
+                   Reply(Result);
+                 });
 }
 
 void ClangdLSPServer::onDocumentDidClose(
@@ -1264,7 +1262,7 @@ void ClangdLSPServer::onChangeConfiguration(
 void ClangdLSPServer::onReference(const ReferenceParams &Params,
                                   Callback<std::vector<Location>> Reply) {
   Server->findReferences(
-      Params.textDocument.uri.file(), Params.position, Opts.CodeComplete.Limit,
+      Params.textDocument.uri.file(), Params.position, Opts.ReferencesLimit,
       [Reply = std::move(Reply),
        IncludeDecl(Params.context.includeDeclaration)](
           llvm::Expected<ReferencesResult> Refs) mutable {
@@ -1606,7 +1604,7 @@ void ClangdLSPServer::onBackgroundIndexProgress(
     if (Stats.Completed < Stats.Enqueued) {
       assert(Stats.Enqueued > Stats.LastIdle);
       WorkDoneProgressReport Report;
-      Report.percentage = 100.0 * (Stats.Completed - Stats.LastIdle) /
+      Report.percentage = 100 * (Stats.Completed - Stats.LastIdle) /
                           (Stats.Enqueued - Stats.LastIdle);
       Report.message =
           llvm::formatv("{0}/{1}", Stats.Completed - Stats.LastIdle,

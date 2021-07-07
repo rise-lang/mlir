@@ -43,15 +43,6 @@ DEFAULT_FEATURES = [
                                                                  sys.platform.lower().strip() == 'darwin'), # TODO: this doesn't handle cross-compiling to Apple platforms.
   Feature(name='objective-c++',                 when=lambda cfg: hasCompileFlag(cfg, '-xobjective-c++ -fobjc-arc')),
 
-  # Note: We use a custom modules cache path to make sure that we don't reuse
-  #       the default one, which can be shared across builds. This is important
-  #       because we define macros in headers files, and a change in these macros
-  #       doesn't seem to invalidate modules cache entries, which means we could
-  #       build against now-invalid cached headers from a previous build.
-  Feature(name='modules-support',
-          when=lambda cfg: hasCompileFlag(cfg, '-fmodules'),
-          actions=lambda cfg: [AddCompileFlag('-fmodules-cache-path=%t/ModuleCache')]),
-
   Feature(name='non-lockfree-atomics',
           when=lambda cfg: sourceBuilds(cfg, """
             #include <atomic>
@@ -166,51 +157,4 @@ DEFAULT_FEATURES += [
     when=lambda cfg: shutil.which('gdb') is not None,
     actions=[AddSubstitution('%{gdb}', lambda cfg: shutil.which('gdb'))]
   )
-]
-
-
-# When vendor-specific availability annotations are enabled, add Lit features
-# with various forms of the target triple to make it easier to write XFAIL or
-# UNSUPPORTED markup for tests that are known to fail on a particular triple.
-#
-# More specifically, when the `use_system_cxx_lib` parameter is enabled, then
-# assuming the `target_triple` is set to `x86_64-apple-macosx10.12`, the
-# following features will be made available:
-#   - with_system_cxx_lib=macosx
-#   - with_system_cxx_lib=macosx10.12
-#   - with_system_cxx_lib=x86_64-apple-macosx10.12
-#
-# These features can be used to XFAIL a test that fails when deployed on (or is
-# compiled for) an older system. For example, if the test exhibits a bug in the
-# libc on a particular system version, or if the test uses a symbol that is not
-# available on an older version of the dylib, it can be marked as XFAIL with
-# one of the above features.
-#
-# It is sometimes useful to check that a test fails specifically when compiled
-# for a given deployment target. For example, this is the case when testing
-# availability markup, where we want to make sure that using the annotated
-# facility on a deployment target that doesn't support it will fail at compile
-# time, not at runtime. This can be achieved by creating a `.compile.pass.cpp`
-# and XFAILing it for the right deployment target. If the test doesn't fail at
-# compile-time like it's supposed to, the test will XPASS. Another option is to
-# create a `.verify.cpp` test that checks for the right errors, and mark that
-# test as requiring `with_system_cxx_lib=<something>`.
-#
-# TODO: This is very unclean -- we assume that the 'use_system_cxx_lib' parameter
-#       is set before this feature gets detected, and we also set a dummy name
-#       for the main feature. We also take for granted that `target_triple`
-#       exists in the config object. This should be refactored so that the
-#       'use_system_cxx_lib' Parameter can set these features itself.
-def _addSystemCxxLibDeclinations(cfg):
-  (arch, vendor, platform) = cfg.target_triple.split('-', 2)
-  (sysname, version) = re.match(r'([^0-9]+)([0-9\.]*)', platform).groups()
-  return [
-    AddFeature('with_system_cxx_lib={}-{}-{}{}'.format(arch, vendor, sysname, version)),
-    AddFeature('with_system_cxx_lib={}{}'.format(sysname, version)),
-    AddFeature('with_system_cxx_lib={}'.format(sysname)),
-  ]
-DEFAULT_FEATURES += [
-  Feature(name='__dummy_use_system_cxx_lib',
-          when=lambda cfg: 'use_system_cxx_lib' in cfg.available_features,
-          actions=_addSystemCxxLibDeclinations)
 ]

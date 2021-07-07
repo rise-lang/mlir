@@ -68,6 +68,7 @@ add_lldb_library(lldbTarget
   ThreadSpec.cpp
   ThreadPostMortemTrace.cpp
   Trace.cpp
+  TraceCursor.cpp
   TraceSessionFileParser.cpp
   UnixSignals.cpp
   UnwindAssembly.cpp
@@ -81,7 +82,6 @@ add_lldb_library(lldbTarget
     lldbInterpreter
     lldbSymbol
     lldbUtility
-    lldbPluginExpressionParserClang
     lldbPluginProcessUtility
 
   LINK_COMPONENTS

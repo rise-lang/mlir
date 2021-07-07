@@ -18,6 +18,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "LegalizeTypes.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
@@ -96,6 +97,8 @@ void DAGTypeLegalizer::PromoteIntegerResult(SDNode *N, unsigned ResNo) {
 
   case ISD::EXTRACT_SUBVECTOR:
                          Res = PromoteIntRes_EXTRACT_SUBVECTOR(N); break;
+  case ISD::INSERT_SUBVECTOR:
+                         Res = PromoteIntRes_INSERT_SUBVECTOR(N); break;
   case ISD::VECTOR_REVERSE:
                          Res = PromoteIntRes_VECTOR_REVERSE(N); break;
   case ISD::VECTOR_SHUFFLE:
@@ -464,7 +467,8 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BSWAP(SDNode *N) {
   // If we expand later we'll end up with more operations since we lost the
   // original type. We only do this for scalars since we have a shuffle
   // based lowering for vectors in LegalizeVectorOps.
-  if (!OVT.isVector() && !TLI.isOperationLegalOrCustom(ISD::BSWAP, NVT)) {
+  if (!OVT.isVector() &&
+      !TLI.isOperationLegalOrCustomOrPromote(ISD::BSWAP, NVT)) {
     if (SDValue Res = TLI.expandBSWAP(N, DAG))
       return DAG.getNode(ISD::ANY_EXTEND, dl, NVT, Res);
   }
@@ -486,7 +490,7 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BITREVERSE(SDNode *N) {
   // original type. We only do this for scalars since we have a shuffle
   // based lowering for vectors in LegalizeVectorOps.
   if (!OVT.isVector() && OVT.isSimple() &&
-      !TLI.isOperationLegalOrCustom(ISD::BITREVERSE, NVT)) {
+      !TLI.isOperationLegalOrCustomOrPromote(ISD::BITREVERSE, NVT)) {
     if (SDValue Res = TLI.expandBITREVERSE(N, DAG))
       return DAG.getNode(ISD::ANY_EXTEND, dl, NVT, Res);
   }
@@ -1238,17 +1242,17 @@ SDValue DAGTypeLegalizer::PromoteIntRes_TRUNCATE(SDNode *N) {
   case TargetLowering::TypeSplitVector: {
     EVT InVT = InOp.getValueType();
     assert(InVT.isVector() && "Cannot split scalar types");
-    unsigned NumElts = InVT.getVectorNumElements();
-    assert(NumElts == NVT.getVectorNumElements() &&
+    ElementCount NumElts = InVT.getVectorElementCount();
+    assert(NumElts == NVT.getVectorElementCount() &&
            "Dst and Src must have the same number of elements");
-    assert(isPowerOf2_32(NumElts) &&
+    assert(isPowerOf2_32(NumElts.getKnownMinValue()) &&
            "Promoted vector type must be a power of two");
 
     SDValue EOp1, EOp2;
     GetSplitVector(InOp, EOp1, EOp2);
 
     EVT HalfNVT = EVT::getVectorVT(*DAG.getContext(), NVT.getScalarType(),
-                                   NumElts/2);
+                                   NumElts.divideCoefficientBy(2));
     EOp1 = DAG.getNode(ISD::TRUNCATE, dl, HalfNVT, EOp1);
     EOp2 = DAG.getNode(ISD::TRUNCATE, dl, HalfNVT, EOp2);
 
@@ -1986,8 +1990,37 @@ SDValue DAGTypeLegalizer::PromoteIntOp_PREFETCH(SDNode *N, unsigned OpNo) {
 }
 
 SDValue DAGTypeLegalizer::PromoteIntOp_FPOWI(SDNode *N) {
-  SDValue Op = SExtPromotedInteger(N->getOperand(1));
-  return SDValue(DAG.UpdateNodeOperands(N, N->getOperand(0), Op), 0);
+  // FIXME: Support for promotion of STRICT_FPOWI is not implemented yet.
+  assert(N->getOpcode() == ISD::FPOWI && "No STRICT_FPOWI support here yet.");
+
+  // The integer operand is the last operand in FPOWI (so the result and
+  // floating point operand is already type legalized).
+
+  // We can't just promote the exponent type in FPOWI, since we want to lower
+  // the node to a libcall and we if we promote to a type larger than
+  // sizeof(int) the libcall might not be according to the targets ABI. Instead
+  // we rewrite to a libcall here directly, letting makeLibCall handle promotion
+  // if the target accepts it according to shouldSignExtendTypeInLibCall.
+  RTLIB::Libcall LC = RTLIB::getPOWI(N->getValueType(0));
+  assert(LC != RTLIB::UNKNOWN_LIBCALL && "Unexpected fpowi.");
+  if (!TLI.getLibcallName(LC)) {
+    // Some targets don't have a powi libcall; use pow instead.
+    // FIXME: Implement this if some target needs it.
+    DAG.getContext()->emitError("Don't know how to promote fpowi to fpow");
+    return DAG.getUNDEF(N->getValueType(0));
+  }
+  // The exponent should fit in a sizeof(int) type for the libcall to be valid.
+  assert(DAG.getLibInfo().getIntSize() ==
+         N->getOperand(1).getValueType().getSizeInBits() &&
+         "POWI exponent should match with sizeof(int) when doing the libcall.");
+  TargetLowering::MakeLibCallOptions CallOptions;
+  CallOptions.setSExt(true);
+  SDValue Ops[2] = { N->getOperand(0), N->getOperand(1) };
+  std::pair<SDValue, SDValue> Tmp =
+      TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops,
+                      CallOptions, SDLoc(N), SDValue());
+  ReplaceValueWith(SDValue(N, 0), Tmp.first);
+  return SDValue();
 }
 
 SDValue DAGTypeLegalizer::PromoteIntOp_VECREDUCE(SDNode *N) {
@@ -2225,7 +2258,7 @@ void DAGTypeLegalizer::ExpandIntegerResult(SDNode *N, unsigned ResNo) {
 std::pair <SDValue, SDValue> DAGTypeLegalizer::ExpandAtomic(SDNode *Node) {
   unsigned Opc = Node->getOpcode();
   MVT VT = cast<AtomicSDNode>(Node)->getMemoryVT().getSimpleVT();
-  AtomicOrdering order = cast<AtomicSDNode>(Node)->getOrdering();
+  AtomicOrdering order = cast<AtomicSDNode>(Node)->getMergedOrdering();
   // Lower to outline atomic libcall if outline atomics enabled,
   // or to sync libcall otherwise
   RTLIB::Libcall LC = RTLIB::getOUTLINE_ATOMIC(Opc, order, VT);
@@ -4696,6 +4729,50 @@ SDValue DAGTypeLegalizer::PromoteIntRes_EXTRACT_SUBVECTOR(SDNode *N) {
   }
 
   return DAG.getBuildVector(NOutVT, dl, Ops);
+}
+
+SDValue DAGTypeLegalizer::PromoteIntRes_INSERT_SUBVECTOR(SDNode *N) {
+  EVT OutVT = N->getValueType(0);
+  EVT NOutVT = TLI.getTypeToTransformTo(*DAG.getContext(), OutVT);
+  assert(NOutVT.isVector() && "This type must be promoted to a vector type");
+
+  SDLoc dl(N);
+  SDValue Vec = N->getOperand(0);
+  SDValue SubVec = N->getOperand(1);
+  SDValue Idx = N->getOperand(2);
+
+  auto *ConstantIdx = cast<ConstantSDNode>(Idx);
+  unsigned IdxN = ConstantIdx->getZExtValue();
+
+  EVT VecVT = Vec.getValueType();
+  EVT SubVecVT = SubVec.getValueType();
+
+  // To insert SubVec into Vec, store the wider vector to memory, overwrite the
+  // appropriate bits with the narrower vector, and reload.
+  Align SmallestAlign = DAG.getReducedAlign(SubVecVT, /*UseABI=*/false);
+
+  SDValue StackPtr =
+      DAG.CreateStackTemporary(VecVT.getStoreSize(), SmallestAlign);
+  auto StackPtrVT = StackPtr->getValueType(0);
+  auto &MF = DAG.getMachineFunction();
+  auto FrameIndex = cast<FrameIndexSDNode>(StackPtr.getNode())->getIndex();
+  auto PtrInfo = MachinePointerInfo::getFixedStack(MF, FrameIndex);
+
+  SDValue Store = DAG.getStore(DAG.getEntryNode(), dl, Vec, StackPtr, PtrInfo,
+                               SmallestAlign);
+
+  SDValue ScaledIdx = Idx;
+  if (SubVecVT.isScalableVector() && IdxN != 0) {
+    APInt IdxAPInt = cast<ConstantSDNode>(Idx)->getAPIntValue();
+    ScaledIdx = DAG.getVScale(dl, StackPtrVT,
+                              IdxAPInt.sextOrSelf(StackPtrVT.getSizeInBits()));
+  }
+
+  SDValue SubVecPtr =
+      TLI.getVectorSubVecPointer(DAG, StackPtr, VecVT, SubVecVT, ScaledIdx);
+  Store = DAG.getStore(Store, dl, SubVec, SubVecPtr, PtrInfo, SmallestAlign);
+  return DAG.getExtLoad(ISD::LoadExtType::EXTLOAD, dl, NOutVT, Store, StackPtr,
+                        PtrInfo, OutVT, SmallestAlign);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_VECTOR_REVERSE(SDNode *N) {

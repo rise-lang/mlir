@@ -8,7 +8,7 @@
 
 #include "PlatformDarwin.h"
 
-#include <string.h>
+#include <cstring>
 
 #include <algorithm>
 #include <memory>
@@ -54,7 +54,7 @@ PlatformDarwin::PlatformDarwin(bool is_host) : PlatformPOSIX(is_host) {}
 ///
 /// The destructor is virtual since this class is designed to be
 /// inherited from by the plug-in instance.
-PlatformDarwin::~PlatformDarwin() {}
+PlatformDarwin::~PlatformDarwin() = default;
 
 lldb_private::Status
 PlatformDarwin::PutFile(const lldb_private::FileSpec &source,

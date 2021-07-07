@@ -1178,9 +1178,11 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       FunctionCallee Fn = MS.MaybeStoreOriginFn[SizeIndex];
       Value *ConvertedShadow2 =
           IRB.CreateZExt(ConvertedShadow, IRB.getIntNTy(8 * (1 << SizeIndex)));
-      IRB.CreateCall(Fn,
-                     {ConvertedShadow2,
-                      IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()), Origin});
+      CallBase *CB = IRB.CreateCall(
+          Fn, {ConvertedShadow2,
+               IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()), Origin});
+      CB->addParamAttr(0, Attribute::ZExt);
+      CB->addParamAttr(2, Attribute::ZExt);
     } else {
       Value *Cmp = convertToBool(ConvertedShadow, IRB, "_mscmp");
       Instruction *CheckTerm = SplitBlockAndInsertIfThen(
@@ -1250,9 +1252,11 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       FunctionCallee Fn = MS.MaybeWarningFn[SizeIndex];
       Value *ConvertedShadow2 =
           IRB.CreateZExt(ConvertedShadow, IRB.getIntNTy(8 * (1 << SizeIndex)));
-      IRB.CreateCall(Fn, {ConvertedShadow2, MS.TrackOrigins && Origin
-                                                ? Origin
-                                                : (Value *)IRB.getInt32(0)});
+      CallBase *CB = IRB.CreateCall(
+          Fn, {ConvertedShadow2,
+               MS.TrackOrigins && Origin ? Origin : (Value *)IRB.getInt32(0)});
+      CB->addParamAttr(0, Attribute::ZExt);
+      CB->addParamAttr(1, Attribute::ZExt);
     } else {
       Value *Cmp = convertToBool(ConvertedShadow, IRB, "_mscmp");
       Instruction *CheckTerm = SplitBlockAndInsertIfThen(
@@ -3113,7 +3117,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     if (PropagateShadow) {
       std::tie(ShadowPtr, OriginPtr) =
           getShadowOriginPtr(Addr, IRB, ShadowTy, Alignment, /*isStore*/ false);
-      setShadow(&I, IRB.CreateMaskedLoad(ShadowPtr, Alignment, Mask,
+      setShadow(&I, IRB.CreateMaskedLoad(ShadowTy, ShadowPtr, Alignment, Mask,
                                          getShadow(PassThru), "_msmaskedld"));
     } else {
       setShadow(&I, getCleanShadow(&I));

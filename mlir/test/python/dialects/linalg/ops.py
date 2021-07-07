@@ -38,6 +38,17 @@ def testInitTensor():
 
   print(module)
 
+# CHECK-LABEL: TEST: testInitTensorStaticSizesAttribute
+@run
+def testInitTensorStaticSizesAttribute():
+  with Context() as ctx, Location.unknown():
+    module = Module.create()
+    f32 = F32Type.get()
+    with InsertionPoint(module.body):
+      op = linalg.InitTensorOp([3, 4], f32)
+      # CHECK: [3, 4]
+      print(op.attributes['static_sizes'])
+
 # CHECK-LABEL: TEST: testFill
 @run
 def testFill():
@@ -48,7 +59,7 @@ def testFill():
       # CHECK-LABEL: func @fill_tensor
       #  CHECK-SAME:   %[[OUT:[0-9a-z]+]]: tensor<12x?xf32>
       #  CHECK-NEXT: %[[CST:.*]] = constant 0.0{{.*}} : f32
-      #  CHECK-NEXT: %[[RES:.*]] = linalg.fill(%[[OUT]], %[[CST]]) : tensor<12x?xf32>, f32 -> tensor<12x?xf32>
+      #  CHECK-NEXT: %[[RES:.*]] = linalg.fill(%[[CST]], %[[OUT]]) : f32, tensor<12x?xf32> -> tensor<12x?xf32>
       #  CHECK-NEXT: return %[[RES]] : tensor<12x?xf32>
       @builtin.FuncOp.from_py_func(
           RankedTensorType.get((12, -1), f32))
@@ -62,7 +73,7 @@ def testFill():
       # CHECK-LABEL: func @fill_buffer
       #  CHECK-SAME:   %[[OUT:[0-9a-z]+]]: memref<12x?xf32>
       #  CHECK-NEXT: %[[CST:.*]] = constant 0.0{{.*}} : f32
-      #  CHECK-NEXT: linalg.fill(%[[OUT]], %[[CST]]) : memref<12x?xf32>, f32
+      #  CHECK-NEXT: linalg.fill(%[[CST]], %[[OUT]]) : f32, memref<12x?xf32>
       #  CHECK-NEXT: return
       @builtin.FuncOp.from_py_func(
           MemRefType.get((12, -1), f32))
@@ -153,7 +164,7 @@ def testNamedStructuredOpGenericForm():
         # CHECK-NEXT:    std.mulf{{.*}} (f32, f32) -> f32
         # CHECK-NEXT:    std.addf{{.*}} (f32, f32) -> f32
         # CHECK-NEXT:    linalg.yield{{.*}} (f32) -> ()
-        # CHECK-NEXT:    {linalg.memoized_indexing_maps{{.*}}operand_segment_sizes = dense<[2, 1]> : vector<2xi32>} : 
+        # CHECK-NEXT:    {linalg.memoized_indexing_maps{{.*}}operand_segment_sizes = dense<[2, 1]> : vector<2xi32>} :
         # CHECK-SAME: (tensor<4x16xf32>, tensor<16x8xf32>, tensor<4x8xf32>) -> tensor<4x8xf32>
         return linalg.matmul(lhs, rhs, outs=[init_result.result])
 

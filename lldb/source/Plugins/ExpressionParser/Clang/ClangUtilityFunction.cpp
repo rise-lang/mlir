@@ -14,7 +14,7 @@
 #include "ClangExpressionSourceCode.h"
 #include "ClangPersistentVariables.h"
 
-#include <stdio.h>
+#include <cstdio>
 #if HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -65,7 +65,7 @@ ClangUtilityFunction::ClangUtilityFunction(ExecutionContextScope &exe_scope,
   }
 }
 
-ClangUtilityFunction::~ClangUtilityFunction() {}
+ClangUtilityFunction::~ClangUtilityFunction() = default;
 
 /// Install the utility function into a process
 ///

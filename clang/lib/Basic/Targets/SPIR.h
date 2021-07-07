@@ -35,6 +35,8 @@ static const unsigned SPIRDefIsPrivMap[] = {
     0, // cuda_shared
     // SYCL address space values for this map are dummy
     0, // sycl_global
+    0, // sycl_global_device
+    0, // sycl_global_host
     0, // sycl_local
     0, // sycl_private
     0, // ptr32_sptr
@@ -56,6 +58,8 @@ static const unsigned SPIRDefIsGenMap[] = {
     0, // cuda_constant
     0, // cuda_shared
     1, // sycl_global
+    5, // sycl_global_device
+    6, // sycl_global_host
     3, // sycl_local
     0, // sycl_private
     0, // ptr32_sptr
@@ -113,6 +117,11 @@ public:
     return TargetInfo::VoidPtrBuiltinVaList;
   }
 
+  Optional<unsigned>
+  getDWARFAddressSpace(unsigned AddressSpace) const override {
+    return AddressSpace;
+  }
+
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
     return (CC == CC_SpirFunction || CC == CC_OpenCLKernel) ? CCCR_OK
                                                             : CCCR_Warning;
@@ -126,8 +135,8 @@ public:
     AddrSpaceMap = DefaultIsGeneric ? &SPIRDefIsGenMap : &SPIRDefIsPrivMap;
   }
 
-  void adjust(LangOptions &Opts) override {
-    TargetInfo::adjust(Opts);
+  void adjust(DiagnosticsEngine &Diags, LangOptions &Opts) override {
+    TargetInfo::adjust(Diags, Opts);
     // FIXME: SYCL specification considers unannotated pointers and references
     // to be pointing to the generic address space. See section 5.9.3 of
     // SYCL 2020 specification.

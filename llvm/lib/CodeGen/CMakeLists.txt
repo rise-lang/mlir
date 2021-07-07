@@ -7,7 +7,6 @@ add_llvm_component_library(LLVMCodeGen
   BranchFolding.cpp
   BranchRelaxation.cpp
   BreakFalseDeps.cpp
-  BuiltinGCs.cpp
   BasicBlockSections.cpp
   CalcSpillWeights.cpp
   CallingConvLower.cpp
@@ -38,7 +37,6 @@ add_llvm_component_library(LLVMCodeGen
   GCMetadata.cpp
   GCMetadataPrinter.cpp
   GCRootLowering.cpp
-  GCStrategy.cpp
   GlobalMerge.cpp
   HardwareLoops.cpp
   IfConversion.cpp
@@ -93,6 +91,7 @@ add_llvm_component_library(LLVMCodeGen
   MachineLoopUtils.cpp
   MachineModuleInfo.cpp
   MachineModuleInfoImpls.cpp
+  MachineModuleSlotTracker.cpp
   MachineOperand.cpp
   MachineOptimizationRemarkEmitter.cpp
   MachineOutliner.cpp
@@ -108,6 +107,8 @@ add_llvm_component_library(LLVMCodeGen
   MachineStripDebug.cpp
   MachineTraceMetrics.cpp
   MachineVerifier.cpp
+  MIRFSDiscriminator.cpp
+  MIRYamlMapping.cpp
   ModuloSchedule.cpp
   MultiHazardRecognizer.cpp
   PatchableFunction.cpp

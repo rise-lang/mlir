@@ -546,7 +546,7 @@ private:
 }
 
 CodeGen::CGCXXABI *CodeGen::CreateItaniumCXXABI(CodeGenModule &CGM) {
-  switch (CGM.getTarget().getCXXABI().getKind()) {
+  switch (CGM.getContext().getCXXABIKind()) {
   // For IR-generation purposes, there's no significant difference
   // between the ARM and iOS ABIs.
   case TargetCXXABI::GenericARM:
@@ -2611,15 +2611,6 @@ static llvm::Function *createGlobalInitOrCleanupFn(CodeGen::CodeGenModule &CGM,
   return GlobalInitOrCleanupFn;
 }
 
-static FunctionDecl *
-createGlobalInitOrCleanupFnDecl(CodeGen::CodeGenModule &CGM, StringRef FnName) {
-  ASTContext &Ctx = CGM.getContext();
-  QualType FunctionTy = Ctx.getFunctionType(Ctx.VoidTy, llvm::None, {});
-  return FunctionDecl::Create(
-      Ctx, Ctx.getTranslationUnitDecl(), SourceLocation(), SourceLocation(),
-      &Ctx.Idents.get(FnName), FunctionTy, nullptr, SC_Static, false, false);
-}
-
 void CodeGenModule::unregisterGlobalDtorsWithUnAtExit() {
   for (const auto &I : DtorsUsingAtExit) {
     int Priority = I.first;
@@ -2629,13 +2620,11 @@ void CodeGenModule::unregisterGlobalDtorsWithUnAtExit() {
     llvm::Function *GlobalCleanupFn =
         createGlobalInitOrCleanupFn(*this, GlobalCleanupFnName);
 
-    FunctionDecl *GlobalCleanupFD =
-        createGlobalInitOrCleanupFnDecl(*this, GlobalCleanupFnName);
-
     CodeGenFunction CGF(*this);
-    CGF.StartFunction(GlobalDecl(GlobalCleanupFD), getContext().VoidTy,
-                      GlobalCleanupFn, getTypes().arrangeNullaryFunction(),
-                      FunctionArgList(), SourceLocation(), SourceLocation());
+    CGF.StartFunction(GlobalDecl(), getContext().VoidTy, GlobalCleanupFn,
+                      getTypes().arrangeNullaryFunction(), FunctionArgList(),
+                      SourceLocation(), SourceLocation());
+    auto AL = ApplyDebugLocation::CreateArtificial(CGF);
 
     // Get the destructor function type, void(*)(void).
     llvm::FunctionType *dtorFuncTy = llvm::FunctionType::get(CGF.VoidTy, false);
@@ -2688,13 +2677,12 @@ void CodeGenModule::registerGlobalDtorsWithAtExit() {
         std::string("__GLOBAL_init_") + llvm::to_string(Priority);
     llvm::Function *GlobalInitFn =
         createGlobalInitOrCleanupFn(*this, GlobalInitFnName);
-    FunctionDecl *GlobalInitFD =
-        createGlobalInitOrCleanupFnDecl(*this, GlobalInitFnName);
 
     CodeGenFunction CGF(*this);
-    CGF.StartFunction(GlobalDecl(GlobalInitFD), getContext().VoidTy,
-                      GlobalInitFn, getTypes().arrangeNullaryFunction(),
-                      FunctionArgList(), SourceLocation(), SourceLocation());
+    CGF.StartFunction(GlobalDecl(), getContext().VoidTy, GlobalInitFn,
+                      getTypes().arrangeNullaryFunction(), FunctionArgList(),
+                      SourceLocation(), SourceLocation());
+    auto AL = ApplyDebugLocation::CreateArtificial(CGF);
 
     // Since constructor functions are run in non-descending order of their
     // priorities, destructors are registered in non-descending order of their
@@ -2811,7 +2799,7 @@ ItaniumCXXABI::getOrCreateThreadLocalWrapper(const VarDecl *VD,
   if (CGM.supportsCOMDAT() && Wrapper->isWeakForLinker())
     Wrapper->setComdat(CGM.getModule().getOrInsertComdat(Wrapper->getName()));
 
-  CGM.SetLLVMFunctionAttributes(GlobalDecl(), FI, Wrapper);
+  CGM.SetLLVMFunctionAttributes(GlobalDecl(), FI, Wrapper, /*IsThunk=*/false);
 
   // Always resolve references to the wrapper at link time.
   if (!Wrapper->hasLocalLinkage())
@@ -2944,8 +2932,8 @@ void ItaniumCXXABI::EmitThreadLocalInitFuncs(
                                     llvm::GlobalVariable::ExternalWeakLinkage,
                                     InitFnName.str(), &CGM.getModule());
       const CGFunctionInfo &FI = CGM.getTypes().arrangeNullaryFunction();
-      CGM.SetLLVMFunctionAttributes(GlobalDecl(), FI,
-                                    cast<llvm::Function>(Init));
+      CGM.SetLLVMFunctionAttributes(
+          GlobalDecl(), FI, cast<llvm::Function>(Init), /*IsThunk=*/false);
     }
 
     if (Init) {

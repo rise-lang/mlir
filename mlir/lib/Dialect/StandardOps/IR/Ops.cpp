@@ -10,7 +10,6 @@
 
 #include "mlir/Dialect/CommonFolders.h"
 #include "mlir/Dialect/StandardOps/Utils/Utils.h"
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -29,57 +28,12 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "mlir/Dialect/StandardOps/IR/OpsDialect.cpp.inc"
+
 // Pull in all enum type definitions and utility function declarations.
 #include "mlir/Dialect/StandardOps/IR/OpsEnums.cpp.inc"
 
 using namespace mlir;
-
-/// Helper function to dispatch an OpFoldResult into either the `dynamicVec` if
-/// it is a Value or into `staticVec` if it is an IntegerAttr.
-/// In the case of a Value, a copy of the `sentinel` value is also pushed to
-/// `staticVec`. This is useful to extract mixed static and dynamic entries that
-/// come from an AttrSizedOperandSegments trait.
-static void dispatchIndexOpFoldResult(OpFoldResult ofr,
-                                      SmallVectorImpl<Value> &dynamicVec,
-                                      SmallVectorImpl<int64_t> &staticVec,
-                                      int64_t sentinel) {
-  if (auto v = ofr.dyn_cast<Value>()) {
-    dynamicVec.push_back(v);
-    staticVec.push_back(sentinel);
-    return;
-  }
-  APInt apInt = ofr.dyn_cast<Attribute>().cast<IntegerAttr>().getValue();
-  staticVec.push_back(apInt.getSExtValue());
-}
-
-static void dispatchIndexOpFoldResults(ArrayRef<OpFoldResult> ofrs,
-                                       SmallVectorImpl<Value> &dynamicVec,
-                                       SmallVectorImpl<int64_t> &staticVec,
-                                       int64_t sentinel) {
-  for (auto ofr : ofrs)
-    dispatchIndexOpFoldResult(ofr, dynamicVec, staticVec, sentinel);
-}
-
-/// Return true if ofr1 and ofr2 are the same integer constant attribute values
-/// or the same SSA value.
-/// Ignore integer bitwitdh and type mismatch that come from the fact there is
-/// no IndexAttr and that IndexType have no bitwidth.
-bool mlir::isEqualConstantIntOrValue(OpFoldResult op1, OpFoldResult op2) {
-  auto getConstantIntValue = [](OpFoldResult ofr) -> llvm::Optional<int64_t> {
-    Attribute attr = ofr.dyn_cast<Attribute>();
-    // Note: isa+cast-like pattern allows writing the condition below as 1 line.
-    if (!attr && ofr.get<Value>().getDefiningOp<ConstantOp>())
-      attr = ofr.get<Value>().getDefiningOp<ConstantOp>().getValue();
-    if (auto intAttr = attr.dyn_cast_or_null<IntegerAttr>())
-      return intAttr.getValue().getSExtValue();
-    return llvm::None;
-  };
-  auto cst1 = getConstantIntValue(op1), cst2 = getConstantIntValue(op2);
-  if (cst1 && cst2 && *cst1 == *cst2)
-    return true;
-  auto v1 = op1.dyn_cast<Value>(), v2 = op2.dyn_cast<Value>();
-  return v1 && v2 && v1 == v2;
-}
 
 //===----------------------------------------------------------------------===//
 // StandardOpsDialect Interfaces
@@ -216,7 +170,6 @@ static void printStandardCastOp(Operation *op, OpAsmPrinter &p) {
 }
 
 void StandardOpsDialect::initialize() {
-  getContext()->loadDialect<tensor::TensorDialect>();
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/StandardOps/IR/Ops.cpp.inc"
@@ -273,14 +226,6 @@ OpFoldResult AddIOp::fold(ArrayRef<Attribute> operands) {
 
   return constFoldBinaryOp<IntegerAttr>(operands,
                                         [](APInt a, APInt b) { return a + b; });
-}
-
-/// Extract int64_t values from the assumed ArrayAttr of IntegerAttr.
-static SmallVector<int64_t, 4> extractFromI64ArrayAttr(Attribute attr) {
-  return llvm::to_vector<4>(
-      llvm::map_range(attr.cast<ArrayAttr>(), [](Attribute a) -> int64_t {
-        return a.cast<IntegerAttr>().getInt();
-      }));
 }
 
 /// Canonicalize a sum of a constant and (constant - something) to simply be
@@ -406,6 +351,53 @@ static LogicalResult verify(AtomicRMWOp op) {
     break;
   }
   return success();
+}
+
+/// Returns the identity value attribute associated with an AtomicRMWKind op.
+Attribute mlir::getIdentityValueAttr(AtomicRMWKind kind, Type resultType,
+                                     OpBuilder &builder, Location loc) {
+  switch (kind) {
+  case AtomicRMWKind::addf:
+  case AtomicRMWKind::addi:
+    return builder.getZeroAttr(resultType);
+  case AtomicRMWKind::muli:
+    return builder.getIntegerAttr(resultType, 1);
+  case AtomicRMWKind::mulf:
+    return builder.getFloatAttr(resultType, 1);
+  // TODO: Add remaining reduction operations.
+  default:
+    (void)emitOptionalError(loc, "Reduction operation type not supported");
+    break;
+  }
+  return nullptr;
+}
+
+/// Returns the identity value associated with an AtomicRMWKind op.
+Value mlir::getIdentityValue(AtomicRMWKind op, Type resultType,
+                             OpBuilder &builder, Location loc) {
+  Attribute attr = getIdentityValueAttr(op, resultType, builder, loc);
+  return builder.create<ConstantOp>(loc, attr);
+}
+
+/// Return the value obtained by applying the reduction operation kind
+/// associated with a binary AtomicRMWKind op to `lhs` and `rhs`.
+Value mlir::getReductionOp(AtomicRMWKind op, OpBuilder &builder, Location loc,
+                           Value lhs, Value rhs) {
+  switch (op) {
+  case AtomicRMWKind::addf:
+    return builder.create<AddFOp>(loc, lhs, rhs);
+  case AtomicRMWKind::addi:
+    return builder.create<AddIOp>(loc, lhs, rhs);
+  case AtomicRMWKind::mulf:
+    return builder.create<MulFOp>(loc, lhs, rhs);
+  case AtomicRMWKind::muli:
+    return builder.create<MulIOp>(loc, lhs, rhs);
+  // TODO: Add remaining reduction operations.
+  default:
+    (void)emitOptionalError(loc, "Reduction operation type not supported");
+    break;
+  }
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -986,13 +978,87 @@ struct SimplifyCondBranchFromCondBranchOnSameCondition
     return success();
   }
 };
+
+///   cond_br %arg0, ^trueB, ^falseB
+///
+/// ^trueB:
+///   "test.consumer1"(%arg0) : (i1) -> ()
+///    ...
+///
+/// ^falseB:
+///   "test.consumer2"(%arg0) : (i1) -> ()
+///   ...
+///
+/// ->
+///
+///   cond_br %arg0, ^trueB, ^falseB
+/// ^trueB:
+///   "test.consumer1"(%true) : (i1) -> ()
+///   ...
+///
+/// ^falseB:
+///   "test.consumer2"(%false) : (i1) -> ()
+///   ...
+struct CondBranchTruthPropagation : public OpRewritePattern<CondBranchOp> {
+  using OpRewritePattern<CondBranchOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(CondBranchOp condbr,
+                                PatternRewriter &rewriter) const override {
+    // Check that we have a single distinct predecessor.
+    bool replaced = false;
+    Type ty = rewriter.getI1Type();
+
+    // These variables serve to prevent creating duplicate constants
+    // and hold constant true or false values.
+    Value constantTrue = nullptr;
+    Value constantFalse = nullptr;
+
+    // TODO These checks can be expanded to encompas any use with only
+    // either the true of false edge as a predecessor. For now, we fall
+    // back to checking the single predecessor is given by the true/fasle
+    // destination, thereby ensuring that only that edge can reach the
+    // op.
+    if (condbr.getTrueDest()->getSinglePredecessor()) {
+      for (OpOperand &use :
+           llvm::make_early_inc_range(condbr.condition().getUses())) {
+        if (use.getOwner()->getBlock() == condbr.getTrueDest()) {
+          replaced = true;
+
+          if (!constantTrue)
+            constantTrue = rewriter.create<mlir::ConstantOp>(
+                condbr.getLoc(), ty, rewriter.getBoolAttr(true));
+
+          rewriter.updateRootInPlace(use.getOwner(),
+                                     [&] { use.set(constantTrue); });
+        }
+      }
+    }
+    if (condbr.getFalseDest()->getSinglePredecessor()) {
+      for (OpOperand &use :
+           llvm::make_early_inc_range(condbr.condition().getUses())) {
+        if (use.getOwner()->getBlock() == condbr.getFalseDest()) {
+          replaced = true;
+
+          if (!constantFalse)
+            constantFalse = rewriter.create<mlir::ConstantOp>(
+                condbr.getLoc(), ty, rewriter.getBoolAttr(false));
+
+          rewriter.updateRootInPlace(use.getOwner(),
+                                     [&] { use.set(constantFalse); });
+        }
+      }
+    }
+    return success(replaced);
+  }
+};
 } // end anonymous namespace
 
 void CondBranchOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                                MLIRContext *context) {
   results.add<SimplifyConstCondBranchPred, SimplifyPassThroughCondBranch,
               SimplifyCondBranchIdenticalSuccessors,
-              SimplifyCondBranchFromCondBranchOnSameCondition>(context);
+              SimplifyCondBranchFromCondBranchOnSameCondition,
+              CondBranchTruthPropagation>(context);
 }
 
 Optional<MutableOperandRange>
@@ -1020,8 +1086,8 @@ static void print(OpAsmPrinter &p, ConstantOp &op) {
     p << ' ';
   p << op.getValue();
 
-  // If the value is a symbol reference, print a trailing type.
-  if (op.getValue().isa<SymbolRefAttr>())
+  // If the value is a symbol reference or Array, print a trailing type.
+  if (op.getValue().isa<SymbolRefAttr, ArrayAttr>())
     p << " : " << op.getType();
 }
 
@@ -1032,9 +1098,10 @@ static ParseResult parseConstantOp(OpAsmParser &parser,
       parser.parseAttribute(valueAttr, "value", result.attributes))
     return failure();
 
-  // If the attribute is a symbol reference, then we expect a trailing type.
+  // If the attribute is a symbol reference or array, then we expect a trailing
+  // type.
   Type type;
-  if (!valueAttr.isa<SymbolRefAttr>())
+  if (!valueAttr.isa<SymbolRefAttr, ArrayAttr>())
     type = valueAttr.getType();
   else if (parser.parseColonType(type))
     return failure();
@@ -1069,6 +1136,24 @@ static LogicalResult verify(ConstantOp &op) {
     if (!intVal.isSignedIntN(bitwidth) && !intVal.isIntN(bitwidth))
       return op.emitOpError("requires 'value' to be an integer within the "
                             "range of the integer result type");
+    return success();
+  }
+
+  if (auto complexTy = type.dyn_cast<ComplexType>()) {
+    auto arrayAttr = value.dyn_cast<ArrayAttr>();
+    if (!complexTy || arrayAttr.size() != 2)
+      return op.emitOpError(
+          "requires 'value' to be a complex constant, represented as array of "
+          "two values");
+    auto complexEltTy = complexTy.getElementType();
+    if (complexEltTy != arrayAttr[0].getType() ||
+        complexEltTy != arrayAttr[1].getType()) {
+      return op.emitOpError()
+             << "requires attribute's element types (" << arrayAttr[0].getType()
+             << ", " << arrayAttr[1].getType()
+             << ") to match the element type of the op's return type ("
+             << complexEltTy << ")";
+    }
     return success();
   }
 
@@ -1146,13 +1231,21 @@ bool ConstantOp::isBuildableWith(Attribute value, Type type) {
   if (value.isa<SymbolRefAttr>())
     return type.isa<FunctionType>();
   // The attribute must have the same type as 'type'.
-  if (value.getType() != type)
+  if (!value.getType().isa<NoneType>() && value.getType() != type)
     return false;
   // If the type is an integer type, it must be signless.
   if (IntegerType integerTy = type.dyn_cast<IntegerType>())
     if (!integerTy.isSignless())
       return false;
   // Finally, check that the attribute kind is handled.
+  if (auto arrAttr = value.dyn_cast<ArrayAttr>()) {
+    auto complexTy = type.dyn_cast<ComplexType>();
+    if (!complexTy)
+      return false;
+    auto complexEltTy = complexTy.getElementType();
+    return arrAttr.size() == 2 && arrAttr[0].getType() == complexEltTy &&
+           arrAttr[1].getType() == complexEltTy;
+  }
   return value.isa<IntegerAttr, FloatAttr, ElementsAttr, UnitAttr>();
 }
 
@@ -1404,6 +1497,37 @@ static LogicalResult verify(ReturnOp op) {
 //===----------------------------------------------------------------------===//
 // SelectOp
 //===----------------------------------------------------------------------===//
+
+// Transforms a select to a not, where relevant.
+//
+//  select %arg, %false, %true
+//
+//  becomes
+//
+//  xor %arg, %true
+struct SelectToNot : public OpRewritePattern<SelectOp> {
+  using OpRewritePattern<SelectOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(SelectOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!matchPattern(op.getTrueValue(), m_Zero()))
+      return failure();
+
+    if (!matchPattern(op.getFalseValue(), m_One()))
+      return failure();
+
+    if (!op.getType().isInteger(1))
+      return failure();
+
+    rewriter.replaceOpWithNewOp<XOrOp>(op, op.condition(), op.getFalseValue());
+    return success();
+  }
+};
+
+void SelectOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+                                           MLIRContext *context) {
+  results.insert<SelectToNot>(context);
+}
 
 OpFoldResult SelectOp::fold(ArrayRef<Attribute> operands) {
   auto trueVal = getTrueValue();
@@ -1921,499 +2045,6 @@ bool UIToFPOp::areCastCompatible(TypeRange inputs, TypeRange outputs) {
   if (a.isSignlessInteger() && b.isa<FloatType>())
     return true;
   return areVectorCastSimpleCompatible(a, b, areCastCompatible);
-}
-
-//===----------------------------------------------------------------------===//
-// SubTensorOp
-//===----------------------------------------------------------------------===//
-
-/// A subtensor result type can be fully inferred from the source type and the
-/// static representation of offsets, sizes and strides. Special sentinels
-/// encode the dynamic case.
-Type SubTensorOp::inferResultType(RankedTensorType sourceRankedTensorType,
-                                  ArrayRef<int64_t> leadingStaticOffsets,
-                                  ArrayRef<int64_t> leadingStaticSizes,
-                                  ArrayRef<int64_t> leadingStaticStrides) {
-  // A subtensor may specify only a leading subset of offset/sizes/strides in
-  // which case we complete with offset=0, sizes from memref type and strides=1.
-  unsigned rank = sourceRankedTensorType.getRank();
-  assert(leadingStaticSizes.size() <= rank &&
-         "unexpected leadingStaticSizes overflow");
-  auto staticSizes = llvm::to_vector<4>(leadingStaticSizes);
-  unsigned numTrailingSizes = rank - staticSizes.size();
-  llvm::append_range(staticSizes, sourceRankedTensorType.getShape().take_back(
-                                      numTrailingSizes));
-  return RankedTensorType::get(staticSizes,
-                               sourceRankedTensorType.getElementType());
-}
-
-Type SubTensorOp::inferResultType(RankedTensorType sourceRankedTensorType,
-                                  ArrayRef<OpFoldResult> leadingStaticOffsets,
-                                  ArrayRef<OpFoldResult> leadingStaticSizes,
-                                  ArrayRef<OpFoldResult> leadingStaticStrides) {
-  SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
-  SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(leadingStaticOffsets, dynamicOffsets,
-                             staticOffsets, ShapedType::kDynamicStrideOrOffset);
-  dispatchIndexOpFoldResults(leadingStaticSizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamicSize);
-  dispatchIndexOpFoldResults(leadingStaticStrides, dynamicStrides,
-                             staticStrides, ShapedType::kDynamicStrideOrOffset);
-  return SubTensorOp::inferResultType(sourceRankedTensorType, staticOffsets,
-                                      staticSizes, staticStrides);
-}
-
-/// A subtensor result type can be fully inferred from the source type and the
-/// static representation of offsets, sizes and strides. Special sentinels
-/// encode the dynamic case.
-Type SubTensorOp::inferRankReducedResultType(
-    unsigned resultRank, RankedTensorType sourceRankedTensorType,
-    ArrayRef<int64_t> leadingStaticOffsets,
-    ArrayRef<int64_t> leadingStaticSizes,
-    ArrayRef<int64_t> leadingStaticStrides) {
-  auto inferredType =
-      inferResultType(sourceRankedTensorType, leadingStaticOffsets,
-                      leadingStaticSizes, leadingStaticStrides)
-          .cast<RankedTensorType>();
-  int rankDiff = inferredType.getRank() - resultRank;
-  if (rankDiff > 0) {
-    auto shape = inferredType.getShape();
-    llvm::SmallDenseSet<unsigned> dimsToProject;
-    mlir::getPositionsOfShapeOne(rankDiff, shape, dimsToProject);
-    SmallVector<int64_t> projectedShape;
-    for (unsigned pos = 0, e = shape.size(); pos < e; ++pos)
-      if (!dimsToProject.contains(pos))
-        projectedShape.push_back(shape[pos]);
-    inferredType =
-        RankedTensorType::get(projectedShape, inferredType.getElementType());
-  }
-  return inferredType;
-}
-
-Type SubTensorOp::inferRankReducedResultType(
-    unsigned resultRank, RankedTensorType sourceRankedTensorType,
-    ArrayRef<OpFoldResult> leadingStaticOffsets,
-    ArrayRef<OpFoldResult> leadingStaticSizes,
-    ArrayRef<OpFoldResult> leadingStaticStrides) {
-  SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
-  SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(leadingStaticOffsets, dynamicOffsets,
-                             staticOffsets, ShapedType::kDynamicStrideOrOffset);
-  dispatchIndexOpFoldResults(leadingStaticSizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamicSize);
-  dispatchIndexOpFoldResults(leadingStaticStrides, dynamicStrides,
-                             staticStrides, ShapedType::kDynamicStrideOrOffset);
-  return SubTensorOp::inferRankReducedResultType(
-      resultRank, sourceRankedTensorType, staticOffsets, staticSizes,
-      staticStrides);
-}
-
-// Build a SubTensorOp with mixed static and dynamic entries and custom result
-// type. If the type passed is nullptr, it is inferred.
-void mlir::SubTensorOp::build(OpBuilder &b, OperationState &result,
-                              RankedTensorType resultType, Value source,
-                              ArrayRef<OpFoldResult> offsets,
-                              ArrayRef<OpFoldResult> sizes,
-                              ArrayRef<OpFoldResult> strides,
-                              ArrayRef<NamedAttribute> attrs) {
-  SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
-  SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamicStrideOrOffset);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamicSize);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamicStrideOrOffset);
-  auto sourceRankedTensorType = source.getType().cast<RankedTensorType>();
-  // Structuring implementation this way avoids duplication between builders.
-  if (!resultType) {
-    resultType =
-        SubTensorOp::inferResultType(sourceRankedTensorType, staticOffsets,
-                                     staticSizes, staticStrides)
-            .cast<RankedTensorType>();
-  }
-  build(b, result, resultType, source, dynamicOffsets, dynamicSizes,
-        dynamicStrides, b.getI64ArrayAttr(staticOffsets),
-        b.getI64ArrayAttr(staticSizes), b.getI64ArrayAttr(staticStrides));
-  result.addAttributes(attrs);
-}
-
-// Build a SubTensorOp with mixed static and dynamic entries and inferred result
-// type.
-void mlir::SubTensorOp::build(OpBuilder &b, OperationState &result,
-                              Value source, ArrayRef<OpFoldResult> offsets,
-                              ArrayRef<OpFoldResult> sizes,
-                              ArrayRef<OpFoldResult> strides,
-                              ArrayRef<NamedAttribute> attrs) {
-  build(b, result, RankedTensorType(), source, offsets, sizes, strides, attrs);
-}
-
-// Build a SubTensorOp with dynamic entries and custom result type. If the type
-// passed is nullptr, it is inferred.
-void mlir::SubTensorOp::build(OpBuilder &b, OperationState &result,
-                              RankedTensorType resultType, Value source,
-                              ValueRange offsets, ValueRange sizes,
-                              ValueRange strides,
-                              ArrayRef<NamedAttribute> attrs) {
-  SmallVector<OpFoldResult> offsetValues = llvm::to_vector<4>(
-      llvm::map_range(offsets, [](Value v) -> OpFoldResult { return v; }));
-  SmallVector<OpFoldResult> sizeValues = llvm::to_vector<4>(
-      llvm::map_range(sizes, [](Value v) -> OpFoldResult { return v; }));
-  SmallVector<OpFoldResult> strideValues = llvm::to_vector<4>(
-      llvm::map_range(strides, [](Value v) -> OpFoldResult { return v; }));
-  build(b, result, resultType, source, offsetValues, sizeValues, strideValues);
-}
-
-// Build a SubTensorOp with dynamic entries and inferred result type.
-void mlir::SubTensorOp::build(OpBuilder &b, OperationState &result,
-                              Value source, ValueRange offsets,
-                              ValueRange sizes, ValueRange strides,
-                              ArrayRef<NamedAttribute> attrs) {
-  build(b, result, RankedTensorType(), source, offsets, sizes, strides, attrs);
-}
-
-enum SubTensorVerificationResult {
-  Success,
-  RankTooLarge,
-  SizeMismatch,
-  ElemTypeMismatch,
-};
-
-/// Checks if `original` Type type can be rank reduced to `reduced` type.
-/// This function is slight variant of `is subsequence` algorithm where
-/// not matching dimension must be 1.
-static SubTensorVerificationResult
-isRankReducedType(Type originalType, Type candidateReducedType,
-                  std::string *errMsg = nullptr) {
-  if (originalType == candidateReducedType)
-    return SubTensorVerificationResult::Success;
-  if (!originalType.isa<RankedTensorType>())
-    return SubTensorVerificationResult::Success;
-  if (originalType.isa<RankedTensorType>() &&
-      !candidateReducedType.isa<RankedTensorType>())
-    return SubTensorVerificationResult::Success;
-
-  ShapedType originalShapedType = originalType.cast<ShapedType>();
-  ShapedType candidateReducedShapedType =
-      candidateReducedType.cast<ShapedType>();
-
-  // Rank and size logic is valid for all ShapedTypes.
-  ArrayRef<int64_t> originalShape = originalShapedType.getShape();
-  ArrayRef<int64_t> candidateReducedShape =
-      candidateReducedShapedType.getShape();
-  unsigned originalRank = originalShape.size(),
-           candidateReducedRank = candidateReducedShape.size();
-  if (candidateReducedRank > originalRank)
-    return SubTensorVerificationResult::RankTooLarge;
-
-  auto optionalUnusedDimsMask =
-      computeRankReductionMask(originalShape, candidateReducedShape);
-
-  // Sizes cannot be matched in case empty vector is returned.
-  if (!optionalUnusedDimsMask.hasValue())
-    return SubTensorVerificationResult::SizeMismatch;
-
-  if (originalShapedType.getElementType() !=
-      candidateReducedShapedType.getElementType())
-    return SubTensorVerificationResult::ElemTypeMismatch;
-
-  // We are done for the tensor case.
-  if (originalType.isa<RankedTensorType>())
-    return SubTensorVerificationResult::Success;
-
-  return SubTensorVerificationResult::Success;
-}
-
-template <typename OpTy>
-static LogicalResult
-produceSubTensorErrorMsg(SubTensorVerificationResult result, OpTy op,
-                         Type expectedType, StringRef errMsg = "") {
-  auto memrefType = expectedType.cast<ShapedType>();
-  switch (result) {
-  case SubTensorVerificationResult::Success:
-    return success();
-  case SubTensorVerificationResult::RankTooLarge:
-    return op.emitError("expected result rank to be smaller or equal to ")
-           << "the source rank. " << errMsg;
-  case SubTensorVerificationResult::SizeMismatch:
-    return op.emitError("expected result type to be ")
-           << expectedType
-           << " or a rank-reduced version. (mismatch of result sizes) "
-           << errMsg;
-  case SubTensorVerificationResult::ElemTypeMismatch:
-    return op.emitError("expected result element type to be ")
-           << memrefType.getElementType() << errMsg;
-  }
-  llvm_unreachable("unexpected subtensor verification result");
-}
-/// Verifier for SubTensorOp.
-static LogicalResult verify(SubTensorOp op) {
-  // Verify result type against inferred type.
-  auto expectedType = SubTensorOp::inferResultType(
-      op.getSourceType(), extractFromI64ArrayAttr(op.static_offsets()),
-      extractFromI64ArrayAttr(op.static_sizes()),
-      extractFromI64ArrayAttr(op.static_strides()));
-  auto result = isRankReducedType(expectedType, op.getType());
-  return produceSubTensorErrorMsg(result, op, expectedType);
-}
-
-/// Infer the canonical type of the result of a subtensor operation. Returns a
-/// type with rank `resultRank` that is either the rank of the rank-reduced
-/// type, or the non-rank-reduced type.
-static RankedTensorType getCanonicalSubTensorResultType(
-    unsigned resultRank, RankedTensorType sourceType,
-    ArrayRef<OpFoldResult> mixedOffsets, ArrayRef<OpFoldResult> mixedSizes,
-    ArrayRef<OpFoldResult> mixedStrides) {
-  auto resultType =
-      SubTensorOp::inferRankReducedResultType(
-          resultRank, sourceType, mixedOffsets, mixedSizes, mixedStrides)
-          .cast<RankedTensorType>();
-  if (resultType.getRank() != resultRank) {
-    resultType = SubTensorOp::inferResultType(sourceType, mixedOffsets,
-                                              mixedSizes, mixedStrides)
-                     .cast<RankedTensorType>();
-  }
-  return resultType;
-}
-
-namespace {
-/// Pattern to rewrite a subtensor op with tensor::Cast arguments.
-/// This essentially pushes memref_cast past its consuming subtensor when
-/// `canFoldIntoConsumerOp` is true.
-///
-/// Example:
-/// ```
-///   %0 = tensorcast %V : tensor<16x16xf32> to tensor<?x?xf32>
-///   %1 = subtensor %0[0, 0][3, 4][1, 1] : tensor<?x?xf32> to tensor<3x4xf32>
-/// ```
-/// is rewritten into:
-/// ```
-///   %0 = subtensor %V[0, 0][3, 4][1, 1] : tensor<16x16xf32> to tensor<3x4xf32>
-///   %1 = tensor.cast %0: tensor<3x4xf32> to tensor<3x4xf32>
-/// ```
-class SubTensorOpCastFolder final : public OpRewritePattern<SubTensorOp> {
-public:
-  using OpRewritePattern<SubTensorOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(SubTensorOp subTensorOp,
-                                PatternRewriter &rewriter) const override {
-    // Any constant operand, just return to let SubViewOpConstantFolder kick in.
-    if (llvm::any_of(subTensorOp.getOperands(), [](Value operand) {
-          return matchPattern(operand, matchConstantIndex());
-        }))
-      return failure();
-
-    auto castOp = subTensorOp.source().getDefiningOp<tensor::CastOp>();
-    if (!castOp)
-      return failure();
-
-    if (!canFoldIntoConsumerOp(castOp))
-      return failure();
-
-    /// Deduce the type of the result to use for the canonicalized operation.
-    RankedTensorType resultType = getCanonicalSubTensorResultType(
-        subTensorOp.getType().getRank(), subTensorOp.getSourceType(),
-        subTensorOp.getMixedOffsets(), subTensorOp.getMixedSizes(),
-        subTensorOp.getMixedStrides());
-    Value newSubTensor = rewriter.create<SubTensorOp>(
-        subTensorOp.getLoc(), resultType, castOp.source(),
-        subTensorOp.offsets(), subTensorOp.sizes(), subTensorOp.strides(),
-        subTensorOp.static_offsets(), subTensorOp.static_sizes(),
-        subTensorOp.static_strides());
-    rewriter.replaceOpWithNewOp<tensor::CastOp>(
-        subTensorOp, subTensorOp.getType(), newSubTensor);
-    return success();
-  }
-};
-} // namespace
-
-/// Return the canonical type of the result of a subtensor.
-struct SubTensorReturnTypeCanonicalizer {
-  RankedTensorType operator()(SubTensorOp op,
-                              ArrayRef<OpFoldResult> mixedOffsets,
-                              ArrayRef<OpFoldResult> mixedSizes,
-                              ArrayRef<OpFoldResult> mixedStrides) {
-    return getCanonicalSubTensorResultType(op.getType().getRank(),
-                                           op.getSourceType(), mixedOffsets,
-                                           mixedSizes, mixedStrides);
-  }
-};
-
-/// A canonicalizer wrapper to replace SubTensorOps.
-struct SubTensorCanonicalizer {
-  void operator()(PatternRewriter &rewriter, SubTensorOp op,
-                  SubTensorOp newOp) {
-    Value replacement = newOp.getResult();
-    if (replacement.getType() != op.getType())
-      replacement = rewriter.create<tensor::CastOp>(op.getLoc(), op.getType(),
-                                                    replacement);
-    rewriter.replaceOp(op, replacement);
-  }
-};
-
-void SubTensorOp::getCanonicalizationPatterns(RewritePatternSet &results,
-                                              MLIRContext *context) {
-  results.add<OpWithOffsetSizesAndStridesConstantArgumentFolder<
-                  SubTensorOp, SubTensorReturnTypeCanonicalizer,
-                  SubTensorCanonicalizer>,
-              SubTensorOpCastFolder>(context);
-}
-
-//
-static LogicalResult
-foldIdentityOffsetSizeAndStrideOpInterface(OffsetSizeAndStrideOpInterface op,
-                                           ShapedType shapedType) {
-  OpBuilder b(op.getContext());
-  for (OpFoldResult ofr : op.getMixedOffsets())
-    if (!isEqualConstantIntOrValue(ofr, b.getIndexAttr(0)))
-      return failure();
-  // Rank-reducing noops only need to inspect the leading dimensions: llvm::zip
-  // is appropriate.
-  auto shape = shapedType.getShape();
-  for (auto it : llvm::zip(op.getMixedSizes(), shape))
-    if (!isEqualConstantIntOrValue(std::get<0>(it),
-                                   b.getIndexAttr(std::get<1>(it))))
-      return failure();
-  for (OpFoldResult ofr : op.getMixedStrides())
-    if (!isEqualConstantIntOrValue(ofr, b.getIndexAttr(1)))
-      return failure();
-  return success();
-}
-
-OpFoldResult SubTensorOp::fold(ArrayRef<Attribute>) {
-  if (getSourceType() == getType() &&
-      succeeded(foldIdentityOffsetSizeAndStrideOpInterface(*this, getType())))
-    return this->source();
-  return OpFoldResult();
-}
-
-//===----------------------------------------------------------------------===//
-// SubTensorInsertOp
-//===----------------------------------------------------------------------===//
-
-// Build a SubTensorInsertOp with mixed static and dynamic entries.
-void mlir::SubTensorInsertOp::build(OpBuilder &b, OperationState &result,
-                                    Value source, Value dest,
-                                    ArrayRef<OpFoldResult> offsets,
-                                    ArrayRef<OpFoldResult> sizes,
-                                    ArrayRef<OpFoldResult> strides,
-                                    ArrayRef<NamedAttribute> attrs) {
-  SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
-  SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamicStrideOrOffset);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamicSize);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamicStrideOrOffset);
-  build(b, result, dest.getType(), source, dest, dynamicOffsets, dynamicSizes,
-        dynamicStrides, b.getI64ArrayAttr(staticOffsets),
-        b.getI64ArrayAttr(staticSizes), b.getI64ArrayAttr(staticStrides));
-  result.addAttributes(attrs);
-}
-
-// Build a SubTensorInsertOp with dynamic entries.
-void mlir::SubTensorInsertOp::build(OpBuilder &b, OperationState &result,
-                                    Value source, Value dest,
-                                    ValueRange offsets, ValueRange sizes,
-                                    ValueRange strides,
-                                    ArrayRef<NamedAttribute> attrs) {
-  SmallVector<OpFoldResult> offsetValues = llvm::to_vector<4>(
-      llvm::map_range(offsets, [](Value v) -> OpFoldResult { return v; }));
-  SmallVector<OpFoldResult> sizeValues = llvm::to_vector<4>(
-      llvm::map_range(sizes, [](Value v) -> OpFoldResult { return v; }));
-  SmallVector<OpFoldResult> strideValues = llvm::to_vector<4>(
-      llvm::map_range(strides, [](Value v) -> OpFoldResult { return v; }));
-  build(b, result, source, dest, offsetValues, sizeValues, strideValues);
-}
-
-OpFoldResult SubTensorInsertOp::fold(ArrayRef<Attribute>) {
-  if (getSourceType().hasStaticShape() && getType().hasStaticShape() &&
-      getSourceType() == getType() &&
-      succeeded(foldIdentityOffsetSizeAndStrideOpInterface(*this, getType())))
-    return this->source();
-  return OpFoldResult();
-}
-
-namespace {
-/// Pattern to rewrite a subtensor_insert op with constant arguments.
-class SubTensorInsertOpConstantArgumentFolder final
-    : public OpRewritePattern<SubTensorInsertOp> {
-public:
-  using OpRewritePattern<SubTensorInsertOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(SubTensorInsertOp subTensorInsertOp,
-                                PatternRewriter &rewriter) const override {
-    // No constant operand, just return.
-    if (llvm::none_of(subTensorInsertOp.getOperands(), [](Value operand) {
-          return matchPattern(operand, matchConstantIndex());
-        }))
-      return failure();
-
-    // At least one of offsets/sizes/strides is a new constant.
-    // Form the new list of operands and constant attributes from the
-    // existing.
-    SmallVector<OpFoldResult> mixedOffsets(subTensorInsertOp.getMixedOffsets());
-    SmallVector<OpFoldResult> mixedSizes(subTensorInsertOp.getMixedSizes());
-    SmallVector<OpFoldResult> mixedStrides(subTensorInsertOp.getMixedStrides());
-    canonicalizeSubViewPart(mixedOffsets, ShapedType::isDynamicStrideOrOffset);
-    canonicalizeSubViewPart(mixedSizes, ShapedType::isDynamic);
-    canonicalizeSubViewPart(mixedStrides, ShapedType::isDynamicStrideOrOffset);
-
-    // Create the new op in canonical form.
-    rewriter.replaceOpWithNewOp<SubTensorInsertOp>(
-        subTensorInsertOp, subTensorInsertOp.source(), subTensorInsertOp.dest(),
-        mixedOffsets, mixedSizes, mixedStrides);
-    return success();
-  }
-};
-
-/// Fold tensor_casts with subtensor_insert operations.
-struct SubTensorInsertOpCastFolder final
-    : public OpRewritePattern<SubTensorInsertOp> {
-  using OpRewritePattern<SubTensorInsertOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(SubTensorInsertOp subTensorInsertOp,
-                                PatternRewriter &rewriter) const override {
-    if (llvm::any_of(subTensorInsertOp.getOperands(), [](Value operand) {
-          return matchPattern(operand, matchConstantIndex());
-        }))
-      return failure();
-
-    auto getSourceOfCastOp = [](Value v) -> Optional<Value> {
-      auto castOp = v.getDefiningOp<tensor::CastOp>();
-      if (!castOp || !canFoldIntoConsumerOp(castOp))
-        return llvm::None;
-      return castOp.source();
-    };
-    Optional<Value> sourceCastSource =
-        getSourceOfCastOp(subTensorInsertOp.source());
-    Optional<Value> destCastSource =
-        getSourceOfCastOp(subTensorInsertOp.dest());
-    if (!sourceCastSource && !destCastSource)
-      return failure();
-
-    Value replacement = rewriter.create<SubTensorInsertOp>(
-        subTensorInsertOp.getLoc(),
-        (sourceCastSource ? *sourceCastSource : subTensorInsertOp.source()),
-        (destCastSource ? *destCastSource : subTensorInsertOp.dest()),
-        subTensorInsertOp.getMixedOffsets(), subTensorInsertOp.getMixedSizes(),
-        subTensorInsertOp.getMixedStrides());
-
-    if (replacement.getType() != subTensorInsertOp.getType()) {
-      replacement = rewriter.create<tensor::CastOp>(
-          subTensorInsertOp.getLoc(), subTensorInsertOp.getType(), replacement);
-    }
-    rewriter.replaceOp(subTensorInsertOp, replacement);
-    return success();
-  }
-};
-} // namespace
-
-void SubTensorInsertOp::getCanonicalizationPatterns(RewritePatternSet &results,
-                                                    MLIRContext *context) {
-  results.add<SubTensorInsertOpConstantArgumentFolder,
-              SubTensorInsertOpCastFolder>(context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -3009,6 +2640,82 @@ OpFoldResult XOrOp::fold(ArrayRef<Attribute> operands) {
 
   return constFoldBinaryOp<IntegerAttr>(operands,
                                         [](APInt a, APInt b) { return a ^ b; });
+}
+
+namespace {
+/// Replace a not of a comparison operation, for example: not(cmp eq A, B) =>
+/// cmp ne A, B. Note that a logical not is implemented as xor 1, val.
+struct NotICmp : public OpRewritePattern<XOrOp> {
+  using OpRewritePattern<XOrOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(XOrOp op,
+                                PatternRewriter &rewriter) const override {
+    // Commutative ops (such as xor) have the constant appear second, which
+    // we assume here.
+
+    APInt constValue;
+    if (!matchPattern(op.getOperand(1), m_ConstantInt(&constValue)))
+      return failure();
+
+    if (constValue != 1)
+      return failure();
+
+    auto prev = op.getOperand(0).getDefiningOp<CmpIOp>();
+    if (!prev)
+      return failure();
+
+    switch (prev.predicate()) {
+    case CmpIPredicate::eq:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::ne, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::ne:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::eq, prev.lhs(),
+                                          prev.rhs());
+      return success();
+
+    case CmpIPredicate::slt:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::sge, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::sle:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::sgt, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::sgt:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::sle, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::sge:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::slt, prev.lhs(),
+                                          prev.rhs());
+      return success();
+
+    case CmpIPredicate::ult:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::uge, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::ule:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::ugt, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::ugt:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::ule, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    case CmpIPredicate::uge:
+      rewriter.replaceOpWithNewOp<CmpIOp>(op, CmpIPredicate::ult, prev.lhs(),
+                                          prev.rhs());
+      return success();
+    }
+    return failure();
+  }
+};
+} // namespace
+
+void XOrOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+                                        MLIRContext *context) {
+  results.insert<NotICmp>(context);
 }
 
 //===----------------------------------------------------------------------===//

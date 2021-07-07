@@ -64,6 +64,11 @@ EXTERN void __kmpc_kernel_init(int ThreadLimit, int16_t RequiresOMPRuntime) {
       omptarget_nvptx_threadPrivateContext->GetTopLevelTaskDescr(threadId);
   nThreads = GetNumberOfThreadsInBlock();
   threadLimit = ThreadLimit;
+
+  if (!__kmpc_is_spmd_exec_mode())
+    omptarget_nvptx_globalArgs.Init();
+
+  __kmpc_data_sharing_init_stack();
   __kmpc_impl_target_init();
 }
 
@@ -94,6 +99,7 @@ EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit,
     parallelLevel[GetWarpId()] =
         1 + (GetNumberOfThreadsInBlock() > 1 ? OMP_ACTIVE_PARALLEL_LEVEL : 0);
   }
+  __kmpc_data_sharing_init_stack();
   if (!RequiresOMPRuntime) {
     // Runtime is not required - exit.
     __kmpc_impl_syncthreads();
@@ -156,8 +162,7 @@ EXTERN void __kmpc_spmd_kernel_deinit_v2(int16_t RequiresOMPRuntime) {
 
 // Return true if the current target region is executed in SPMD mode.
 EXTERN int8_t __kmpc_is_spmd_exec_mode() {
-  PRINT0(LD_IO | LD_PAR, "call to __kmpc_is_spmd_exec_mode\n");
-  return isSPMDMode();
+  return (execution_param & ModeMask) == Spmd;
 }
 
 #pragma omp end declare target

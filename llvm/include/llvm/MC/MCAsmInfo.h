@@ -146,8 +146,15 @@ protected:
   /// Default is true.
   bool AllowAdditionalComments = true;
 
+  /// Should we emit the '\t' as the starting indentation marker for GNU inline
+  /// asm statements. Defaults to true.
+  bool EmitGNUAsmStartIndentationMarker = true;
+
   /// This is appended to emitted labels.  Defaults to ":"
   const char *LabelSuffix;
+
+  /// Emit labels in purely upper case. Defaults to false.
+  bool EmitLabelsInUpperCase = false;
 
   // Print the EH begin symbol with an assignment. Defaults to false.
   bool UseAssignmentForEHBegin = false;
@@ -261,6 +268,11 @@ protected:
   /// null.  Defaults to null.
   const char *ByteListDirective = nullptr;
 
+  /// This directive allows emission of a zero-terminated ascii string without
+  /// the standard C escape characters embedded into it.  If a target doesn't
+  /// support this, it can be set to null. Defaults to null.
+  const char *PlainStringDirective = nullptr;
+
   /// Form used for character literals in the assembly syntax.  Useful for
   /// producing strings as byte lists.  If a target does not use or support
   /// this, it shall be set to ACLS_Unknown.  Defaults to ACLS_Unknown.
@@ -357,8 +369,14 @@ protected:
   LCOMM::LCOMMType LCOMMDirectiveAlignmentType = LCOMM::NoAlignment;
 
   /// True if the target only has basename for .file directive. False if the
-  /// target also needs the directory along with the basename. Default to true.
+  /// target also needs the directory along with the basename. Defaults to true.
   bool HasBasenameOnlyForFileDirective = true;
+
+  /// True if the target represents string constants as mostly raw characters in
+  /// paired double quotation with paired double quotation marks as the escape
+  /// mechanism to represent a double quotation mark within the string. Defaults
+  /// to false.
+  bool HasPairedDoubleQuoteStringConstants = false;
 
   // True if the target allows .align directives on functions. This is true for
   // most targets, so defaults to true.
@@ -425,6 +443,10 @@ protected:
   /// Exception handling format for the target.  Defaults to None.
   ExceptionHandling ExceptionsType = ExceptionHandling::None;
 
+  /// True if target uses CFI unwind information for debugging purpose when
+  /// `ExceptionsType == ExceptionHandling::None`.
+  bool UsesCFIForDebug = false;
+
   /// Windows exception handling data (.pdata) encoding.  Defaults to Invalid.
   WinEH::EncodingType WinEHEncodingType = WinEH::EncodingType::Invalid;
 
@@ -474,6 +496,9 @@ protected:
   /// or otherwise) is considered a bug. It may then be overridden after
   /// construction (see LLVMTargetMachine::initAsmInfo()).
   bool UseIntegratedAssembler;
+
+  /// Use AsmParser to parse inlineAsm when UseIntegratedAssembler is not set.
+  bool ParseInlineAsmUsingAsmParser;
 
   /// Preserve Comments in assembly
   bool PreserveAsmComments;
@@ -614,7 +639,11 @@ public:
     return RestrictCommentStringToStartOfStatement;
   }
   bool shouldAllowAdditionalComments() const { return AllowAdditionalComments; }
+  bool getEmitGNUAsmStartIndentationMarker() const {
+    return EmitGNUAsmStartIndentationMarker;
+  }
   const char *getLabelSuffix() const { return LabelSuffix; }
+  bool shouldEmitLabelsInUpperCase() const { return EmitLabelsInUpperCase; }
 
   bool useAssignmentForEHBegin() const { return UseAssignmentForEHBegin; }
   bool needsLocalForSize() const { return NeedsLocalForSize; }
@@ -669,6 +698,7 @@ public:
   const char *getAsciiDirective() const { return AsciiDirective; }
   const char *getAscizDirective() const { return AscizDirective; }
   const char *getByteListDirective() const { return ByteListDirective; }
+  const char *getPlainStringDirective() const { return PlainStringDirective; }
   AsmCharLiteralSyntax characterLiteralSyntax() const {
     return CharacterLiteralSyntax;
   }
@@ -692,6 +722,9 @@ public:
 
   bool hasBasenameOnlyForFileDirective() const {
     return HasBasenameOnlyForFileDirective;
+  }
+  bool hasPairedDoubleQuoteStringConstants() const {
+    return HasPairedDoubleQuoteStringConstants;
   }
   bool hasFunctionAlignment() const { return HasFunctionAlignment; }
   bool hasDotTypeDotSizeDirective() const { return HasDotTypeDotSizeDirective; }
@@ -727,6 +760,8 @@ public:
   void setExceptionsType(ExceptionHandling EH) {
     ExceptionsType = EH;
   }
+
+  bool doesUseCFIForDebug() const { return UsesCFIForDebug; }
 
   /// Returns true if the exception handling method for the platform uses call
   /// frame information to unwind.
@@ -773,6 +808,11 @@ public:
   /// Return true if assembly (inline or otherwise) should be parsed.
   bool useIntegratedAssembler() const { return UseIntegratedAssembler; }
 
+  /// Return true if target want to use AsmParser to parse inlineasm.
+  bool parseInlineAsmUsingAsmParser() const {
+    return ParseInlineAsmUsingAsmParser;
+  }
+
   bool binutilsIsAtLeast(int Major, int Minor) const {
     return BinutilsVersion >= std::make_pair(Major, Minor);
   }
@@ -780,6 +820,11 @@ public:
   /// Set whether assembly (inline or otherwise) should be parsed.
   virtual void setUseIntegratedAssembler(bool Value) {
     UseIntegratedAssembler = Value;
+  }
+
+  /// Set whether target want to use AsmParser to parse inlineasm.
+  virtual void setParseInlineAsmUsingAsmParser(bool Value) {
+    ParseInlineAsmUsingAsmParser = Value;
   }
 
   /// Return true if assembly (inline or otherwise) should be parsed.

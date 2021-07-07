@@ -30,6 +30,7 @@ Clang-Tidy Checks
    `abseil-time-comparison <abseil-time-comparison.html>`_, "Yes"
    `abseil-time-subtraction <abseil-time-subtraction.html>`_, "Yes"
    `abseil-upgrade-duration-conversions <abseil-upgrade-duration-conversions.html>`_, "Yes"
+   `altera-id-dependent-backward-branch <altera-id-dependent-backward-branch.html>`_,
    `altera-kernel-name-restriction <altera-kernel-name-restriction.html>`_,
    `altera-single-work-item-barrier <altera-single-work-item-barrier.html>`_,
    `altera-struct-pack-align <altera-struct-pack-align.html>`_, "Yes"
@@ -58,6 +59,7 @@ Clang-Tidy Checks
    `bugprone-copy-constructor-init <bugprone-copy-constructor-init.html>`_, "Yes"
    `bugprone-dangling-handle <bugprone-dangling-handle.html>`_,
    `bugprone-dynamic-static-initializers <bugprone-dynamic-static-initializers.html>`_,
+   `bugprone-easily-swappable-parameters <bugprone-easily-swappable-parameters.html>`_,
    `bugprone-exception-escape <bugprone-exception-escape.html>`_,
    `bugprone-fold-init-type <bugprone-fold-init-type.html>`_,
    `bugprone-forward-declaration-namespace <bugprone-forward-declaration-namespace.html>`_,

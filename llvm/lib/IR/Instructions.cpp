@@ -482,7 +482,6 @@ void CallInst::init(FunctionType *FTy, Value *Func, ArrayRef<Value *> Args,
   this->FTy = FTy;
   assert(getNumOperands() == Args.size() + CountBundleInputs(Bundles) + 1 &&
          "NumOperands not set up?");
-  setCalledOperand(Func);
 
 #ifndef NDEBUG
   assert((Args.size() == FTy->getNumParams() ||
@@ -495,7 +494,10 @@ void CallInst::init(FunctionType *FTy, Value *Func, ArrayRef<Value *> Args,
            "Calling a function with a bad signature!");
 #endif
 
+  // Set operands in order of their index to match use-list-order
+  // prediction.
   llvm::copy(Args, op_begin());
+  setCalledOperand(Func);
 
   auto It = populateBundleOperandInfos(Bundles, Args.size());
   (void)It;
@@ -824,9 +826,6 @@ void InvokeInst::init(FunctionType *FTy, Value *Fn, BasicBlock *IfNormal,
   assert((int)getNumOperands() ==
              ComputeNumOperands(Args.size(), CountBundleInputs(Bundles)) &&
          "NumOperands not set up?");
-  setNormalDest(IfNormal);
-  setUnwindDest(IfException);
-  setCalledOperand(Fn);
 
 #ifndef NDEBUG
   assert(((Args.size() == FTy->getNumParams()) ||
@@ -839,7 +838,12 @@ void InvokeInst::init(FunctionType *FTy, Value *Fn, BasicBlock *IfNormal,
            "Invoking a function with a bad signature!");
 #endif
 
+  // Set operands in order of their index to match use-list-order
+  // prediction.
   llvm::copy(Args, op_begin());
+  setNormalDest(IfNormal);
+  setUnwindDest(IfException);
+  setCalledOperand(Fn);
 
   auto It = populateBundleOperandInfos(Bundles, Args.size());
   (void)It;
@@ -892,11 +896,6 @@ void CallBrInst::init(FunctionType *FTy, Value *Fn, BasicBlock *Fallthrough,
              ComputeNumOperands(Args.size(), IndirectDests.size(),
                                 CountBundleInputs(Bundles)) &&
          "NumOperands not set up?");
-  NumIndirectDests = IndirectDests.size();
-  setDefaultDest(Fallthrough);
-  for (unsigned i = 0; i != NumIndirectDests; ++i)
-    setIndirectDest(i, IndirectDests[i]);
-  setCalledOperand(Fn);
 
 #ifndef NDEBUG
   assert(((Args.size() == FTy->getNumParams()) ||
@@ -909,7 +908,14 @@ void CallBrInst::init(FunctionType *FTy, Value *Fn, BasicBlock *Fallthrough,
            "Calling a function with a bad signature!");
 #endif
 
+  // Set operands in order of their index to match use-list-order
+  // prediction.
   std::copy(Args.begin(), Args.end(), op_begin());
+  NumIndirectDests = IndirectDests.size();
+  setDefaultDest(Fallthrough);
+  for (unsigned i = 0; i != NumIndirectDests; ++i)
+    setIndirectDest(i, IndirectDests[i]);
+  setCalledOperand(Fn);
 
   auto It = populateBundleOperandInfos(Bundles, Args.size());
   (void)It;
@@ -1241,9 +1247,10 @@ BranchInst::BranchInst(BasicBlock *IfTrue, BasicBlock *IfFalse, Value *Cond,
     : Instruction(Type::getVoidTy(IfTrue->getContext()), Instruction::Br,
                   OperandTraits<BranchInst>::op_end(this) - 3, 3,
                   InsertBefore) {
-  Op<-1>() = IfTrue;
-  Op<-2>() = IfFalse;
+  // Assign in order of operand index to make use-list order predictable.
   Op<-3>() = Cond;
+  Op<-2>() = IfFalse;
+  Op<-1>() = IfTrue;
 #ifndef NDEBUG
   AssertOK();
 #endif
@@ -1260,9 +1267,10 @@ BranchInst::BranchInst(BasicBlock *IfTrue, BasicBlock *IfFalse, Value *Cond,
                        BasicBlock *InsertAtEnd)
     : Instruction(Type::getVoidTy(IfTrue->getContext()), Instruction::Br,
                   OperandTraits<BranchInst>::op_end(this) - 3, 3, InsertAtEnd) {
-  Op<-1>() = IfTrue;
-  Op<-2>() = IfFalse;
+  // Assign in order of operand index to make use-list order predictable.
   Op<-3>() = Cond;
+  Op<-2>() = IfFalse;
+  Op<-1>() = IfTrue;
 #ifndef NDEBUG
   AssertOK();
 #endif
@@ -1272,12 +1280,13 @@ BranchInst::BranchInst(const BranchInst &BI)
     : Instruction(Type::getVoidTy(BI.getContext()), Instruction::Br,
                   OperandTraits<BranchInst>::op_end(this) - BI.getNumOperands(),
                   BI.getNumOperands()) {
-  Op<-1>() = BI.Op<-1>();
+  // Assign in order of operand index to make use-list order predictable.
   if (BI.getNumOperands() != 1) {
     assert(BI.getNumOperands() == 3 && "BR can have 1 or 3 operands!");
     Op<-3>() = BI.Op<-3>();
     Op<-2>() = BI.Op<-2>();
   }
+  Op<-1>() = BI.Op<-1>();
   SubclassOptionalData = BI.SubclassOptionalData;
 }
 
@@ -1436,7 +1445,7 @@ LoadInst::LoadInst(Type *Ty, Value *Ptr, const Twine &Name, bool isVolatile,
                    Align Align, AtomicOrdering Order, SyncScope::ID SSID,
                    Instruction *InsertBef)
     : UnaryInstruction(Ty, Load, Ptr, InsertBef) {
-  assert(Ty == cast<PointerType>(Ptr->getType())->getElementType());
+  assert(cast<PointerType>(Ptr->getType())->isOpaqueOrPointeeTypeMatches(Ty));
   setVolatile(isVolatile);
   setAlignment(Align);
   setAtomic(Order, SSID);
@@ -1448,7 +1457,7 @@ LoadInst::LoadInst(Type *Ty, Value *Ptr, const Twine &Name, bool isVolatile,
                    Align Align, AtomicOrdering Order, SyncScope::ID SSID,
                    BasicBlock *InsertAE)
     : UnaryInstruction(Ty, Load, Ptr, InsertAE) {
-  assert(Ty == cast<PointerType>(Ptr->getType())->getElementType());
+  assert(cast<PointerType>(Ptr->getType())->isOpaqueOrPointeeTypeMatches(Ty));
   setVolatile(isVolatile);
   setAlignment(Align);
   setAtomic(Order, SSID);
@@ -1464,9 +1473,9 @@ void StoreInst::AssertOK() {
   assert(getOperand(0) && getOperand(1) && "Both operands must be non-null!");
   assert(getOperand(1)->getType()->isPointerTy() &&
          "Ptr must have pointer type!");
-  assert(getOperand(0)->getType() ==
-                 cast<PointerType>(getOperand(1)->getType())->getElementType()
-         && "Ptr must be a pointer to Val type!");
+  assert(cast<PointerType>(getOperand(1)->getType())
+             ->isOpaqueOrPointeeTypeMatches(getOperand(0)->getType()) &&
+         "Ptr must be a pointer to Val type!");
   assert(!(isAtomic() && getAlignment() == 0) &&
          "Alignment required for atomic store");
 }
@@ -1548,22 +1557,14 @@ void AtomicCmpXchgInst::Init(Value *Ptr, Value *Cmp, Value *NewVal,
          "All operands must be non-null!");
   assert(getOperand(0)->getType()->isPointerTy() &&
          "Ptr must have pointer type!");
-  assert(getOperand(1)->getType() ==
-                 cast<PointerType>(getOperand(0)->getType())->getElementType()
-         && "Ptr must be a pointer to Cmp type!");
-  assert(getOperand(2)->getType() ==
-                 cast<PointerType>(getOperand(0)->getType())->getElementType()
-         && "Ptr must be a pointer to NewVal type!");
-  assert(SuccessOrdering != AtomicOrdering::NotAtomic &&
-         "AtomicCmpXchg instructions must be atomic!");
-  assert(FailureOrdering != AtomicOrdering::NotAtomic &&
-         "AtomicCmpXchg instructions must be atomic!");
-  assert(!isStrongerThan(FailureOrdering, SuccessOrdering) &&
-         "AtomicCmpXchg failure argument shall be no stronger than the success "
-         "argument");
-  assert(FailureOrdering != AtomicOrdering::Release &&
-         FailureOrdering != AtomicOrdering::AcquireRelease &&
-         "AtomicCmpXchg failure ordering cannot include release semantics");
+  assert(cast<PointerType>(getOperand(0)->getType())
+             ->isOpaqueOrPointeeTypeMatches(getOperand(1)->getType()) &&
+         "Ptr must be a pointer to Cmp type!");
+  assert(cast<PointerType>(getOperand(0)->getType())
+             ->isOpaqueOrPointeeTypeMatches(getOperand(2)->getType()) &&
+         "Ptr must be a pointer to NewVal type!");
+  assert(getOperand(1)->getType() == getOperand(2)->getType() &&
+         "Cmp type and NewVal type must be same!");
 }
 
 AtomicCmpXchgInst::AtomicCmpXchgInst(Value *Ptr, Value *Cmp, Value *NewVal,
@@ -1610,9 +1611,9 @@ void AtomicRMWInst::Init(BinOp Operation, Value *Ptr, Value *Val,
          "All operands must be non-null!");
   assert(getOperand(0)->getType()->isPointerTy() &&
          "Ptr must have pointer type!");
-  assert(getOperand(1)->getType() ==
-         cast<PointerType>(getOperand(0)->getType())->getElementType()
-         && "Ptr must be a pointer to Val type!");
+  assert(cast<PointerType>(getOperand(0)->getType())
+             ->isOpaqueOrPointeeTypeMatches(getOperand(1)->getType()) &&
+         "Ptr must be a pointer to Val type!");
   assert(Ordering != AtomicOrdering::NotAtomic &&
          "AtomicRMW instructions must be atomic!");
 }
@@ -1804,6 +1805,15 @@ bool GetElementPtrInst::accumulateConstantOffset(const DataLayout &DL,
                                                  APInt &Offset) const {
   // Delegate to the generic GEPOperator implementation.
   return cast<GEPOperator>(this)->accumulateConstantOffset(DL, Offset);
+}
+
+bool GetElementPtrInst::collectOffset(
+    const DataLayout &DL, unsigned BitWidth,
+    MapVector<Value *, APInt> &VariableOffsets,
+    APInt &ConstantOffset) const {
+  // Delegate to the generic GEPOperator implementation.
+  return cast<GEPOperator>(this)->collectOffset(DL, BitWidth, VariableOffsets,
+                                                ConstantOffset);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2082,6 +2092,7 @@ void ShuffleVectorInst::setShuffleMask(ArrayRef<int> Mask) {
   ShuffleMask.assign(Mask.begin(), Mask.end());
   ShuffleMaskForBitcode = convertShuffleMaskForBitcode(Mask, getType());
 }
+
 Constant *ShuffleVectorInst::convertShuffleMaskForBitcode(ArrayRef<int> Mask,
                                                           Type *ResultTy) {
   Type *Int32Ty = Type::getInt32Ty(ResultTy->getContext());
@@ -2899,13 +2910,15 @@ unsigned CastInst::isEliminableCastPair(
         "Illegal addrspacecast, bitcast sequence!");
       // Allowed, use first cast's opcode
       return firstOp;
-    case 14:
+    case 14: {
       // bitcast, addrspacecast -> addrspacecast if the element type of
       // bitcast's source is the same as that of addrspacecast's destination.
-      if (SrcTy->getScalarType()->getPointerElementType() ==
-          DstTy->getScalarType()->getPointerElementType())
+      PointerType *SrcPtrTy = cast<PointerType>(SrcTy->getScalarType());
+      PointerType *DstPtrTy = cast<PointerType>(DstTy->getScalarType());
+      if (SrcPtrTy->hasSameElementTypeAs(DstPtrTy))
         return Instruction::AddrSpaceCast;
       return 0;
+    }
     case 15:
       // FIXME: this state can be merged with (1), but the following assert
       // is useful to check the correcteness of the sequence due to semantic

@@ -880,10 +880,15 @@ ASTContext::getCanonicalTemplateTemplateParmDecl(
   return CanonTTP;
 }
 
+TargetCXXABI::Kind ASTContext::getCXXABIKind() const {
+  auto Kind = getTargetInfo().getCXXABI().getKind();
+  return getLangOpts().CXXABI.getValueOr(Kind);
+}
+
 CXXABI *ASTContext::createCXXABI(const TargetInfo &T) {
   if (!LangOpts.CPlusPlus) return nullptr;
 
-  switch (T.getCXXABI().getKind()) {
+  switch (getCXXABIKind()) {
   case TargetCXXABI::AppleARM64:
   case TargetCXXABI::Fuchsia:
   case TargetCXXABI::GenericARM: // Same as Itanium at this level
@@ -932,6 +937,8 @@ static const LangASMap *getAddressSpaceMap(const TargetInfo &T,
         8,  // cuda_constant
         9,  // cuda_shared
         1,  // sycl_global
+        5,  // sycl_global_device
+        6,  // sycl_global_host
         3,  // sycl_local
         0,  // sycl_private
         10, // ptr32_sptr
@@ -1562,6 +1569,21 @@ ASTContext::setInstantiatedFromUsingDecl(NamedDecl *Inst, NamedDecl *Pattern) {
          "instantiation did not produce a using decl");
   assert(!InstantiatedFromUsingDecl[Inst] && "pattern already exists");
   InstantiatedFromUsingDecl[Inst] = Pattern;
+}
+
+UsingEnumDecl *
+ASTContext::getInstantiatedFromUsingEnumDecl(UsingEnumDecl *UUD) {
+  auto Pos = InstantiatedFromUsingEnumDecl.find(UUD);
+  if (Pos == InstantiatedFromUsingEnumDecl.end())
+    return nullptr;
+
+  return Pos->second;
+}
+
+void ASTContext::setInstantiatedFromUsingEnumDecl(UsingEnumDecl *Inst,
+                                                  UsingEnumDecl *Pattern) {
+  assert(!InstantiatedFromUsingEnumDecl[Inst] && "pattern already exists");
+  InstantiatedFromUsingEnumDecl[Inst] = Pattern;
 }
 
 UsingShadowDecl *
@@ -2451,7 +2473,7 @@ unsigned ASTContext::getPreferredTypeAlign(const Type *T) const {
   // The preferred alignment of member pointers is that of a pointer.
   if (T->isMemberPointerType())
     return getPreferredTypeAlign(getPointerDiffType().getTypePtr());
- 
+
   if (!Target->allowsLargerPreferedTypeAlignment())
     return ABIAlign;
 
@@ -5761,29 +5783,29 @@ QualType ASTContext::getUnqualifiedArrayType(QualType type,
 /// Attempt to unwrap two types that may both be array types with the same bound
 /// (or both be array types of unknown bound) for the purpose of comparing the
 /// cv-decomposition of two types per C++ [conv.qual].
-bool ASTContext::UnwrapSimilarArrayTypes(QualType &T1, QualType &T2) {
-  bool UnwrappedAny = false;
+void ASTContext::UnwrapSimilarArrayTypes(QualType &T1, QualType &T2) {
   while (true) {
     auto *AT1 = getAsArrayType(T1);
-    if (!AT1) return UnwrappedAny;
+    if (!AT1)
+      return;
 
     auto *AT2 = getAsArrayType(T2);
-    if (!AT2) return UnwrappedAny;
+    if (!AT2)
+      return;
 
     // If we don't have two array types with the same constant bound nor two
     // incomplete array types, we've unwrapped everything we can.
     if (auto *CAT1 = dyn_cast<ConstantArrayType>(AT1)) {
       auto *CAT2 = dyn_cast<ConstantArrayType>(AT2);
       if (!CAT2 || CAT1->getSize() != CAT2->getSize())
-        return UnwrappedAny;
+        return;
     } else if (!isa<IncompleteArrayType>(AT1) ||
                !isa<IncompleteArrayType>(AT2)) {
-      return UnwrappedAny;
+      return;
     }
 
     T1 = AT1->getElementType();
     T2 = AT2->getElementType();
-    UnwrappedAny = true;
   }
 }
 
@@ -7976,19 +7998,21 @@ static TypedefDecl *CreateVoidPtrBuiltinVaListDecl(const ASTContext *Context) {
 
 static TypedefDecl *
 CreateAArch64ABIBuiltinVaListDecl(const ASTContext *Context) {
-  // struct __va_list
   RecordDecl *VaListTagDecl = Context->buildImplicitRecord("__va_list");
-  if (Context->getLangOpts().CPlusPlus) {
-    // namespace std { struct __va_list {
-    NamespaceDecl *NS;
-    NS = NamespaceDecl::Create(const_cast<ASTContext &>(*Context),
-                               Context->getTranslationUnitDecl(),
-                               /*Inline*/ false, SourceLocation(),
-                               SourceLocation(), &Context->Idents.get("std"),
-                               /*PrevDecl*/ nullptr);
-    NS->setImplicit();
-    VaListTagDecl->setDeclContext(NS);
-  }
+  // namespace std { struct __va_list {
+  // Note that we create the namespace even in C. This is intentional so that
+  // the type is consistent between C and C++, which is important in cases where
+  // the types need to match between translation units (e.g. with
+  // -fsanitize=cfi-icall). Ideally we wouldn't have created this namespace at
+  // all, but it's now part of the ABI (e.g. in mangled names), so we can't
+  // change it.
+  auto *NS = NamespaceDecl::Create(
+      const_cast<ASTContext &>(*Context), Context->getTranslationUnitDecl(),
+      /*Inline*/ false, SourceLocation(), SourceLocation(),
+      &Context->Idents.get("std"),
+      /*PrevDecl*/ nullptr);
+  NS->setImplicit();
+  VaListTagDecl->setDeclContext(NS);
 
   VaListTagDecl->startDefinition();
 
@@ -11068,6 +11092,33 @@ MangleContext *ASTContext::createMangleContext(const TargetInfo *T) {
   llvm_unreachable("Unsupported ABI");
 }
 
+MangleContext *ASTContext::createDeviceMangleContext(const TargetInfo &T) {
+  assert(T.getCXXABI().getKind() != TargetCXXABI::Microsoft &&
+         "Device mangle context does not support Microsoft mangling.");
+  switch (T.getCXXABI().getKind()) {
+  case TargetCXXABI::AppleARM64:
+  case TargetCXXABI::Fuchsia:
+  case TargetCXXABI::GenericAArch64:
+  case TargetCXXABI::GenericItanium:
+  case TargetCXXABI::GenericARM:
+  case TargetCXXABI::GenericMIPS:
+  case TargetCXXABI::iOS:
+  case TargetCXXABI::WebAssembly:
+  case TargetCXXABI::WatchOS:
+  case TargetCXXABI::XL:
+    return ItaniumMangleContext::create(
+        *this, getDiagnostics(),
+        [](ASTContext &, const NamedDecl *ND) -> llvm::Optional<unsigned> {
+          if (const auto *RD = dyn_cast<CXXRecordDecl>(ND))
+            return RD->getDeviceLambdaManglingNumber();
+          return llvm::None;
+        });
+  case TargetCXXABI::Microsoft:
+    return MicrosoftMangleContext::create(*this, getDiagnostics());
+  }
+  llvm_unreachable("Unsupported ABI");
+}
+
 CXXABI::~CXXABI() = default;
 
 size_t ASTContext::getSideTableAllocatedMemory() const {
@@ -11630,7 +11681,7 @@ bool ASTContext::mayExternalizeStaticVar(const Decl *D) const {
 bool ASTContext::shouldExternalizeStaticVar(const Decl *D) const {
   return mayExternalizeStaticVar(D) &&
          (D->hasAttr<HIPManagedAttr>() ||
-          CUDAStaticDeviceVarReferencedByHost.count(cast<VarDecl>(D)));
+          CUDADeviceVarODRUsedByHost.count(cast<VarDecl>(D)));
 }
 
 StringRef ASTContext::getCUIDHash() const {
@@ -11640,4 +11691,87 @@ StringRef ASTContext::getCUIDHash() const {
     return StringRef();
   CUIDHash = llvm::utohexstr(llvm::MD5Hash(LangOpts.CUID), /*LowerCase=*/true);
   return CUIDHash;
+}
+
+// Get the closest named parent, so we can order the sycl naming decls somewhere
+// that mangling is meaningful.
+static const DeclContext *GetNamedParent(const CXXRecordDecl *RD) {
+  const DeclContext *DC = RD->getDeclContext();
+
+  while (!isa<NamedDecl, TranslationUnitDecl>(DC))
+    DC = DC->getParent();
+  return DC;
+}
+
+void ASTContext::AddSYCLKernelNamingDecl(const CXXRecordDecl *RD) {
+  assert(getLangOpts().isSYCL() && "Only valid for SYCL programs");
+  RD = RD->getCanonicalDecl();
+  const DeclContext *DC = GetNamedParent(RD);
+
+  assert(RD->getLocation().isValid() &&
+         "Invalid location on kernel naming decl");
+
+  (void)SYCLKernelNamingTypes[DC].insert(RD);
+}
+
+bool ASTContext::IsSYCLKernelNamingDecl(const NamedDecl *ND) const {
+  assert(getLangOpts().isSYCL() && "Only valid for SYCL programs");
+  const auto *RD = dyn_cast<CXXRecordDecl>(ND);
+  if (!RD)
+    return false;
+  RD = RD->getCanonicalDecl();
+  const DeclContext *DC = GetNamedParent(RD);
+
+  auto Itr = SYCLKernelNamingTypes.find(DC);
+
+  if (Itr == SYCLKernelNamingTypes.end())
+    return false;
+
+  return Itr->getSecond().count(RD);
+}
+
+// Filters the Decls list to those that share the lambda mangling with the
+// passed RD.
+void ASTContext::FilterSYCLKernelNamingDecls(
+    const CXXRecordDecl *RD,
+    llvm::SmallVectorImpl<const CXXRecordDecl *> &Decls) {
+
+  if (!SYCLKernelFilterContext)
+    SYCLKernelFilterContext.reset(
+        ItaniumMangleContext::create(*this, getDiagnostics()));
+
+  llvm::SmallString<128> LambdaSig;
+  llvm::raw_svector_ostream Out(LambdaSig);
+  SYCLKernelFilterContext->mangleLambdaSig(RD, Out);
+
+  llvm::erase_if(Decls, [this, &LambdaSig](const CXXRecordDecl *LocalRD) {
+    llvm::SmallString<128> LocalLambdaSig;
+    llvm::raw_svector_ostream LocalOut(LocalLambdaSig);
+    SYCLKernelFilterContext->mangleLambdaSig(LocalRD, LocalOut);
+    return LambdaSig != LocalLambdaSig;
+  });
+}
+
+unsigned ASTContext::GetSYCLKernelNamingIndex(const NamedDecl *ND) {
+  assert(getLangOpts().isSYCL() && "Only valid for SYCL programs");
+  assert(IsSYCLKernelNamingDecl(ND) &&
+         "Lambda not involved in mangling asked for a naming index?");
+
+  const CXXRecordDecl *RD = cast<CXXRecordDecl>(ND)->getCanonicalDecl();
+  const DeclContext *DC = GetNamedParent(RD);
+
+  auto Itr = SYCLKernelNamingTypes.find(DC);
+  assert(Itr != SYCLKernelNamingTypes.end() && "Not a valid DeclContext?");
+
+  const llvm::SmallPtrSet<const CXXRecordDecl *, 4> &Set = Itr->getSecond();
+
+  llvm::SmallVector<const CXXRecordDecl *> Decls{Set.begin(), Set.end()};
+
+  FilterSYCLKernelNamingDecls(RD, Decls);
+
+  llvm::sort(Decls, [](const CXXRecordDecl *LHS, const CXXRecordDecl *RHS) {
+    return LHS->getLambdaManglingNumber() < RHS->getLambdaManglingNumber();
+  });
+
+  return llvm::find(Decls, RD) - Decls.begin();
 }

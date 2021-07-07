@@ -139,6 +139,8 @@ class VectorType;
     PREDICATE_CAST,  // Predicate cast for MVE i1 types
     VECTOR_REG_CAST, // Reinterpret the current contents of a vector register
 
+    MVETRUNC,     // Legalization aid for truncating two vectors into one.
+
     VCMP,  // Vector compare.
     VCMPZ, // Vector compare to zero.
     VTST,  // Vector test bits.
@@ -300,6 +302,13 @@ class VectorType;
     // instructions.
     MEMCPY,
 
+    // Pseudo-instruction representing a memory copy using a tail predicated
+    // loop
+    MEMCPYLOOP,
+    // Pseudo-instruction representing a memset using a tail predicated
+    // loop
+    MEMSETLOOP,
+
     // V8.1MMainline condition select
     CSINV, // Conditional select invert.
     CSNEG, // Conditional select negate.
@@ -323,6 +332,9 @@ class VectorType;
     VLD2DUP_UPD,
     VLD3DUP_UPD,
     VLD4DUP_UPD,
+    VLD1x2_UPD,
+    VLD1x3_UPD,
+    VLD1x4_UPD,
 
     // NEON stores with post-increment base updates:
     VST1_UPD,
@@ -332,6 +344,9 @@ class VectorType;
     VST2LN_UPD,
     VST3LN_UPD,
     VST4LN_UPD,
+    VST1x2_UPD,
+    VST1x3_UPD,
+    VST1x4_UPD,
 
     // Load/Store of dual registers
     LDRD,
@@ -404,6 +419,7 @@ class VectorType;
     SDValue PerformBRCONDCombine(SDNode *N, SelectionDAG &DAG) const;
     SDValue PerformCMOVToBFICombine(SDNode *N, SelectionDAG &DAG) const;
     SDValue PerformIntrinsicCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue PerformMVETruncCombine(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
     bool SimplifyDemandedBitsForTargetNode(SDValue Op,
@@ -566,6 +582,8 @@ class VectorType;
 
     Sched::Preference getSchedulingPreference(SDNode *N) const override;
 
+    bool preferZeroCompareBranch() const override { return true; }
+
     bool
     isShuffleMaskLegal(ArrayRef<int> M, EVT VT) const override;
     bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
@@ -600,7 +618,8 @@ class VectorType;
     /// Returns true if an argument of type Ty needs to be passed in a
     /// contiguous block of registers in calling convention CallConv.
     bool functionArgumentNeedsConsecutiveRegisters(
-        Type *Ty, CallingConv::ID CallConv, bool isVarArg) const override;
+        Type *Ty, CallingConv::ID CallConv, bool isVarArg,
+        const DataLayout &DL) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.
@@ -612,17 +631,18 @@ class VectorType;
     Register
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 
-    Instruction *makeDMB(IRBuilder<> &Builder, ARM_MB::MemBOpt Domain) const;
-    Value *emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
+    Instruction *makeDMB(IRBuilderBase &Builder, ARM_MB::MemBOpt Domain) const;
+    Value *emitLoadLinked(IRBuilderBase &Builder, Type *ValueTy, Value *Addr,
                           AtomicOrdering Ord) const override;
-    Value *emitStoreConditional(IRBuilder<> &Builder, Value *Val,
-                                Value *Addr, AtomicOrdering Ord) const override;
+    Value *emitStoreConditional(IRBuilderBase &Builder, Value *Val, Value *Addr,
+                                AtomicOrdering Ord) const override;
 
-    void emitAtomicCmpXchgNoStoreLLBalance(IRBuilder<> &Builder) const override;
+    void
+    emitAtomicCmpXchgNoStoreLLBalance(IRBuilderBase &Builder) const override;
 
-    Instruction *emitLeadingFence(IRBuilder<> &Builder, Instruction *Inst,
+    Instruction *emitLeadingFence(IRBuilderBase &Builder, Instruction *Inst,
                                   AtomicOrdering Ord) const override;
-    Instruction *emitTrailingFence(IRBuilder<> &Builder, Instruction *Inst,
+    Instruction *emitTrailingFence(IRBuilderBase &Builder, Instruction *Inst,
                                    AtomicOrdering Ord) const override;
 
     unsigned getMaxSupportedInterleaveFactor() const override;
@@ -696,7 +716,7 @@ class VectorType;
 
     /// Return the correct alignment for the current calling convention.
     Align getABIAlignmentForCallingConv(Type *ArgTy,
-                                        DataLayout DL) const override;
+                                        const DataLayout &DL) const override;
 
     bool isDesirableToCommuteWithShift(const SDNode *N,
                                        CombineLevel Level) const override;
@@ -741,7 +761,8 @@ class VectorType;
                           CCValAssign &VA, CCValAssign &NextVA,
                           SDValue &StackPtr,
                           SmallVectorImpl<SDValue> &MemOpChains,
-                          ISD::ArgFlagsTy Flags) const;
+                          bool IsTailCall,
+                          int SPDiff) const;
     SDValue GetF64FormalArgument(CCValAssign &VA, CCValAssign &NextVA,
                                  SDValue &Root, SelectionDAG &DAG,
                                  const SDLoc &dl) const;
@@ -750,10 +771,10 @@ class VectorType;
                                             bool isVarArg) const;
     CCAssignFn *CCAssignFnForNode(CallingConv::ID CC, bool Return,
                                   bool isVarArg) const;
-    SDValue LowerMemOpCallTo(SDValue Chain, SDValue StackPtr, SDValue Arg,
-                             const SDLoc &dl, SelectionDAG &DAG,
-                             const CCValAssign &VA,
-                             ISD::ArgFlagsTy Flags) const;
+    std::pair<SDValue, MachinePointerInfo>
+    computeAddrForCallArg(const SDLoc &dl, SelectionDAG &DAG,
+                          const CCValAssign &VA, SDValue StackPtr,
+                          bool IsTailCall, int SPDiff) const;
     SDValue LowerEH_SJLJ_SETJMP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_SJLJ_LONGJMP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_SJLJ_SETUP_DISPATCH(SDValue Op, SelectionDAG &DAG) const;

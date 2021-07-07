@@ -298,6 +298,7 @@ private:
   SDValue PromoteIntRes_Atomic1(AtomicSDNode *N);
   SDValue PromoteIntRes_AtomicCmpSwap(AtomicSDNode *N, unsigned ResNo);
   SDValue PromoteIntRes_EXTRACT_SUBVECTOR(SDNode *N);
+  SDValue PromoteIntRes_INSERT_SUBVECTOR(SDNode *N);
   SDValue PromoteIntRes_VECTOR_REVERSE(SDNode *N);
   SDValue PromoteIntRes_VECTOR_SHUFFLE(SDNode *N);
   SDValue PromoteIntRes_VECTOR_SPLICE(SDNode *N);
@@ -928,6 +929,7 @@ private:
   SDValue WidenVecOp_CONCAT_VECTORS(SDNode *N);
   SDValue WidenVecOp_EXTEND(SDNode *N);
   SDValue WidenVecOp_EXTRACT_VECTOR_ELT(SDNode *N);
+  SDValue WidenVecOp_INSERT_SUBVECTOR(SDNode *N);
   SDValue WidenVecOp_EXTRACT_SUBVECTOR(SDNode *N);
   SDValue WidenVecOp_STORE(SDNode* N);
   SDValue WidenVecOp_MSTORE(SDNode* N, unsigned OpNo);

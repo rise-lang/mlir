@@ -48,6 +48,8 @@ public:
     AllowHashAtStartOfIdentifier = Value;
   }
   void setAllowDotIsPC(bool Value) { DotIsPC = Value; }
+  void setAssemblerDialect(unsigned Value) { AssemblerDialect = Value; }
+  void setEmitLabelsInUpperCase(bool Value) { EmitLabelsInUpperCase = Value; }
 };
 
 // Setup a testing class that the GTest framework can call.
@@ -62,6 +64,7 @@ protected:
   std::unique_ptr<MCRegisterInfo> MRI;
   std::unique_ptr<MockedUpMCAsmInfo> MUPMAI;
   std::unique_ptr<const MCInstrInfo> MII;
+  std::unique_ptr<MCObjectFileInfo> MOFI;
   std::unique_ptr<MCStreamer> Str;
   std::unique_ptr<MCAsmParser> Parser;
   std::unique_ptr<MCContext> Ctx;
@@ -74,7 +77,6 @@ protected:
   const Target *TheTarget;
 
   const MCTargetOptions MCOptions;
-  MCObjectFileInfo MOFI;
 
   SystemZAsmLexerTest() {
     // We will use the SystemZ triple, because of missing
@@ -112,9 +114,11 @@ protected:
     SrcMgr.AddNewSourceBuffer(std::move(Buffer), SMLoc());
     EXPECT_EQ(Buffer, nullptr);
 
-    Ctx.reset(
-        new MCContext(MUPMAI.get(), MRI.get(), &MOFI, &SrcMgr, &MCOptions));
-    MOFI.InitMCObjectFileInfo(Triple, false, *Ctx, false);
+    Ctx.reset(new MCContext(Triple, MUPMAI.get(), MRI.get(), STI.get(), &SrcMgr,
+                            &MCOptions));
+    MOFI.reset(TheTarget->createMCObjectFileInfo(*Ctx, /*PIC=*/false,
+                                                 /*LargeCodeModel=*/false));
+    Ctx->setObjectFileInfo(MOFI.get());
 
     Str.reset(TheTarget->createNullStreamer(*Ctx));
 
@@ -699,5 +703,84 @@ TEST_F(SystemZAsmLexerTest, CheckRejectStarAsCurrentPC) {
   bool ParsePrimaryExpr = Parser->parseExpression(Expr);
   EXPECT_EQ(ParsePrimaryExpr, true);
   EXPECT_EQ(Parser->hasPendingError(), true);
+}
+
+TEST_F(SystemZAsmLexerTest, CheckRejectCharLiterals) {
+  StringRef AsmStr = "abc 'd'";
+
+  // Setup.
+  setupCallToAsmParser(AsmStr);
+  Parser->getLexer().setLexHLASMStrings(true);
+
+  // Lex initially to get the string.
+  Parser->getLexer().Lex();
+
+  SmallVector<AsmToken::TokenKind> ExpectedTokens(
+      {AsmToken::Identifier, AsmToken::Error, AsmToken::Error,
+       AsmToken::EndOfStatement, AsmToken::Eof});
+  lexAndCheckTokens(AsmStr, ExpectedTokens);
+}
+
+TEST_F(SystemZAsmLexerTest, CheckRejectStringLiterals) {
+  StringRef AsmStr = "abc \"ef\"";
+
+  // Setup.
+  setupCallToAsmParser(AsmStr);
+  Parser->getLexer().setLexHLASMStrings(true);
+
+  // Lex initially to get the string.
+  Parser->getLexer().Lex();
+
+  SmallVector<AsmToken::TokenKind> ExpectedTokens(
+      {AsmToken::Identifier, AsmToken::Error, AsmToken::Identifier,
+       AsmToken::Error, AsmToken::EndOfStatement, AsmToken::Eof});
+  lexAndCheckTokens(AsmStr, ExpectedTokens);
+}
+
+TEST_F(SystemZAsmLexerTest, CheckPrintAcceptableSymbol) {
+  std::string AsmStr = "ab13_$.@";
+  EXPECT_EQ(true, MUPMAI->isValidUnquotedName(AsmStr));
+  AsmStr += "#";
+  EXPECT_EQ(false, MUPMAI->isValidUnquotedName(AsmStr));
+}
+
+TEST_F(SystemZAsmLexerTest, CheckPrintAcceptableSymbol2) {
+  MUPMAI->setAssemblerDialect(1);
+  std::string AsmStr = "ab13_$.@";
+  EXPECT_EQ(true, MUPMAI->isValidUnquotedName(AsmStr));
+  AsmStr += "#";
+  EXPECT_EQ(true, MUPMAI->isValidUnquotedName(AsmStr));
+}
+
+TEST_F(SystemZAsmLexerTest, CheckLabelCaseUpperCase2) {
+  StringRef AsmStr = "label\nlabel";
+
+  // Setup.
+  setupCallToAsmParser(AsmStr);
+
+  // Lex initially to get the string.
+  Parser->getLexer().Lex();
+
+  const MCExpr *Expr;
+  bool ParsePrimaryExpr = Parser->parseExpression(Expr);
+  EXPECT_EQ(ParsePrimaryExpr, false);
+
+  const MCSymbolRefExpr *SymbolExpr = dyn_cast<MCSymbolRefExpr>(Expr);
+  EXPECT_NE(SymbolExpr, nullptr);
+  EXPECT_NE(&SymbolExpr->getSymbol(), nullptr);
+  EXPECT_EQ((&SymbolExpr->getSymbol())->getName(), StringRef("label"));
+
+  // Lex the end of statement token.
+  Parser->getLexer().Lex();
+
+  MUPMAI->setEmitLabelsInUpperCase(true);
+
+  ParsePrimaryExpr = Parser->parseExpression(Expr);
+  EXPECT_EQ(ParsePrimaryExpr, false);
+
+  SymbolExpr = dyn_cast<MCSymbolRefExpr>(Expr);
+  EXPECT_NE(SymbolExpr, nullptr);
+  EXPECT_NE(&SymbolExpr->getSymbol(), nullptr);
+  EXPECT_EQ((&SymbolExpr->getSymbol())->getName(), StringRef("LABEL"));
 }
 } // end anonymous namespace

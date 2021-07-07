@@ -291,7 +291,7 @@ public:
 
   bool isTypeLegal(Type *Ty) const { return false; }
 
-  unsigned getRegUsageForType(Type *Ty) const { return 1; }
+  InstructionCost getRegUsageForType(Type *Ty) const { return 1; }
 
   bool shouldBuildLookupTables() const { return true; }
 
@@ -347,8 +347,8 @@ public:
     return TargetTransformInfo::TCC_Basic;
   }
 
-  int getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
-                            Type *Ty) const {
+  InstructionCost getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx,
+                                        const APInt &Imm, Type *Ty) const {
     return 0;
   }
 
@@ -576,6 +576,7 @@ public:
     case Intrinsic::assume:
     case Intrinsic::sideeffect:
     case Intrinsic::pseudoprobe:
+    case Intrinsic::arithmetic_fence:
     case Intrinsic::dbg_declare:
     case Intrinsic::dbg_value:
     case Intrinsic::dbg_label:
@@ -636,7 +637,7 @@ public:
     return 1;
   }
 
-  unsigned getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) const {
+  InstructionCost getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) const {
     return 0;
   }
 
@@ -715,10 +716,12 @@ public:
     return true;
   }
 
-  bool isLegalToVectorizeReduction(RecurrenceDescriptor RdxDesc,
+  bool isLegalToVectorizeReduction(const RecurrenceDescriptor &RdxDesc,
                                    ElementCount VF) const {
     return true;
   }
+
+  bool isElementTypeLegalForScalableVector(Type *Ty) const { return true; }
 
   unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
                                unsigned ChainSizeInBytes,
@@ -857,9 +860,8 @@ public:
              ArrayRef<const Value *> Operands,
              TTI::TargetCostKind CostKind = TTI::TCK_SizeAndLatency) {
     assert(PointeeType && Ptr && "can't get GEPCost of nullptr");
-    // TODO: will remove this when pointers have an opaque type.
-    assert(Ptr->getType()->getScalarType()->getPointerElementType() ==
-               PointeeType &&
+    assert(cast<PointerType>(Ptr->getType()->getScalarType())
+               ->isOpaqueOrPointeeTypeMatches(PointeeType) &&
            "explicit pointee type doesn't match operand's pointee type");
     auto *BaseGV = dyn_cast<GlobalValue>(Ptr->stripPointerCasts());
     bool HasBaseReg = (BaseGV == nullptr);

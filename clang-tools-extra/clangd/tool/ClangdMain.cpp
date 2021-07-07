@@ -10,7 +10,7 @@
 #include "CodeComplete.h"
 #include "Config.h"
 #include "ConfigProvider.h"
-#include "Features.inc"
+#include "Features.h"
 #include "PathMapping.h"
 #include "Protocol.h"
 #include "TidyProvider.h"
@@ -26,7 +26,6 @@
 #include "support/Shutdown.h"
 #include "support/ThreadsafeFS.h"
 #include "support/Trace.h"
-#include "clang/Basic/Version.h"
 #include "clang/Format/Format.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
@@ -62,7 +61,8 @@ namespace clangd {
 // Implemented in Check.cpp.
 bool check(const llvm::StringRef File,
            llvm::function_ref<bool(const Position &)> ShouldCheckLine,
-           const ThreadsafeFS &TFS, const ClangdLSPServer::Options &Opts);
+           const ThreadsafeFS &TFS, const ClangdLSPServer::Options &Opts,
+           bool EnableCodeCompletion);
 
 namespace {
 
@@ -290,6 +290,14 @@ opt<int> LimitResults{
     desc("Limit the number of results returned by clangd. "
          "0 means no limit (default=100)"),
     init(100),
+};
+
+opt<int> ReferencesLimit{
+    "limit-references",
+    cat(Features),
+    desc("Limit the number of references returned by clangd. "
+         "0 means no limit (default=1000)"),
+    init(1000),
 };
 
 list<std::string> TweakList{
@@ -670,7 +678,8 @@ int main(int argc, char *argv[]) {
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
   llvm::sys::SetInterruptFunction(&requestShutdown);
   llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
-    OS << clang::getClangToolFullVersion("clangd") << "\n";
+    OS << versionString() << "\n"
+       << "Features: " << featureString() << "\n";
   });
   const char *FlagsEnvVar = "CLANGD_FLAGS";
   const char *Overview =
@@ -775,7 +784,8 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
   StreamLogger Logger(llvm::errs(), LogLevel);
   LoggingSession LoggingSession(Logger);
   // Write some initial logs before we start doing any real work.
-  log("{0}", clang::getClangToolFullVersion("clangd"));
+  log("{0}", versionString());
+  log("Features: {0}", featureString());
   log("PID: {0}", llvm::sys::Process::getProcessId());
   {
     SmallString<128> CWD;
@@ -821,6 +831,7 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
   }
 #endif
   Opts.BackgroundIndex = EnableBackgroundIndex;
+  Opts.ReferencesLimit = ReferencesLimit;
   auto PAI = createProjectAwareIndex(loadExternalIndex, Sync);
   if (StaticIdx) {
     IdxStack.emplace_back(std::move(StaticIdx));
@@ -899,7 +910,11 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
 
   if (CheckFile.getNumOccurrences()) {
     llvm::SmallString<256> Path;
-    llvm::sys::fs::real_path(CheckFile, Path, /*expand_tilde=*/true);
+    if (auto Error =
+            llvm::sys::fs::real_path(CheckFile, Path, /*expand_tilde=*/true)) {
+      elog("Failed to resolve path {0}: {1}", CheckFile, Error.message());
+      return 1;
+    }
     log("Entering check mode (no LSP server)");
     uint32_t Begin = 0, End = std::numeric_limits<uint32_t>::max();
     if (!CheckFileLines.empty()) {
@@ -920,7 +935,11 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
       uint32_t Line = Pos.line + 1; // Position::line is 0-based.
       return Line >= Begin && Line <= End;
     };
-    return check(Path, ShouldCheckLine, TFS, Opts)
+    // For now code completion is enabled any time the range is limited via
+    // --check-lines. If it turns out to be to slow, we can introduce a
+    // dedicated flag for that instead.
+    return check(Path, ShouldCheckLine, TFS, Opts,
+                 /*EnableCodeCompletion=*/!CheckFileLines.empty())
                ? 0
                : static_cast<int>(ErrorResultCode::CheckFailed);
   }

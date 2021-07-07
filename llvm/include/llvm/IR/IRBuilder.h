@@ -647,8 +647,11 @@ public:
                                  TBAAStructTag, ScopeTag, NoAliasTag);
   }
 
-  CallInst *CreateMemCpyInline(Value *Dst, MaybeAlign DstAlign, Value *Src,
-                               MaybeAlign SrcAlign, Value *Size);
+  CallInst *
+  CreateMemCpyInline(Value *Dst, MaybeAlign DstAlign, Value *Src,
+                     MaybeAlign SrcAlign, Value *Size, bool IsVolatile = false,
+                     MDNode *TBAATag = nullptr, MDNode *TBAAStructTag = nullptr,
+                     MDNode *ScopeTag = nullptr, MDNode *NoAliasTag = nullptr);
 
   /// Create and insert an element unordered-atomic memcpy between the
   /// specified pointers.
@@ -749,7 +752,7 @@ public:
   CallInst *CreateInvariantStart(Value *Ptr, ConstantInt *Size = nullptr);
 
   /// Create a call to Masked Load intrinsic
-  CallInst *CreateMaskedLoad(Value *Ptr, Align Alignment, Value *Mask,
+  CallInst *CreateMaskedLoad(Type *Ty, Value *Ptr, Align Alignment, Value *Mask,
                              Value *PassThru = nullptr, const Twine &Name = "");
 
   /// Create a call to Masked Store intrinsic
@@ -757,7 +760,7 @@ public:
                               Value *Mask);
 
   /// Create a call to Masked Gather intrinsic
-  CallInst *CreateMaskedGather(Value *Ptrs, Align Alignment,
+  CallInst *CreateMaskedGather(Type *Ty, Value *Ptrs, Align Alignment,
                                Value *Mask = nullptr, Value *PassThru = nullptr,
                                const Twine &Name = "");
 
@@ -850,6 +853,14 @@ public:
                              Type *ResultType,
                              const Twine &Name = "");
 
+  /// Create a call to the experimental.gc.pointer.base intrinsic to get the
+  /// base pointer for the specified derived pointer.
+  CallInst *CreateGCGetPointerBase(Value *DerivedPtr, const Twine &Name = "");
+
+  /// Create a call to the experimental.gc.get.pointer.offset intrinsic to get
+  /// the offset of the specified derived pointer from its base.
+  CallInst *CreateGCGetPointerOffset(Value *DerivedPtr, const Twine &Name = "");
+
   /// Create a call to llvm.vscale, multiplied by \p Scaling. The type of VScale
   /// will be the same type as that of \p Scaling.
   Value *CreateVScale(Constant *Scaling, const Twine &Name = "");
@@ -895,6 +906,13 @@ public:
   /// Create call to the maximum intrinsic.
   CallInst *CreateMaximum(Value *LHS, Value *RHS, const Twine &Name = "") {
     return CreateBinaryIntrinsic(Intrinsic::maximum, LHS, RHS, nullptr, Name);
+  }
+
+  /// Create a call to the arithmetic_fence intrinsic.
+  CallInst *CreateArithmeticFence(Value *Val, Type *DstType,
+                                  const Twine &Name = "") {
+    return CreateIntrinsic(Intrinsic::arithmetic_fence, DstType, Val, nullptr,
+                           Name);
   }
 
   /// Create a call to the experimental.vector.extract intrinsic.
@@ -2509,6 +2527,16 @@ public:
 
   /// Return a vector value that contains the vector V reversed
   Value *CreateVectorReverse(Value *V, const Twine &Name = "");
+
+  /// Return a vector splice intrinsic if using scalable vectors, otherwise
+  /// return a shufflevector. If the immediate is positive, a vector is
+  /// extracted from concat(V1, V2), starting at Imm. If the immediate
+  /// is negative, we extract -Imm elements from V1 and the remaining
+  /// elements from V2. Imm is a signed integer in the range
+  /// -VL <= Imm < VL (where VL is the runtime vector length of the
+  /// source/result vector)
+  Value *CreateVectorSplice(Value *V1, Value *V2, int64_t Imm,
+                            const Twine &Name = "");
 
   /// Return a vector value that contains \arg V broadcasted to \p
   /// NumElts elements.

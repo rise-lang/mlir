@@ -2046,7 +2046,7 @@ public:
                                                        SMLoc S,
                                                        MCContext &Ctx) {
     auto Op = std::make_unique<AArch64Operand>(k_BTIHint, Ctx);
-    Op->BTIHint.Val = Val << 1 | 32;
+    Op->BTIHint.Val = Val | 32;
     Op->BTIHint.Data = Str.data();
     Op->BTIHint.Length = Str.size();
     Op->StartLoc = S;
@@ -2707,7 +2707,7 @@ AArch64AsmParser::tryParseImmWithOptionalShift(OperandVector &Operands) {
 
   // The optional operand must be "lsl #N" where N is non-negative.
   if (!Parser.getTok().is(AsmToken::Identifier) ||
-      !Parser.getTok().getIdentifier().equals_lower("lsl")) {
+      !Parser.getTok().getIdentifier().equals_insensitive("lsl")) {
     Error(Parser.getTok().getLoc(), "only 'lsl #+N' valid after immediate");
     return MatchOperand_ParseFail;
   }
@@ -2917,6 +2917,7 @@ static const struct Extension {
     {"xs", {AArch64::FeatureXS}},
     {"pauth", {AArch64::FeaturePAuth}},
     {"flagm", {AArch64::FeatureFlagM}},
+    {"rme", {AArch64::FeatureRME}},
     // FIXME: Unsupported extensions
     {"lor", {}},
     {"rdma", {}},
@@ -3669,9 +3670,10 @@ bool AArch64AsmParser::parseOptionalMulOperand(OperandVector &Operands) {
   // Some SVE instructions have a decoration after the immediate, i.e.
   // "mul vl". We parse them here and add tokens, which must be present in the
   // asm string in the tablegen instruction.
-  bool NextIsVL = Parser.getLexer().peekTok().getString().equals_lower("vl");
+  bool NextIsVL =
+      Parser.getLexer().peekTok().getString().equals_insensitive("vl");
   bool NextIsHash = Parser.getLexer().peekTok().is(AsmToken::Hash);
-  if (!Parser.getTok().getString().equals_lower("mul") ||
+  if (!Parser.getTok().getString().equals_insensitive("mul") ||
       !(NextIsVL || NextIsHash))
     return true;
 
@@ -5267,10 +5269,9 @@ bool AArch64AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
 
 /// ParseDirective parses the arm specific directives
 bool AArch64AsmParser::ParseDirective(AsmToken DirectiveID) {
-  const MCObjectFileInfo::Environment Format =
-    getContext().getObjectFileInfo()->getObjectFileType();
-  bool IsMachO = Format == MCObjectFileInfo::IsMachO;
-  bool IsCOFF = Format == MCObjectFileInfo::IsCOFF;
+  const MCContext::Environment Format = getContext().getObjectFileType();
+  bool IsMachO = Format == MCContext::IsMachO;
+  bool IsCOFF = Format == MCContext::IsCOFF;
 
   auto IDVal = DirectiveID.getIdentifier().lower();
   SMLoc Loc = DirectiveID.getLoc();
@@ -5443,7 +5444,7 @@ bool AArch64AsmParser::parseDirectiveArch(SMLoc L) {
   for (auto Name : RequestedExtensions) {
     bool EnableFeature = true;
 
-    if (Name.startswith_lower("no")) {
+    if (Name.startswith_insensitive("no")) {
       EnableFeature = false;
       Name = Name.substr(2);
     }
@@ -5479,7 +5480,7 @@ bool AArch64AsmParser::parseDirectiveArchExtension(SMLoc L) {
     return true;
 
   bool EnableFeature = true;
-  if (Name.startswith_lower("no")) {
+  if (Name.startswith_insensitive("no")) {
     EnableFeature = false;
     Name = Name.substr(2);
   }
@@ -5545,7 +5546,7 @@ bool AArch64AsmParser::parseDirectiveCPU(SMLoc L) {
 
     bool EnableFeature = true;
 
-    if (Name.startswith_lower("no")) {
+    if (Name.startswith_insensitive("no")) {
       EnableFeature = false;
       Name = Name.substr(2);
     }
@@ -5595,9 +5596,7 @@ bool AArch64AsmParser::parseDirectiveInst(SMLoc Loc) {
     return false;
   };
 
-  if (parseMany(parseOp))
-    return addErrorSuffix(" in '.inst' directive");
-  return false;
+  return parseMany(parseOp);
 }
 
 // parseDirectiveTLSDescCall:
@@ -5753,9 +5752,7 @@ bool AArch64AsmParser::parseDirectiveUnreq(SMLoc L) {
     return TokError("unexpected input in .unreq directive.");
   RegisterReqs.erase(Parser.getTok().getIdentifier().lower());
   Parser.Lex(); // Eat the identifier.
-  if (parseToken(AsmToken::EndOfStatement))
-    return addErrorSuffix("in '.unreq' directive");
-  return false;
+  return parseToken(AsmToken::EndOfStatement);
 }
 
 bool AArch64AsmParser::parseDirectiveCFINegateRAState() {
@@ -5788,16 +5785,13 @@ bool AArch64AsmParser::parseDirectiveVariantPCS(SMLoc L) {
 
   MCSymbol *Sym = getContext().lookupSymbol(SymbolName);
   if (!Sym)
-    return TokError("unknown symbol in '.variant_pcs' directive");
+    return TokError("unknown symbol");
 
   Parser.Lex(); // Eat the symbol
 
-  // Shouldn't be any more tokens
-  if (parseToken(AsmToken::EndOfStatement))
-    return addErrorSuffix(" in '.variant_pcs' directive");
-
+  if (parseEOL())
+    return true;
   getTargetStreamer().emitDirectiveVariantPCS(Sym);
-
   return false;
 }
 

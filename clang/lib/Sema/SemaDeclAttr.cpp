@@ -229,7 +229,7 @@ static bool checkUInt32Argument(Sema &S, const AttrInfo &AI, const Expr *Expr,
 
   if (!I->isIntN(32)) {
     S.Diag(Expr->getExprLoc(), diag::err_ice_too_large)
-        << I->toString(10, false) << 32 << /* Unsigned */ 1;
+        << toString(*I, 10, false) << 32 << /* Unsigned */ 1;
     return false;
   }
 
@@ -257,7 +257,7 @@ static bool checkPositiveIntArgument(Sema &S, const AttrInfo &AI, const Expr *Ex
     llvm::APSInt I(32); // for toString
     I = UVal;
     S.Diag(Expr->getExprLoc(), diag::err_ice_too_large)
-        << I.toString(10, false) << 32 << /* Unsigned */ 0;
+        << toString(I, 10, false) << 32 << /* Unsigned */ 0;
     return false;
   }
 
@@ -1935,6 +1935,12 @@ static void handleTLSModelAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
+  if (S.Context.getTargetInfo().getTriple().isOSAIX() &&
+      Model != "global-dynamic") {
+    S.Diag(LiteralLoc, diag::err_aix_attr_unsupported_tls_model) << Model;
+    return;
+  }
+
   D->addAttr(::new (S.Context) TLSModelAttr(S.Context, AL, Model));
 }
 
@@ -2087,7 +2093,7 @@ static void handleAnalyzerNoReturnAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     ValueDecl *VD = dyn_cast<ValueDecl>(D);
     if (!VD || (!VD->getType()->isBlockPointerType() &&
                 !VD->getType()->isFunctionPointerType())) {
-      S.Diag(AL.getLoc(), AL.isCXX11Attribute()
+      S.Diag(AL.getLoc(), AL.isStandardAttributeSyntax()
                               ? diag::err_attribute_wrong_decl_type
                               : diag::warn_attribute_wrong_decl_type)
           << AL << ExpectedFunctionMethodOrBlock;
@@ -2294,6 +2300,7 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(
 
   case AMK_Override:
   case AMK_ProtocolImplementation:
+  case AMK_OptionalProtocolImplementation:
     OverrideOrImpl = true;
     break;
   }
@@ -2362,6 +2369,14 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(
                  diag::warn_mismatched_availability_override_unavail)
               << AvailabilityAttr::getPrettyPlatformName(Platform->getName())
               << (AMK == AMK_Override);
+          } else if (Which != 1 && AMK == AMK_OptionalProtocolImplementation) {
+            // Allow different 'introduced' / 'obsoleted' availability versions
+            // on a method that implements an optional protocol requirement. It
+            // makes less sense to allow this for 'deprecated' as the user can't
+            // see if the method is 'deprecated' as 'respondsToSelector' will
+            // still return true when the method is deprecated.
+            ++i;
+            continue;
           } else {
             Diag(OldAA->getLocation(),
                  diag::warn_mismatched_availability_override)
@@ -2431,6 +2446,13 @@ AvailabilityAttr *Sema::mergeAvailabilityAttr(
 }
 
 static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (isa<UsingDecl, UnresolvedUsingTypenameDecl, UnresolvedUsingValueDecl>(
+          D)) {
+    S.Diag(AL.getRange().getBegin(), diag::warn_deprecated_ignored_on_using)
+        << AL;
+    return;
+  }
+
   if (!AL.checkExactlyNumArgs(S, 1))
     return;
   IdentifierLoc *Platform = AL.getArgAsIdent(0);
@@ -2841,7 +2863,7 @@ static void handleWarnUnusedResult(Sema &S, Decl *D, const ParsedAttr &AL) {
     }
 
   StringRef Str;
-  if ((AL.isCXX11Attribute() || AL.isC2xAttribute()) && !AL.getScopeName()) {
+  if (AL.isStandardAttributeSyntax() && !AL.getScopeName()) {
     // The standard attribute cannot be applied to variable declarations such
     // as a function pointer.
     if (isa<VarDecl>(D))
@@ -3449,7 +3471,7 @@ static void handleFormatAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   } else if (Kind == NSStringFormat) {
     // FIXME: do we need to check if the type is NSString*?  What are the
     // semantics?
-    if (!isNSStringType(Ty, S.Context)) {
+    if (!isNSStringType(Ty, S.Context, /*AllowNSAttributedString=*/true)) {
       S.Diag(AL.getLoc(), diag::err_format_attribute_not)
         << "an NSString" << IdxExpr->getSourceRange()
         << getFunctionOrMethodParamRange(D, ArgIdx);
@@ -3747,11 +3769,11 @@ void Sema::AddAnnotationAttr(Decl *D, const AttributeCommonInfo &CI,
       E = ImplicitCastExpr::Create(Context,
                                    Context.getPointerType(E->getType()),
                                    clang::CK_FunctionToPointerDecay, E, nullptr,
-                                   VK_RValue, FPOptionsOverride());
+                                   VK_PRValue, FPOptionsOverride());
     if (E->isLValue())
       E = ImplicitCastExpr::Create(Context, E->getType().getNonReferenceType(),
                                    clang::CK_LValueToRValue, E, nullptr,
-                                   VK_RValue, FPOptionsOverride());
+                                   VK_PRValue, FPOptionsOverride());
 
     Expr::EvalResult Eval;
     Notes.clear();
@@ -4404,6 +4426,13 @@ static void handleConstantAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     S.Diag(AL.getLoc(), diag::err_cuda_nonstatic_constdev);
     return;
   }
+  // constexpr variable may already get an implicit constant attr, which should
+  // be replaced by the explicit constant attr.
+  if (auto *A = D->getAttr<CUDAConstantAttr>()) {
+    if (!A->isImplicit())
+      return;
+    D->dropAttr<CUDAConstantAttr>();
+  }
   D->addAttr(::new (S.Context) CUDAConstantAttr(S.Context, AL));
 }
 
@@ -4874,6 +4903,14 @@ void Sema::AddParameterABIAttr(Decl *D, const AttributeCommonInfo &CI,
     D->addAttr(::new (Context) SwiftContextAttr(Context, CI));
     return;
 
+  case ParameterABI::SwiftAsyncContext:
+    if (!isValidSwiftContextType(type)) {
+      Diag(CI.getLoc(), diag::err_swift_abi_parameter_wrong_type)
+          << getParameterABISpelling(abi) << /*pointer to pointer */ 0 << type;
+    }
+    D->addAttr(::new (Context) SwiftAsyncContextAttr(Context, CI));
+    return;
+
   case ParameterABI::SwiftErrorResult:
     if (!isValidSwiftErrorResultType(type)) {
       Diag(CI.getLoc(), diag::err_swift_abi_parameter_wrong_type)
@@ -4953,7 +4990,7 @@ static Expr *makeLaunchBoundsArgExpr(Sema &S, Expr *E,
   // Make sure we can fit it in 32 bits.
   if (!I->isIntN(32)) {
     S.Diag(E->getExprLoc(), diag::err_ice_too_large)
-        << I->toString(10, false) << 32 << /* Unsigned */ 1;
+        << toString(*I, 10, false) << 32 << /* Unsigned */ 1;
     return nullptr;
   }
   if (*I < 0)
@@ -5126,16 +5163,12 @@ static bool ArmCdeAliasValid(unsigned BuiltinID, StringRef AliasName) {
   return ArmBuiltinAliasValid(BuiltinID, AliasName, Map, IntrinNames);
 }
 
-static bool ArmSveAliasValid(unsigned BuiltinID, StringRef AliasName) {
-  switch (BuiltinID) {
-  default:
-    return false;
-#define GET_SVE_BUILTINS
-#define BUILTIN(name, types, attr) case SVE::BI##name:
-#include "clang/Basic/arm_sve_builtins.inc"
-#undef BUILTIN
-    return true;
-  }
+static bool ArmSveAliasValid(ASTContext &Context, unsigned BuiltinID,
+                             StringRef AliasName) {
+  if (Context.BuiltinInfo.isAuxBuiltinID(BuiltinID))
+    BuiltinID = Context.BuiltinInfo.getAuxBuiltinID(BuiltinID);
+  return BuiltinID >= AArch64::FirstSVEBuiltin &&
+         BuiltinID <= AArch64::LastSVEBuiltin;
 }
 
 static void handleArmBuiltinAliasAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -5150,7 +5183,7 @@ static void handleArmBuiltinAliasAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   StringRef AliasName = cast<FunctionDecl>(D)->getIdentifier()->getName();
 
   bool IsAArch64 = S.Context.getTargetInfo().getTriple().isAArch64();
-  if ((IsAArch64 && !ArmSveAliasValid(BuiltinID, AliasName)) ||
+  if ((IsAArch64 && !ArmSveAliasValid(S.Context, BuiltinID, AliasName)) ||
       (!IsAArch64 && !ArmMveAliasValid(BuiltinID, AliasName) &&
        !ArmCdeAliasValid(BuiltinID, AliasName))) {
     S.Diag(AL.getLoc(), diag::err_attribute_arm_builtin_alias);
@@ -5161,14 +5194,8 @@ static void handleArmBuiltinAliasAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 }
 
 static bool RISCVAliasValid(unsigned BuiltinID, StringRef AliasName) {
-  switch (BuiltinID) {
-  default:
-    return false;
-#define BUILTIN(ID, TYPE, ATTRS) case RISCV::BI##ID:
-#include "clang/Basic/BuiltinsRISCV.def"
-#undef BUILTIN
-    return true;
-  }
+  return BuiltinID >= Builtin::FirstTSBuiltin &&
+         BuiltinID < RISCV::LastTSBuiltin;
 }
 
 static void handleBuiltinAliasAttr(Sema &S, Decl *D,
@@ -5186,7 +5213,7 @@ static void handleBuiltinAliasAttr(Sema &S, Decl *D,
   bool IsAArch64 = S.Context.getTargetInfo().getTriple().isAArch64();
   bool IsARM = S.Context.getTargetInfo().getTriple().isARM();
   bool IsRISCV = S.Context.getTargetInfo().getTriple().isRISCV();
-  if ((IsAArch64 && !ArmSveAliasValid(BuiltinID, AliasName)) ||
+  if ((IsAArch64 && !ArmSveAliasValid(S.Context, BuiltinID, AliasName)) ||
       (IsARM && !ArmMveAliasValid(BuiltinID, AliasName) &&
        !ArmCdeAliasValid(BuiltinID, AliasName)) ||
       (IsRISCV && !RISCVAliasValid(BuiltinID, AliasName)) ||
@@ -7240,6 +7267,11 @@ static void handleDeprecatedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       // namespace.
       return;
     }
+  } else if (isa<UsingDecl, UnresolvedUsingTypenameDecl,
+                 UnresolvedUsingValueDecl>(D)) {
+    S.Diag(AL.getRange().getBegin(), diag::warn_deprecated_ignored_on_using)
+        << AL;
+    return;
   }
 
   // Handle the cases where the attribute has a text message.
@@ -7248,8 +7280,8 @@ static void handleDeprecatedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       !S.checkStringLiteralArgumentAttr(AL, 0, Str))
     return;
 
-  // Only support a single optional message for Declspec and CXX11.
-  if (AL.isDeclspecAttribute() || AL.isCXX11Attribute())
+  // Support a single optional message only for Declspec and [[]] spellings.
+  if (AL.isDeclspecAttribute() || AL.isStandardAttributeSyntax())
     AL.checkAtMostNumArgs(S, 1);
   else if (AL.isArgExpr(1) && AL.getArgAsExpr(1) &&
            !S.checkStringLiteralArgumentAttr(AL, 1, Replacement))
@@ -7281,7 +7313,8 @@ static void handleNoSanitizeAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       return;
 
     if (parseSanitizerValue(SanitizerName, /*AllowGroups=*/true) ==
-        SanitizerMask())
+            SanitizerMask() &&
+        SanitizerName != "coverage")
       S.Diag(LiteralLoc, diag::warn_unknown_sanitizer_ignored) << SanitizerName;
     else if (isGlobalVar(D) && SanitizerName != "address")
       S.Diag(D->getLocation(), diag::err_attribute_wrong_decl_type)
@@ -7315,7 +7348,7 @@ static void handleNoSanitizeSpecificAttr(Sema &S, Decl *D,
   // getSpelling() or prettyPrint() on the resulting semantic attribute object
   // without failing assertions.
   unsigned TranslatedSpellingIndex = 0;
-  if (AL.isC2xAttribute() || AL.isCXX11Attribute())
+  if (AL.isStandardAttributeSyntax())
     TranslatedSpellingIndex = 1;
 
   AttributeCommonInfo Info = AL;
@@ -8094,6 +8127,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_SwiftContext:
     S.AddParameterABIAttr(D, AL, ParameterABI::SwiftContext);
     break;
+  case ParsedAttr::AT_SwiftAsyncContext:
+    S.AddParameterABIAttr(D, AL, ParameterABI::SwiftAsyncContext);
+    break;
   case ParsedAttr::AT_SwiftErrorResult:
     S.AddParameterABIAttr(D, AL, ParameterABI::SwiftErrorResult);
     break;
@@ -8298,6 +8334,10 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
 
   case ParsedAttr::AT_BuiltinAlias:
     handleBuiltinAliasAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_UsingIfExists:
+    handleSimpleAttribute<UsingIfExistsAttr>(S, D, AL);
     break;
   }
 }

@@ -29,7 +29,7 @@ bool isDimBoundedByConstant(isl::set Set, unsigned dim) {
   auto ParamDims = Set.dim(isl::dim::param);
   Set = Set.project_out(isl::dim::param, 0, ParamDims);
   Set = Set.project_out(isl::dim::set, 0, dim);
-  auto SetDims = Set.dim(isl::dim::set);
+  auto SetDims = Set.tuple_dim();
   Set = Set.project_out(isl::dim::set, 1, SetDims - 1);
   return bool(Set.is_bounded());
 }
@@ -40,7 +40,7 @@ bool isDimBoundedByConstant(isl::set Set, unsigned dim) {
 /// Min_p <= x <= Max_p.
 bool isDimBoundedByParameter(isl::set Set, unsigned dim) {
   Set = Set.project_out(isl::dim::set, 0, dim);
-  auto SetDims = Set.dim(isl::dim::set);
+  auto SetDims = Set.tuple_dim();
   Set = Set.project_out(isl::dim::set, 1, SetDims - 1);
   return bool(Set.is_bounded());
 }
@@ -48,7 +48,7 @@ bool isDimBoundedByParameter(isl::set Set, unsigned dim) {
 /// Whether BMap's first out-dimension is not a constant.
 bool isVariableDim(const isl::basic_map &BMap) {
   auto FixedVal = BMap.plain_get_val_if_fixed(isl::dim::out, 0);
-  return !FixedVal || FixedVal.is_nan();
+  return FixedVal.is_null() || FixedVal.is_nan();
 }
 
 /// Whether Map's first out dimension is no constant nor piecewise constant.
@@ -132,10 +132,10 @@ isl::union_map scheduleProjectOut(const isl::union_map &UMap, unsigned first,
 isl_size scheduleScatterDims(const isl::union_map &Schedule) {
   isl_size Dims = 0;
   for (isl::map Map : Schedule.get_map_list()) {
-    if (!Map)
+    if (Map.is_null())
       continue;
 
-    Dims = std::max(Dims, Map.dim(isl::dim::out));
+    Dims = std::max(Dims, Map.range_tuple_dim());
   }
   return Dims;
 }
@@ -144,7 +144,7 @@ isl_size scheduleScatterDims(const isl::union_map &Schedule) {
 isl::union_pw_aff scheduleExtractDimAff(isl::union_map UMap, unsigned pos) {
   auto SingleUMap = isl::union_map::empty(UMap.get_space());
   for (isl::map Map : UMap.get_map_list()) {
-    unsigned MapDims = Map.dim(isl::dim::out);
+    unsigned MapDims = Map.range_tuple_dim();
     isl::map SingleMap = Map.project_out(isl::dim::out, 0, pos);
     SingleMap = SingleMap.project_out(isl::dim::out, 1, MapDims - pos - 1);
     SingleUMap = SingleUMap.add_map(SingleMap);
@@ -179,13 +179,13 @@ isl::union_map tryFlattenSequence(isl::union_map Schedule) {
   auto ScatterSet = isl::set(Schedule.range());
 
   auto ParamSpace = Schedule.get_space().params();
-  auto Dims = ScatterSet.dim(isl::dim::set);
+  auto Dims = ScatterSet.tuple_dim();
   assert(Dims >= 2);
 
   // Would cause an infinite loop.
   if (!isDimBoundedByConstant(ScatterSet, 0)) {
     LLVM_DEBUG(dbgs() << "Abort; dimension is not of fixed size\n");
-    return nullptr;
+    return {};
   }
 
   auto AllDomains = Schedule.domain();
@@ -216,7 +216,7 @@ isl::union_map tryFlattenSequence(isl::union_map Schedule) {
 
     if (!isDimBoundedByParameter(FirstSubScatter, 0)) {
       LLVM_DEBUG(dbgs() << "Abort; sequence step is not bounded\n");
-      return nullptr;
+      return {};
     }
 
     auto FirstSubScatterMap = isl::map::from_range(FirstSubScatter);
@@ -275,7 +275,7 @@ isl::union_map tryFlattenLoop(isl::union_map Schedule) {
 
   if (!isDimBoundedByConstant(SubExtent, 0)) {
     LLVM_DEBUG(dbgs() << "Abort; dimension not bounded by constant\n");
-    return nullptr;
+    return {};
   }
 
   auto Min = SubExtent.dim_min(0);
@@ -285,9 +285,10 @@ isl::union_map tryFlattenLoop(isl::union_map Schedule) {
   LLVM_DEBUG(dbgs() << "Max bound:\n  " << Max << "\n");
   auto MaxVal = getConstant(Max, true, false);
 
-  if (!MinVal || !MaxVal || MinVal.is_nan() || MaxVal.is_nan()) {
+  if (MinVal.is_null() || MaxVal.is_null() || MinVal.is_nan() ||
+      MaxVal.is_nan()) {
     LLVM_DEBUG(dbgs() << "Abort; dimension bounds could not be determined\n");
-    return nullptr;
+    return {};
   }
 
   auto FirstSubScheduleAff = scheduleExtractDimAff(SubSchedule, 0);
@@ -328,20 +329,20 @@ isl::union_map polly::flattenSchedule(isl::union_map Schedule) {
   if (!isVariableDim(Schedule)) {
     LLVM_DEBUG(dbgs() << "Fixed dimension; try sequence flattening\n");
     auto NewScheduleSequence = tryFlattenSequence(Schedule);
-    if (NewScheduleSequence)
+    if (!NewScheduleSequence.is_null())
       return NewScheduleSequence;
   }
 
   // Constant stride
   LLVM_DEBUG(dbgs() << "Try loop flattening\n");
   auto NewScheduleLoop = tryFlattenLoop(Schedule);
-  if (NewScheduleLoop)
+  if (!NewScheduleLoop.is_null())
     return NewScheduleLoop;
 
   // Try again without loop condition (may blow up the number of pieces!!)
   LLVM_DEBUG(dbgs() << "Try sequence flattening again\n");
   auto NewScheduleSequence = tryFlattenSequence(Schedule);
-  if (NewScheduleSequence)
+  if (!NewScheduleSequence.is_null())
     return NewScheduleSequence;
 
   // Cannot flatten

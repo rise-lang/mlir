@@ -129,9 +129,9 @@ struct TransferrableTargetInfo {
     Float128
   };
 protected:
-  IntType SizeType, IntMaxType, PtrDiffType, IntPtrType, WCharType,
-          WIntType, Char16Type, Char32Type, Int64Type, SigAtomicType,
-          ProcessIDType;
+  IntType SizeType, IntMaxType, PtrDiffType, IntPtrType, WCharType, WIntType,
+      Char16Type, Char32Type, Int64Type, Int16Type, SigAtomicType,
+      ProcessIDType;
 
   /// Whether Objective-C's built-in boolean type should be signed char.
   ///
@@ -350,6 +350,10 @@ public:
   IntType getInt64Type() const { return Int64Type; }
   IntType getUInt64Type() const {
     return getCorrespondingUnsignedType(Int64Type);
+  }
+  IntType getInt16Type() const { return Int16Type; }
+  IntType getUInt16Type() const {
+    return getCorrespondingUnsignedType(Int16Type);
   }
   IntType getSigAtomicType() const { return SigAtomicType; }
   IntType getProcessIDType() const { return ProcessIDType; }
@@ -1087,6 +1091,12 @@ public:
     return std::string(1, *Constraint);
   }
 
+  /// Replace some escaped characters with another string based on
+  /// target-specific rules
+  virtual llvm::Optional<std::string> handleAsmEscapedChar(char C) const {
+    return llvm::None;
+  }
+
   /// Returns a string of target-specific clobbers, in LLVM format.
   virtual const char *getClobbers() const = 0;
 
@@ -1152,7 +1162,7 @@ public:
   /// Apply changes to the target information with respect to certain
   /// language options which change the target configuration and adjust
   /// the language based on the target options where applicable.
-  virtual void adjust(LangOptions &Opts);
+  virtual void adjust(DiagnosticsEngine &Diags, LangOptions &Opts);
 
   /// Adjust target options based on codegen options.
   virtual void adjustTargetOptions(const CodeGenOptions &CGOpts,
@@ -1410,6 +1420,12 @@ public:
 
   bool isBigEndian() const { return BigEndian; }
   bool isLittleEndian() const { return !BigEndian; }
+
+  /// Whether the option -fextend-arguments={32,64} is supported on the target.
+  virtual bool supportsExtendIntArgs() const { return false; }
+
+  /// Controls if __arithmetic_fence is supported in the targeted backend.
+  virtual bool checkArithmeticFenceSupported() const { return false; }
 
   /// Gets the default calling convention for the given target and
   /// declaration context.

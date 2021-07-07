@@ -618,6 +618,9 @@ public:
   /// \param Args - Arguments of the LOH.
   virtual void emitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) {}
 
+  /// Emit a .gnu_attribute directive.
+  virtual void emitGNUAttribute(unsigned Tag, unsigned Value) {}
+
   /// Emit a common symbol.
   ///
   /// \param Symbol - The common symbol to emit.
@@ -979,6 +982,8 @@ public:
   virtual void emitCFIDefCfa(int64_t Register, int64_t Offset);
   virtual void emitCFIDefCfaOffset(int64_t Offset);
   virtual void emitCFIDefCfaRegister(int64_t Register);
+  virtual void emitCFILLVMDefAspaceCfa(int64_t Register, int64_t Offset,
+                                       int64_t AddressSpace);
   virtual void emitCFIOffset(int64_t Register, int64_t Offset);
   virtual void emitCFIPersonality(const MCSymbol *Sym, unsigned Encoding);
   virtual void emitCFILsda(const MCSymbol *Sym, unsigned Encoding);

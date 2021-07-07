@@ -1,6 +1,6 @@
 llvm_canonicalize_cmake_booleans(
   BUILD_SHARED_LIBS
-  HAVE_LIBXAR
+  LLVM_HAVE_LIBXAR
   HAVE_OCAMLOPT
   HAVE_OCAML_OUNIT
   LLVM_ENABLE_DIA_SDK
@@ -26,6 +26,7 @@ configure_lit_site_cfg(
   MAIN_CONFIG
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py
   PATHS
+  "CMAKE_OSX_SYSROOT"
   "LLVM_SOURCE_DIR"
   "LLVM_BINARY_DIR"
   "LLVM_TOOLS_DIR"
@@ -110,12 +111,14 @@ set(LLVM_TEST_DEPENDS
           llvm-readelf
           llvm-reduce
           llvm-rtdyld
+          llvm-sim
           llvm-size
           llvm-split
           llvm-strings
           llvm-strip
           llvm-symbolizer
           llvm-tblgen
+          llvm-tapi-diff
           llvm-undname
           llvm-windres
           llvm-xray
@@ -159,6 +162,11 @@ if(LLVM_BUILD_EXAMPLES)
     Kaleidoscope-Ch6
     Kaleidoscope-Ch7
     LLJITWithThinLTOSummaries
+    OrcV2CBindingsBasicUsage
+    OrcV2CBindingsAddObjectFile
+    OrcV2CBindingsRemovableCode
+    OrcV2CBindingsReflectProcessSymbols
+    OrcV2CBindingsLazy
     )
   if(CMAKE_HOST_UNIX)
     list(APPEND LLVM_TEST_DEPENDS

@@ -455,6 +455,11 @@ public:
   /// one already, a new and unique number will be assigned.
   unsigned getDebugInstrNum();
 
+  /// Fetch instruction number of this MachineInstr -- but before it's inserted
+  /// into \p MF. Needed for transformations that create an instruction but
+  /// don't immediately insert them.
+  unsigned getDebugInstrNum(MachineFunction &MF);
+
   /// Examine the instruction number of this MachineInstr. May be zero if
   /// it hasn't been assigned a number yet.
   unsigned peekDebugInstrNum() const { return DebugInstrNum; }
@@ -1207,8 +1212,9 @@ public:
   }
   bool isDebugLabel() const { return getOpcode() == TargetOpcode::DBG_LABEL; }
   bool isDebugRef() const { return getOpcode() == TargetOpcode::DBG_INSTR_REF; }
+  bool isDebugPHI() const { return getOpcode() == TargetOpcode::DBG_PHI; }
   bool isDebugInstr() const {
-    return isDebugValue() || isDebugLabel() || isDebugRef();
+    return isDebugValue() || isDebugLabel() || isDebugRef() || isDebugPHI();
   }
   bool isDebugOrPseudoInstr() const {
     return isDebugInstr() || isPseudoProbe();
@@ -1314,6 +1320,7 @@ public:
     case TargetOpcode::DBG_VALUE:
     case TargetOpcode::DBG_VALUE_LIST:
     case TargetOpcode::DBG_INSTR_REF:
+    case TargetOpcode::DBG_PHI:
     case TargetOpcode::DBG_LABEL:
     case TargetOpcode::LIFETIME_START:
     case TargetOpcode::LIFETIME_END:
@@ -1467,9 +1474,6 @@ public:
   ///
   /// If GroupNo is not NULL, it will receive the number of the operand group
   /// containing OpIdx.
-  ///
-  /// The flag operand is an immediate that can be decoded with methods like
-  /// InlineAsm::hasRegClassConstraint().
   int findInlineAsmFlagIdx(unsigned OpIdx, unsigned *GroupNo = nullptr) const;
 
   /// Compute the static register class constraint for operand OpIdx.

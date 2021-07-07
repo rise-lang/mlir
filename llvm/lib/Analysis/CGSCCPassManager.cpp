@@ -69,9 +69,6 @@ PassManager<LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,
 
   PreservedAnalyses PA = PreservedAnalyses::all();
 
-  if (DebugLogging)
-    dbgs() << "Starting CGSCC pass manager run.\n";
-
   // The SCC may be refined while we are running passes over it, so set up
   // a pointer that we can update.
   LazyCallGraph::SCC *C = &InitialC;
@@ -141,9 +138,6 @@ PassManager<LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,
   // preserved. We mark this with a set so that we don't need to inspect each
   // one individually.
   PA.preserveSet<AllAnalysesOn<LazyCallGraph::SCC>>();
-
-  if (DebugLogging)
-    dbgs() << "Finished CGSCC pass manager run.\n";
 
   return PA;
 }
@@ -864,7 +858,7 @@ incorporateNewSCCRange(const SCCRangeT &NewSCCRange, LazyCallGraph &G,
   // split-off SCCs.
   // We know however that this will preserve any FAM proxy so go ahead and mark
   // that.
-  auto PA = PreservedAnalyses::allInSet<AllAnalysesOn<Function>>();
+  PreservedAnalyses PA;
   PA.preserve<FunctionAnalysisManagerCGSCCProxy>();
   AM.invalidate(*OldC, PA);
 

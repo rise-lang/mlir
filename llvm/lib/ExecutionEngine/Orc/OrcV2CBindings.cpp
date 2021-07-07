@@ -13,6 +13,7 @@
 
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 
@@ -93,9 +94,16 @@ DEFINE_SIMPLE_CONVERSION_FUNCTIONS(ThreadSafeModule, LLVMOrcThreadSafeModuleRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(JITTargetMachineBuilder,
                                    LLVMOrcJITTargetMachineBuilderRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(ObjectLayer, LLVMOrcObjectLayerRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(IRTransformLayer, LLVMOrcIRTransformLayerRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(ObjectTransformLayer,
+                                   LLVMOrcObjectTransformLayerRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(DumpObjects, LLVMOrcDumpObjectsRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(IndirectStubsManager,
+                                   LLVMOrcIndirectStubsManagerRef)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LazyCallThroughManager,
+                                   LLVMOrcLazyCallThroughManagerRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLJITBuilder, LLVMOrcLLJITBuilderRef)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(LLJIT, LLVMOrcLLJITRef)
-
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(TargetMachine, LLVMTargetMachineRef)
 
 namespace llvm {
@@ -336,6 +344,26 @@ LLVMOrcAbsoluteSymbols(LLVMOrcCSymbolMapPairs Syms, size_t NumPairs) {
   return wrap(absoluteSymbols(std::move(SM)).release());
 }
 
+LLVMOrcMaterializationUnitRef LLVMOrcLazyReexports(
+    LLVMOrcLazyCallThroughManagerRef LCTM, LLVMOrcIndirectStubsManagerRef ISM,
+    LLVMOrcJITDylibRef SourceJD, LLVMOrcCSymbolAliasMapPairs CallableAliases,
+    size_t NumPairs) {
+
+  SymbolAliasMap SAM;
+  for (size_t I = 0; I != NumPairs; ++I) {
+    auto pair = CallableAliases[I];
+    JITSymbolFlags Flags = toJITSymbolFlags(pair.Entry.Flags);
+    SymbolStringPtr Name =
+        OrcV2CAPIHelper::moveToSymbolStringPtr(unwrap(pair.Entry.Name));
+    SAM[OrcV2CAPIHelper::moveToSymbolStringPtr(unwrap(pair.Name))] =
+        SymbolAliasMapEntry(Name, Flags);
+  }
+
+  return wrap(lazyReexports(*unwrap(LCTM), *unwrap(ISM), *unwrap(SourceJD),
+                            std::move(SAM))
+                  .release());
+}
+
 LLVMOrcJITDylibRef
 LLVMOrcExecutionSessionCreateBareJITDylib(LLVMOrcExecutionSessionRef ES,
                                           const char *Name) {
@@ -423,6 +451,14 @@ void LLVMOrcDisposeThreadSafeContext(LLVMOrcThreadSafeContextRef TSCtx) {
   delete unwrap(TSCtx);
 }
 
+LLVMErrorRef
+LLVMOrcThreadSafeModuleWithModuleDo(LLVMOrcThreadSafeModuleRef TSM,
+                                    LLVMOrcGenericIRModuleOperationFunction F,
+                                    void *Ctx) {
+  return wrap(unwrap(TSM)->withModuleDo(
+      [&](Module &M) { return unwrap(F(Ctx, wrap(&M))); }));
+}
+
 LLVMOrcThreadSafeModuleRef
 LLVMOrcCreateNewThreadSafeModule(LLVMModuleRef M,
                                  LLVMOrcThreadSafeContextRef TSCtx) {
@@ -486,9 +522,19 @@ void LLVMOrcJITTargetMachineBuilderSetTargetTriple(
   unwrap(JTMB)->getTargetTriple() = Triple(TargetTriple);
 }
 
-void LLVMOrcJITTargetMachineBuilderDisposeTargetTriple(
-    LLVMOrcJITTargetMachineBuilderRef JTMB, char *TargetTriple) {
-  free(TargetTriple);
+LLVMErrorRef LLVMOrcObjectLayerAddObjectFile(LLVMOrcObjectLayerRef ObjLayer,
+                                             LLVMOrcJITDylibRef JD,
+                                             LLVMMemoryBufferRef ObjBuffer) {
+  return wrap(unwrap(ObjLayer)->add(
+      *unwrap(JD), std::unique_ptr<MemoryBuffer>(unwrap(ObjBuffer))));
+}
+
+LLVMErrorRef LLVMOrcLLJITAddObjectFileWithRT(LLVMOrcObjectLayerRef ObjLayer,
+                                             LLVMOrcResourceTrackerRef RT,
+                                             LLVMMemoryBufferRef ObjBuffer) {
+  return wrap(
+      unwrap(ObjLayer)->add(ResourceTrackerSP(unwrap(RT)),
+                            std::unique_ptr<MemoryBuffer>(unwrap(ObjBuffer))));
 }
 
 void LLVMOrcObjectLayerEmit(LLVMOrcObjectLayerRef ObjLayer,
@@ -501,6 +547,61 @@ void LLVMOrcObjectLayerEmit(LLVMOrcObjectLayerRef ObjLayer,
 
 void LLVMOrcDisposeObjectLayer(LLVMOrcObjectLayerRef ObjLayer) {
   delete unwrap(ObjLayer);
+}
+
+void LLVMOrcIRTransformLayerSetTransform(
+    LLVMOrcIRTransformLayerRef IRTransformLayer,
+    LLVMOrcIRTransformLayerTransformFunction TransformFunction, void *Ctx) {
+  unwrap(IRTransformLayer)
+      ->setTransform(
+          [=](ThreadSafeModule TSM,
+              MaterializationResponsibility &R) -> Expected<ThreadSafeModule> {
+            LLVMOrcThreadSafeModuleRef TSMRef =
+                wrap(new ThreadSafeModule(std::move(TSM)));
+            if (LLVMErrorRef Err = TransformFunction(Ctx, &TSMRef, wrap(&R))) {
+              assert(!TSMRef && "TSMRef was not reset to null on error");
+              return unwrap(Err);
+            }
+            return std::move(*unwrap(TSMRef));
+          });
+}
+
+void LLVMOrcObjectTransformLayerSetTransform(
+    LLVMOrcObjectTransformLayerRef ObjTransformLayer,
+    LLVMOrcObjectTransformLayerTransformFunction TransformFunction, void *Ctx) {
+  unwrap(ObjTransformLayer)
+      ->setTransform([TransformFunction, Ctx](std::unique_ptr<MemoryBuffer> Obj)
+                         -> Expected<std::unique_ptr<MemoryBuffer>> {
+        LLVMMemoryBufferRef ObjBuffer = wrap(Obj.release());
+        if (LLVMErrorRef Err = TransformFunction(Ctx, &ObjBuffer)) {
+          assert(!ObjBuffer && "ObjBuffer was not reset to null on error");
+          return unwrap(Err);
+        }
+        return std::unique_ptr<MemoryBuffer>(unwrap(ObjBuffer));
+      });
+}
+
+LLVMOrcDumpObjectsRef LLVMOrcCreateDumpObjects(const char *DumpDir,
+                                               const char *IdentifierOverride) {
+  assert(DumpDir && "DumpDir should not be null");
+  assert(IdentifierOverride && "IdentifierOverride should not be null");
+  return wrap(new DumpObjects(DumpDir, IdentifierOverride));
+}
+
+void LLVMOrcDisposeDumpObjects(LLVMOrcDumpObjectsRef DumpObjects) {
+  delete unwrap(DumpObjects);
+}
+
+LLVMErrorRef LLVMOrcDumpObjects_CallOperator(LLVMOrcDumpObjectsRef DumpObjects,
+                                             LLVMMemoryBufferRef *ObjBuffer) {
+  std::unique_ptr<MemoryBuffer> OB(unwrap(*ObjBuffer));
+  if (auto Result = (*unwrap(DumpObjects))(std::move(OB))) {
+    *ObjBuffer = wrap(Result->release());
+    return LLVMErrorSuccess;
+  } else {
+    *ObjBuffer = nullptr;
+    return wrap(Result.takeError());
+  }
 }
 
 LLVMOrcLLJITBuilderRef LLVMOrcCreateLLJITBuilder(void) {
@@ -622,6 +723,11 @@ LLVMOrcObjectLayerRef LLVMOrcLLJITGetObjLinkingLayer(LLVMOrcLLJITRef J) {
   return wrap(&unwrap(J)->getObjLinkingLayer());
 }
 
+LLVMOrcObjectTransformLayerRef
+LLVMOrcLLJITGetObjTransformLayer(LLVMOrcLLJITRef J) {
+  return wrap(&unwrap(J)->getObjTransformLayer());
+}
+
 LLVMOrcObjectLayerRef
 LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(
     LLVMOrcExecutionSessionRef ES) {
@@ -637,4 +743,36 @@ void LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener(
   assert(Listener && "Listener must not be null");
   reinterpret_cast<RTDyldObjectLinkingLayer *>(unwrap(RTDyldObjLinkingLayer))
       ->registerJITEventListener(*unwrap(Listener));
+}
+
+LLVMOrcIRTransformLayerRef LLVMOrcLLJITGetIRTransformLayer(LLVMOrcLLJITRef J) {
+  return wrap(&unwrap(J)->getIRTransformLayer());
+}
+
+LLVMOrcIndirectStubsManagerRef
+LLVMOrcCreateLocalIndirectStubsManager(const char *TargetTriple) {
+  auto builder = createLocalIndirectStubsManagerBuilder(Triple(TargetTriple));
+  return wrap(builder().release());
+}
+
+void LLVMOrcDisposeIndirectStubsManager(LLVMOrcIndirectStubsManagerRef ISM) {
+  std::unique_ptr<IndirectStubsManager> TmpISM(unwrap(ISM));
+}
+
+LLVMErrorRef LLVMOrcCreateLocalLazyCallThroughManager(
+    const char *TargetTriple, LLVMOrcExecutionSessionRef ES,
+    LLVMOrcJITTargetAddress ErrorHandlerAddr,
+    LLVMOrcLazyCallThroughManagerRef *Result) {
+  auto LCTM = createLocalLazyCallThroughManager(Triple(TargetTriple),
+                                                *unwrap(ES), ErrorHandlerAddr);
+
+  if (!LCTM)
+    return wrap(LCTM.takeError());
+  *Result = wrap(LCTM->release());
+  return LLVMErrorSuccess;
+}
+
+void LLVMOrcDisposeLazyCallThroughManager(
+    LLVMOrcLazyCallThroughManagerRef LCM) {
+  std::unique_ptr<LazyCallThroughManager> TmpLCM(unwrap(LCM));
 }

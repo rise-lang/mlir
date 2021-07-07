@@ -22,6 +22,26 @@ def ConvertElementwiseToLinalg : FunctionPass<"convert-elementwise-to-linalg"> {
   let dependentDialects = ["linalg::LinalgDialect", "memref::MemRefDialect"];
 }
 
+def LinalgComprehensiveModuleBufferize :
+    Pass<"linalg-comprehensive-module-bufferize", "ModuleOp"> {
+  let summary = "Bufferize (tensor into memref) for a Module.";
+  let description = [{
+    This pass implements a cross-dialect bufferization approach and performs an
+    analysis to determine which op operands and results may be bufferized in the
+    same buffers. The analysis is performed on topologically sorted CallOp and
+    FuncOp within a module. It provides analyses and bufferization across
+    function boundaries. Within a function boundary, the analysis is performed
+    on SSA use-def chains starting from function operands that are annotated
+    with the 'inplaceable' attribute.
+  }];
+  let options = [
+    Option<"testAnalysisOnly", "test-analysis-only", "bool",
+            /*default=*/"false",
+           "Only runs inplaceability analysis (for testing purposes only)">
+  ];
+  let constructor = "mlir::createLinalgComprehensiveModuleBufferizePass()";
+}
+
 def LinalgFoldUnitExtentDims : FunctionPass<"linalg-fold-unit-extent-dims"> {
   let summary = "Remove unit-extent dimension in Linalg ops on tensors";
   let constructor = "mlir::createLinalgFoldUnitExtentDimsPass()";
@@ -55,6 +75,12 @@ def LinalgFoldReshapeOpsByLinearization :
   let summary = "Fold TensorReshapeOps with generic/indexed generic ops by "
                 "linearization";
   let constructor = "mlir::createFoldReshapeOpsByLinearizationPass()";
+  let options = [
+    Option<"allowFoldingUnitDimReshapes", "allow-folding-unit-dim-reshapes",
+           "bool", /*default=*/"false",
+           "Allow fusing linalg.tensor_reshape ops that performs unit "
+           "dimension collapsing">
+  ];
   let dependentDialects = ["AffineDialect", "memref::MemRefDialect"];
 }
 
@@ -66,6 +92,14 @@ def LinalgLowerTiledLoopsToSCF
     "linalg::LinalgDialect",
     "scf::SCFDialect",
     "AffineDialect"
+  ];
+}
+
+def LinalgInlineScalarOperands : FunctionPass<"linalg-inline-scalar-operands"> {
+  let summary = "Inline scalar operands into linalg generic ops";
+  let constructor = "mlir::createLinalgInlineScalarOperandsPass()";
+  let dependentDialects = [
+    "linalg::LinalgDialect"
   ];
 }
 
@@ -159,6 +193,9 @@ def LinalgTilingToTiledLoops
   let constructor = "mlir::createLinalgTilingToTiledLoopPass()";
   let options = [
     ListOption<"tileSizes", "linalg-tile-sizes", "int64_t", "Tile sizes",
+               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">,
+    ListOption<"distributionTypes", "linalg-distribution-types", "std::string",
+               "DistributionTypes",
                "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">
   ];
   let dependentDialects = [

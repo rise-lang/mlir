@@ -49,9 +49,9 @@ def frmarg : Operand<XLenVT> {
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class FPFMAS_rrr_frm<RISCVOpcode opcode, string opcodestr>
-    : RVInstR4<0b00, opcode, (outs FPR32:$rd),
-               (ins FPR32:$rs1, FPR32:$rs2, FPR32:$rs3, frmarg:$funct3),
-                opcodestr, "$rd, $rs1, $rs2, $rs3, $funct3">;
+    : RVInstR4Frm<0b00, opcode, (outs FPR32:$rd),
+                  (ins FPR32:$rs1, FPR32:$rs2, FPR32:$rs3, frmarg:$funct3),
+                  opcodestr, "$rd, $rs1, $rs2, $rs3, $funct3">;
 
 class FPFMASDynFrmAlias<FPFMAS_rrr_frm Inst, string OpcodeStr>
     : InstAlias<OpcodeStr#" $rd, $rs1, $rs2, $rs3",
@@ -373,6 +373,12 @@ def : Pat<(i32 (bitconvert FPR32:$rs1)), (FMV_X_W FPR32:$rs1)>;
 def : Pat<(i32 (fp_to_sint FPR32:$rs1)), (FCVT_W_S $rs1, 0b001)>;
 def : Pat<(i32 (fp_to_uint FPR32:$rs1)), (FCVT_WU_S $rs1, 0b001)>;
 
+// float->int32 with current rounding mode.
+def : Pat<(i32 (lrint FPR32:$rs1)), (FCVT_W_S $rs1, 0b111)>;
+
+// float->int32 rounded to nearest with ties rounded away from zero.
+def : Pat<(i32 (lround FPR32:$rs1)), (FCVT_W_S $rs1, 0b100)>;
+
 // [u]int->float. Match GCC and default to using dynamic rounding mode.
 def : Pat<(sint_to_fp (i32 GPR:$rs1)), (FCVT_S_W $rs1, 0b111)>;
 def : Pat<(uint_to_fp (i32 GPR:$rs1)), (FCVT_S_WU $rs1, 0b111)>;
@@ -392,9 +398,17 @@ def : Pat<(sext_inreg (riscv_fmv_x_anyextw_rv64 FPR32:$src), i32),
 def : Pat<(sext_inreg (assertzexti32 (fp_to_uint FPR32:$rs1)), i32),
           (FCVT_WU_S $rs1, 0b001)>;
 
-// FP->[u]int64
+// float->[u]int64. Round-to-zero must be used.
 def : Pat<(i64 (fp_to_sint FPR32:$rs1)), (FCVT_L_S $rs1, 0b001)>;
 def : Pat<(i64 (fp_to_uint FPR32:$rs1)), (FCVT_LU_S $rs1, 0b001)>;
+
+// float->int64 with current rounding mode.
+def : Pat<(i64 (lrint FPR32:$rs1)), (FCVT_L_S $rs1, 0b111)>;
+def : Pat<(i64 (llrint FPR32:$rs1)), (FCVT_L_S $rs1, 0b111)>;
+
+// float->int64 rounded to neartest with ties rounded away from zero.
+def : Pat<(i64 (lround FPR32:$rs1)), (FCVT_L_S $rs1, 0b100)>;
+def : Pat<(i64 (llround FPR32:$rs1)), (FCVT_L_S $rs1, 0b100)>;
 
 // [u]int->fp. Match GCC and default to using dynamic rounding mode.
 def : Pat<(sint_to_fp (i64 (sexti32 (i64 GPR:$rs1)))), (FCVT_S_W $rs1, 0b111)>;

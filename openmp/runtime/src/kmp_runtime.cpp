@@ -31,6 +31,9 @@
 #if OMPT_SUPPORT
 #include "ompt-specific.h"
 #endif
+#if OMPD_SUPPORT
+#include "ompd-specific.h"
+#endif
 
 #if OMP_PROFILING_SUPPORT
 #include "llvm/Support/TimeProfiler.h"
@@ -1130,7 +1133,6 @@ void __kmp_serialized_parallel(ident_t *loc, kmp_int32 global_tid) {
 
 #if OMPT_SUPPORT
   ompt_data_t ompt_parallel_data = ompt_data_none;
-  ompt_data_t *implicit_task_data;
   void *codeptr = OMPT_LOAD_RETURN_ADDRESS(global_tid);
   if (ompt_enabled.enabled &&
       this_thr->th.ompt_thread_info.state != ompt_state_overhead) {
@@ -1323,7 +1325,6 @@ void __kmp_serialized_parallel(ident_t *loc, kmp_int32 global_tid) {
     // don't use lw_taskteam after linking. content was swaped
 
     /* OMPT implicit task begin */
-    implicit_task_data = OMPT_CUR_TASK_DATA(this_thr);
     if (ompt_enabled.ompt_callback_implicit_task) {
       ompt_callbacks.ompt_callback(ompt_callback_implicit_task)(
           ompt_scope_begin, OMPT_CUR_TEAM_DATA(this_thr),
@@ -1409,6 +1410,9 @@ int __kmp_fork_call(ident_t *loc, int gtid,
     }
 #endif
 
+    // Assign affinity to root thread if it hasn't happened yet
+    __kmp_assign_root_init_mask();
+
     // Nested level will be an index in the nested nthreads array
     level = parent_team->t.t_level;
     // used to launch non-serial teams even if nested is not allowed
@@ -1469,6 +1473,10 @@ int __kmp_fork_call(ident_t *loc, int gtid,
           parent_team->t.t_serialized--;
           return TRUE;
         }
+
+#if OMPD_SUPPORT
+        parent_team->t.t_pkfn = microtask;
+#endif
 
 #if OMPT_SUPPORT
         void *dummy;
@@ -1693,6 +1701,10 @@ int __kmp_fork_call(ident_t *loc, int gtid,
                ("__kmp_fork_call: T#%d serializing parallel region\n", gtid));
 
       __kmpc_serialized_parallel(loc, gtid);
+
+#if OMPD_SUPPORT
+      master_th->th.th_serial_team->t.t_pkfn = microtask;
+#endif
 
       if (call_context == fork_context_intel) {
         /* TODO this sucks, use the compiler itself to pass args! :) */
@@ -2020,6 +2032,10 @@ int __kmp_fork_call(ident_t *loc, int gtid,
 
     // Update the floating point rounding in the team if required.
     propagateFPControl(team);
+#if OMPD_SUPPORT
+    if (ompd_state & OMPD_ENABLE_BP)
+      ompd_bp_parallel_begin();
+#endif
 
     if (__kmp_tasking_mode != tskm_immediate_exec) {
       // Set primary thread's task team to team's task team. Unless this is hot
@@ -2212,7 +2228,6 @@ int __kmp_fork_call(ident_t *loc, int gtid,
   KMP_MB(); /* Flush all pending memory write invalidates.  */
 
   KA_TRACE(20, ("__kmp_fork_call: parallel exit T#%d\n", gtid));
-
 #if OMPT_SUPPORT
   if (ompt_enabled.enabled) {
     master_th->th.ompt_thread_info.state = ompt_state_overhead;
@@ -2488,6 +2503,10 @@ void __kmp_join_call(ident_t *loc, int gtid
 #endif // KMP_AFFINITY_SUPPORTED
   master_th->th.th_def_allocator = team->t.t_def_allocator;
 
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_parallel_end();
+#endif
   updateHWFPControl(team);
 
   if (root->r.r_active != master_active)
@@ -3153,6 +3172,9 @@ static void __kmp_initialize_root(kmp_root_t *root) {
   root->r.r_active = FALSE;
   root->r.r_in_parallel = 0;
   root->r.r_blocktime = __kmp_dflt_blocktime;
+#if KMP_AFFINITY_SUPPORTED
+  root->r.r_affinity_assigned = FALSE;
+#endif
 
   /* setup the root team for this task */
   /* allocate the root team structure */
@@ -3798,9 +3820,6 @@ int __kmp_register_root(int initial_thread) {
   root_thread->th.th_new_place = KMP_PLACE_UNDEFINED;
   root_thread->th.th_first_place = KMP_PLACE_UNDEFINED;
   root_thread->th.th_last_place = KMP_PLACE_UNDEFINED;
-  if (TCR_4(__kmp_init_middle)) {
-    __kmp_affinity_set_init_mask(gtid, TRUE);
-  }
 #endif /* KMP_AFFINITY_SUPPORTED */
   root_thread->th.th_def_allocator = __kmp_def_allocator;
   root_thread->th.th_prev_level = 0;
@@ -3840,6 +3859,10 @@ int __kmp_register_root(int initial_thread) {
 
     ompt_set_thread_state(root_thread, ompt_state_work_serial);
   }
+#endif
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_thread_begin();
 #endif
 
   KMP_MB();
@@ -3923,6 +3946,11 @@ static int __kmp_reset_root(int gtid, kmp_root_t *root) {
            root->r.r_uber_thread->th.th_info.ds.ds_thread));
   __kmp_free_handle(root->r.r_uber_thread->th.th_info.ds.ds_thread);
 #endif /* KMP_OS_WINDOWS */
+
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_thread_end();
+#endif
 
 #if OMPT_SUPPORT
   ompt_data_t *task_data;
@@ -4588,6 +4616,9 @@ __kmp_set_thread_affinity_mask_full_tmp(kmp_affin_mask_t *old_mask) {
 // thread's partition, and binds each worker to a thread in their partition.
 // The primary thread's partition should already include its current binding.
 static void __kmp_partition_places(kmp_team_t *team, int update_master_only) {
+  // Do not partition places for the hidden helper team
+  if (KMP_HIDDEN_HELPER_TEAM(team))
+    return;
   // Copy the primary thread's place partition to the team struct
   kmp_info_t *master_th = team->t.t_threads[0];
   KMP_DEBUG_ASSERT(master_th != NULL);
@@ -5750,6 +5781,11 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
     this_thr->th.th_cons = __kmp_allocate_cons_stack(gtid); // ATT: Memory leak?
   }
 
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_thread_begin();
+#endif
+
 #if OMPT_SUPPORT
   ompt_data_t *thread_data = nullptr;
   if (ompt_enabled.enabled) {
@@ -5826,6 +5862,11 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
     }
   }
   TCR_SYNC_PTR((intptr_t)__kmp_global.g.g_done);
+
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_thread_end();
+#endif
 
 #if OMPT_SUPPORT
   if (ompt_enabled.ompt_callback_thread_end) {
@@ -6163,6 +6204,16 @@ void __kmp_internal_end_library(int gtid_req) {
     return;
   }
 
+  // If hidden helper team has been initialized, we need to deinit it
+  if (TCR_4(__kmp_init_hidden_helper) &&
+      !TCR_4(__kmp_hidden_helper_team_done)) {
+    TCW_SYNC_4(__kmp_hidden_helper_team_done, TRUE);
+    // First release the main thread to let it continue its work
+    __kmp_hidden_helper_main_thread_release();
+    // Wait until the hidden helper team has been destroyed
+    __kmp_hidden_helper_threads_deinitz_wait();
+  }
+
   KMP_MB(); /* Flush all pending memory write invalidates.  */
   /* find out who we are and what we should do */
   {
@@ -6276,7 +6327,8 @@ void __kmp_internal_end_thread(int gtid_req) {
   }
 
   // If hidden helper team has been initialized, we need to deinit it
-  if (TCR_4(__kmp_init_hidden_helper)) {
+  if (TCR_4(__kmp_init_hidden_helper) &&
+      !TCR_4(__kmp_hidden_helper_team_done)) {
     TCW_SYNC_4(__kmp_hidden_helper_team_done, TRUE);
     // First release the main thread to let it continue its work
     __kmp_hidden_helper_main_thread_release();
@@ -6688,6 +6740,10 @@ static void __kmp_do_serial_initialize(void) {
 #if OMPT_SUPPORT
   ompt_pre_init();
 #endif
+#if OMPD_SUPPORT
+  __kmp_env_dump();
+  ompd_init();
+#endif
 
   __kmp_validate_locks();
 
@@ -6845,6 +6901,8 @@ static void __kmp_do_serial_initialize(void) {
   __kmp_global.g.g_dynamic = FALSE;
   __kmp_global.g.g_dynamic_mode = dynamic_default;
 
+  __kmp_init_nesting_mode();
+
   __kmp_env_initialize(NULL);
 
 #if KMP_HAVE_MWAIT || KMP_HAVE_UMWAIT
@@ -6991,13 +7049,6 @@ static void __kmp_do_middle_initialize(void) {
   // number of cores on the machine.
   __kmp_affinity_initialize();
 
-  // Run through the __kmp_threads array and set the affinity mask
-  // for each root thread that is currently registered with the RTL.
-  for (i = 0; i < __kmp_threads_capacity; i++) {
-    if (TCR_PTR(__kmp_threads[i]) != NULL) {
-      __kmp_affinity_set_init_mask(i, TRUE);
-    }
-  }
 #endif /* KMP_AFFINITY_SUPPORTED */
 
   KMP_ASSERT(__kmp_xproc > 0);
@@ -7036,6 +7087,9 @@ static void __kmp_do_middle_initialize(void) {
   if (__kmp_dflt_team_nth > __kmp_sys_max_nth) {
     __kmp_dflt_team_nth = __kmp_sys_max_nth;
   }
+
+  if (__kmp_nesting_mode > 0)
+    __kmp_set_nesting_mode_threads();
 
   // There's no harm in continuing if the following check fails,
   // but it indicates an error in the previous logic.
@@ -7116,6 +7170,7 @@ void __kmp_parallel_initialize(void) {
   if (!__kmp_init_middle) {
     __kmp_do_middle_initialize();
   }
+  __kmp_assign_root_init_mask();
   __kmp_resume_if_hard_paused();
 
   /* begin initialization */
@@ -7422,6 +7477,7 @@ static void __kmp_push_thread_limit(kmp_info_t *thr, int num_teams,
   // Remember the number of threads for inner parallel regions
   if (!TCR_4(__kmp_init_middle))
     __kmp_middle_initialize(); // get internal globals calculated
+  __kmp_assign_root_init_mask();
   KMP_DEBUG_ASSERT(__kmp_avail_proc);
   KMP_DEBUG_ASSERT(__kmp_dflt_team_nth);
 
@@ -7830,6 +7886,13 @@ void __kmp_cleanup(void) {
   __kmp_cleanup_indirect_user_locks();
 #else
   __kmp_cleanup_user_locks();
+#endif
+#if OMPD_SUPPORT
+  if (ompd_state) {
+    __kmp_free(ompd_env_block);
+    ompd_env_block = NULL;
+    ompd_env_block_size = 0;
+  }
 #endif
 
 #if KMP_AFFINITY_SUPPORTED
@@ -8645,11 +8708,12 @@ void __kmp_omp_display_env(int verbose) {
 // Globals and functions for hidden helper task
 kmp_info_t **__kmp_hidden_helper_threads;
 kmp_info_t *__kmp_hidden_helper_main_thread;
-kmp_int32 __kmp_hidden_helper_threads_num = 8;
 std::atomic<kmp_int32> __kmp_unexecuted_hidden_helper_tasks;
 #if KMP_OS_LINUX
+kmp_int32 __kmp_hidden_helper_threads_num = 8;
 kmp_int32 __kmp_enable_hidden_helper = TRUE;
 #else
+kmp_int32 __kmp_hidden_helper_threads_num = 0;
 kmp_int32 __kmp_enable_hidden_helper = FALSE;
 #endif
 
@@ -8696,4 +8760,90 @@ void __kmp_hidden_helper_threads_initz_routine() {
   TCW_SYNC_4(__kmp_init_hidden_helper, FALSE);
 
   __kmp_hidden_helper_threads_deinitz_release();
+}
+
+/* Nesting Mode:
+   Set via KMP_NESTING_MODE, which takes an integer.
+   Note: we skip duplicate topology levels, and skip levels with only
+      one entity.
+   KMP_NESTING_MODE=0 is the default, and doesn't use nesting mode.
+   KMP_NESTING_MODE=1 sets as many nesting levels as there are distinct levels
+      in the topology, and initializes the number of threads at each of those
+      levels to the number of entities at each level, respectively, below the
+      entity at the parent level.
+   KMP_NESTING_MODE=N, where N>1, attempts to create up to N nesting levels,
+      but starts with nesting OFF -- max-active-levels-var is 1 -- and requires
+      the user to turn nesting on explicitly. This is an even more experimental
+      option to this experimental feature, and may change or go away in the
+      future.
+*/
+
+// Allocate space to store nesting levels
+void __kmp_init_nesting_mode() {
+  int levels = KMP_HW_LAST;
+  __kmp_nesting_mode_nlevels = levels;
+  __kmp_nesting_nth_level = (int *)KMP_INTERNAL_MALLOC(levels * sizeof(int));
+  for (int i = 0; i < levels; ++i)
+    __kmp_nesting_nth_level[i] = 0;
+  if (__kmp_nested_nth.size < levels) {
+    __kmp_nested_nth.nth =
+        (int *)KMP_INTERNAL_REALLOC(__kmp_nested_nth.nth, levels * sizeof(int));
+    __kmp_nested_nth.size = levels;
+  }
+}
+
+// Set # threads for top levels of nesting; must be called after topology set
+void __kmp_set_nesting_mode_threads() {
+  kmp_info_t *thread = __kmp_threads[__kmp_entry_gtid()];
+
+  if (__kmp_nesting_mode == 1)
+    __kmp_nesting_mode_nlevels = KMP_MAX_ACTIVE_LEVELS_LIMIT;
+  else if (__kmp_nesting_mode > 1)
+    __kmp_nesting_mode_nlevels = __kmp_nesting_mode;
+
+  if (__kmp_topology) { // use topology info
+    int loc, hw_level;
+    for (loc = 0, hw_level = 0; hw_level < __kmp_topology->get_depth() &&
+                                loc < __kmp_nesting_mode_nlevels;
+         loc++, hw_level++) {
+      __kmp_nesting_nth_level[loc] = __kmp_topology->get_ratio(hw_level);
+      if (__kmp_nesting_nth_level[loc] == 1)
+        loc--;
+    }
+    // Make sure all cores are used
+    if (__kmp_nesting_mode > 1 && loc > 1) {
+      int core_level = __kmp_topology->get_level(KMP_HW_CORE);
+      int num_cores = __kmp_topology->get_count(core_level);
+      int upper_levels = 1;
+      for (int level = 0; level < loc - 1; ++level)
+        upper_levels *= __kmp_nesting_nth_level[level];
+      if (upper_levels * __kmp_nesting_nth_level[loc - 1] < num_cores)
+        __kmp_nesting_nth_level[loc - 1] =
+            num_cores / __kmp_nesting_nth_level[loc - 2];
+    }
+    __kmp_nesting_mode_nlevels = loc;
+    __kmp_nested_nth.used = __kmp_nesting_mode_nlevels;
+  } else { // no topology info available; provide a reasonable guesstimation
+    if (__kmp_avail_proc >= 4) {
+      __kmp_nesting_nth_level[0] = __kmp_avail_proc / 2;
+      __kmp_nesting_nth_level[1] = 2;
+      __kmp_nesting_mode_nlevels = 2;
+    } else {
+      __kmp_nesting_nth_level[0] = __kmp_avail_proc;
+      __kmp_nesting_mode_nlevels = 1;
+    }
+    __kmp_nested_nth.used = __kmp_nesting_mode_nlevels;
+  }
+  for (int i = 0; i < __kmp_nesting_mode_nlevels; ++i) {
+    __kmp_nested_nth.nth[i] = __kmp_nesting_nth_level[i];
+  }
+  set__nproc(thread, __kmp_nesting_nth_level[0]);
+  if (__kmp_nesting_mode > 1 && __kmp_nesting_mode_nlevels > __kmp_nesting_mode)
+    __kmp_nesting_mode_nlevels = __kmp_nesting_mode;
+  if (get__max_active_levels(thread) > 1) {
+    // if max levels was set, set nesting mode levels to same
+    __kmp_nesting_mode_nlevels = get__max_active_levels(thread);
+  }
+  if (__kmp_nesting_mode == 1) // turn on nesting for this case only
+    set__max_active_levels(thread, __kmp_nesting_mode_nlevels);
 }

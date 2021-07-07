@@ -1484,7 +1484,9 @@ void ConversionPatternRewriter::cancelRootUpdate(Operation *op) {
   auto stateHasOp = [op](const auto &it) { return it.getOperation() == op; };
   auto &rootUpdates = impl->rootUpdates;
   auto it = llvm::find_if(llvm::reverse(rootUpdates), stateHasOp);
-  rootUpdates.erase(rootUpdates.begin() + (rootUpdates.rend() - it));
+  assert(it != rootUpdates.rend() && "no root update started on op");
+  int updateIdx = std::prev(rootUpdates.rend()) - it;
+  rootUpdates.erase(rootUpdates.begin() + updateIdx);
 }
 
 /// PatternRewriter hook for notifying match failure reasons.
@@ -2049,7 +2051,7 @@ void OperationLegalizer::computeLegalizationGraphBenefit(
       orderedPatternList = anyOpLegalizerPatterns;
 
     // If the pattern is not found, then it was removed and cannot be matched.
-    auto it = llvm::find(orderedPatternList, &pattern);
+    auto *it = llvm::find(orderedPatternList, &pattern);
     if (it == orderedPatternList.end())
       return PatternBenefit::impossibleToMatch();
 
@@ -2628,15 +2630,15 @@ struct FunctionLikeSignatureConversion : public ConversionPattern {
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    FunctionType type = mlir::impl::getFunctionType(op);
+    FunctionType type = function_like_impl::getFunctionType(op);
 
     // Convert the original function types.
     TypeConverter::SignatureConversion result(type.getNumInputs());
     SmallVector<Type, 1> newResults;
     if (failed(typeConverter->convertSignatureArgs(type.getInputs(), result)) ||
         failed(typeConverter->convertTypes(type.getResults(), newResults)) ||
-        failed(rewriter.convertRegionTypes(&mlir::impl::getFunctionBody(op),
-                                           *typeConverter, &result)))
+        failed(rewriter.convertRegionTypes(
+            &function_like_impl::getFunctionBody(op), *typeConverter, &result)))
       return failure();
 
     // Update the function signature in-place.
@@ -2644,7 +2646,7 @@ struct FunctionLikeSignatureConversion : public ConversionPattern {
                                      result.getConvertedTypes(), newResults);
 
     rewriter.updateRootInPlace(
-        op, [&] { mlir::impl::setFunctionType(op, newType); });
+        op, [&] { function_like_impl::setFunctionType(op, newType); });
 
     return success();
   }

@@ -51,6 +51,8 @@ const LangASMap AMDGPUTargetInfo::AMDGPUDefIsGenMap = {
     Constant, // cuda_constant
     Local,    // cuda_shared
     Global,   // sycl_global
+    Global,   // sycl_global_device
+    Global,   // sycl_global_host
     Local,    // sycl_local
     Private,  // sycl_private
     Generic,  // ptr32_sptr
@@ -72,6 +74,8 @@ const LangASMap AMDGPUTargetInfo::AMDGPUDefIsPrivMap = {
     Local,    // cuda_shared
     // SYCL address space values for this map are dummy
     Generic,  // sycl_global
+    Generic,  // sycl_global_device
+    Generic,  // sycl_global_host
     Generic,  // sycl_local
     Generic,  // sycl_private
     Generic,  // ptr32_sptr
@@ -180,6 +184,8 @@ bool AMDGPUTargetInfo::initFeatureMap(
   // XXX - What does the member GPU mean if device name string passed here?
   if (isAMDGCN(getTriple())) {
     switch (llvm::AMDGPU::parseArchAMDGCN(CPU)) {
+    case GK_GFX1035:
+    case GK_GFX1034:
     case GK_GFX1033:
     case GK_GFX1032:
     case GK_GFX1031:
@@ -209,6 +215,7 @@ bool AMDGPUTargetInfo::initFeatureMap(
       Features["dot6-insts"] = true;
       Features["dot7-insts"] = true;
       LLVM_FALLTHROUGH;
+    case GK_GFX1013:
     case GK_GFX1010:
       Features["dl-insts"] = true;
       Features["ci-insts"] = true;
@@ -351,8 +358,8 @@ AMDGPUTargetInfo::AMDGPUTargetInfo(const llvm::Triple &Triple,
   MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
 }
 
-void AMDGPUTargetInfo::adjust(LangOptions &Opts) {
-  TargetInfo::adjust(Opts);
+void AMDGPUTargetInfo::adjust(DiagnosticsEngine &Diags, LangOptions &Opts) {
+  TargetInfo::adjust(Diags, Opts);
   // ToDo: There are still a few places using default address space as private
   // address space in OpenCL, which needs to be cleaned up, then Opts.OpenCL
   // can be removed from the following line.

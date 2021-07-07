@@ -8,8 +8,10 @@
 
 #include "Driver.h"
 #include "Config.h"
+#include "ICF.h"
 #include "InputFiles.h"
 #include "LTO.h"
+#include "MarkLive.h"
 #include "ObjC.h"
 #include "OutputSection.h"
 #include "OutputSegment.h"
@@ -17,6 +19,7 @@
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
+#include "UnwindInfoSection.h"
 #include "Writer.h"
 
 #include "lld/Common/Args.h"
@@ -31,7 +34,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/BinaryFormat/Magic.h"
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Option/ArgList.h"
@@ -77,26 +80,6 @@ static HeaderFileType getOutputType(const InputArgList &args) {
   }
 }
 
-// Search for all possible combinations of `{root}/{name}.{extension}`.
-// If \p extensions are not specified, then just search for `{root}/{name}`.
-static Optional<StringRef>
-findPathCombination(const Twine &name, const std::vector<StringRef> &roots,
-                    ArrayRef<StringRef> extensions = {""}) {
-  SmallString<261> base;
-  for (StringRef dir : roots) {
-    base = dir;
-    path::append(base, name);
-    for (StringRef ext : extensions) {
-      Twine location = base + ext;
-      if (fs::exists(location))
-        return saver.save(location.str());
-      else
-        depTracker->logFileNotFound(location);
-    }
-  }
-  return {};
-}
-
 static Optional<StringRef> findLibrary(StringRef name) {
   if (config->searchDylibsFirst) {
     if (Optional<StringRef> path = findPathCombination(
@@ -107,19 +90,6 @@ static Optional<StringRef> findLibrary(StringRef name) {
   }
   return findPathCombination("lib" + name, config->librarySearchPaths,
                              {".tbd", ".dylib", ".a"});
-}
-
-// If -syslibroot is specified, absolute paths to non-object files may be
-// rerooted.
-static StringRef rerootPath(StringRef path) {
-  if (!path::is_absolute(path, path::Style::posix) || path.endswith(".o"))
-    return path;
-
-  if (Optional<StringRef> rerootedPath =
-          findPathCombination(path, config->systemLibraryRoots))
-    return *rerootedPath;
-
-  return path;
 }
 
 static Optional<std::string> findFramework(StringRef name) {
@@ -244,7 +214,7 @@ static std::vector<ArchiveMember> getArchiveMembers(MemoryBufferRef mb) {
   std::vector<ArchiveMember> v;
   Error err = Error::success();
 
-  // Thin archives refer to .o files, so --reproduces needs the .o files too.
+  // Thin archives refer to .o files, so --reproduce needs the .o files too.
   bool addToTar = archive->isThin() && tar;
 
   for (const Archive::Child &c : archive->children(err)) {
@@ -267,7 +237,10 @@ static std::vector<ArchiveMember> getArchiveMembers(MemoryBufferRef mb) {
   return v;
 }
 
+static DenseMap<StringRef, ArchiveFile *> loadedArchives;
+
 static InputFile *addFile(StringRef path, bool forceLoadArchive,
+                          bool isExplicit = true,
                           bool isBundleLoader = false) {
   Optional<MemoryBufferRef> buffer = readFile(path);
   if (!buffer)
@@ -278,6 +251,15 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
   file_magic magic = identify_magic(mbref.getBuffer());
   switch (magic) {
   case file_magic::archive: {
+    // Avoid loading archives twice. If the archives are being force-loaded,
+    // loading them twice would create duplicate symbol errors. In the
+    // non-force-loading case, this is just a minor performance optimization.
+    // We don't take a reference to cachedFile here because the
+    // loadArchiveMember() call below may recursively call addFile() and
+    // invalidate this reference.
+    if (ArchiveFile *cachedFile = loadedArchives[path])
+      return cachedFile;
+
     std::unique_ptr<object::Archive> file = CHECK(
         object::Archive::create(mbref), path + ": failed to parse archive");
 
@@ -317,7 +299,7 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
       }
     }
 
-    newFile = make<ArchiveFile>(std::move(file));
+    newFile = loadedArchives[path] = make<ArchiveFile>(std::move(file));
     break;
   }
   case file_magic::macho_object:
@@ -326,8 +308,11 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
   case file_magic::macho_dynamically_linked_shared_lib:
   case file_magic::macho_dynamically_linked_shared_lib_stub:
   case file_magic::tapi_file:
-    if (Optional<DylibFile *> dylibFile = loadDylib(mbref))
-      newFile = *dylibFile;
+    if (DylibFile * dylibFile = loadDylib(mbref)) {
+      if (isExplicit)
+        dylibFile->explicitlyLinked = true;
+      newFile = dylibFile;
+    }
     break;
   case file_magic::bitcode:
     newFile = make<BitcodeFile>(mbref);
@@ -338,14 +323,13 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
     // as a bundle loader.
     if (!isBundleLoader)
       error(path + ": unhandled file type");
-    if (Optional<DylibFile *> dylibFile =
-            loadDylib(mbref, nullptr, isBundleLoader))
-      newFile = *dylibFile;
+    if (DylibFile *dylibFile = loadDylib(mbref, nullptr, isBundleLoader))
+      newFile = dylibFile;
     break;
   default:
     error(path + ": unhandled file type");
   }
-  if (newFile) {
+  if (newFile && !isa<DylibFile>(newFile)) {
     // printArchiveMemberLoad() prints both .a and .o names, so no need to
     // print the .a name here.
     if (config->printEachFile && magic != file_magic::archive)
@@ -355,21 +339,39 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
   return newFile;
 }
 
-static void addLibrary(StringRef name, bool isWeak) {
+static void addLibrary(StringRef name, bool isNeeded, bool isWeak,
+                       bool isReexport, bool isExplicit, bool forceLoad) {
   if (Optional<StringRef> path = findLibrary(name)) {
-    auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false));
-    if (isWeak && dylibFile)
-      dylibFile->forceWeakImport = true;
+    if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
+            addFile(*path, forceLoad, isExplicit))) {
+      if (isNeeded)
+        dylibFile->forceNeeded = true;
+      if (isWeak)
+        dylibFile->forceWeakImport = true;
+      if (isReexport) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
+    }
     return;
   }
   error("library not found for -l" + name);
 }
 
-static void addFramework(StringRef name, bool isWeak) {
+static void addFramework(StringRef name, bool isNeeded, bool isWeak,
+                         bool isReexport, bool isExplicit) {
   if (Optional<std::string> path = findFramework(name)) {
-    auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false));
-    if (isWeak && dylibFile)
-      dylibFile->forceWeakImport = true;
+    if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
+            addFile(*path, /*forceLoadArchive=*/false, isExplicit))) {
+      if (isNeeded)
+        dylibFile->forceNeeded = true;
+      if (isWeak)
+        dylibFile->forceWeakImport = true;
+      if (isReexport) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
+    }
     return;
   }
   error("framework not found for -framework " + name);
@@ -397,11 +399,17 @@ void macho::parseLCLinkerOption(InputFile *f, unsigned argc, StringRef data) {
 
   for (const Arg *arg : args) {
     switch (arg->getOption().getID()) {
-    case OPT_l:
-      addLibrary(arg->getValue(), false);
+    case OPT_l: {
+      StringRef name = arg->getValue();
+      bool forceLoad =
+          config->forceLoadSwift ? name.startswith("swift") : false;
+      addLibrary(name, /*isNeeded=*/false, /*isWeak=*/false,
+                 /*isReexport=*/false, /*isExplicit=*/false, forceLoad);
       break;
+    }
     case OPT_framework:
-      addFramework(arg->getValue(), false);
+      addFramework(arg->getValue(), /*isNeeded=*/false, /*isWeak=*/false,
+                   /*isReexport=*/false, /*isExplicit=*/false);
       break;
     default:
       error(arg->getSpelling() + " is not allowed in LC_LINKER_OPTION");
@@ -415,7 +423,7 @@ static void addFileList(StringRef path) {
     return;
   MemoryBufferRef mbref = *buffer;
   for (StringRef path : args::getLines(mbref))
-    addFile(rerootPath(path), false);
+    addFile(rerootPath(path), /*forceLoadArchive=*/false);
 }
 
 // An order file has one entry per line, in the following format:
@@ -454,13 +462,13 @@ static void parseOrderFile(StringRef path) {
                           .StartsWith("ppc:", CPU_TYPE_POWERPC)
                           .StartsWith("ppc64:", CPU_TYPE_POWERPC64)
                           .Default(CPU_TYPE_ANY);
+
+    if (cpuType != CPU_TYPE_ANY && cpuType != target->cpuType)
+      continue;
+
     // Drop the CPU type as well as the colon
     if (cpuType != CPU_TYPE_ANY)
       line = line.drop_until([](char c) { return c == ':'; }).drop_front();
-    // TODO: Update when we extend support for other CPUs
-    if (cpuType != CPU_TYPE_ANY && cpuType != CPU_TYPE_X86_64 &&
-        cpuType != CPU_TYPE_ARM64)
-      continue;
 
     constexpr std::array<StringRef, 2> fileEnds = {".o:", ".o):"};
     for (StringRef fileEnd : fileEnds) {
@@ -517,6 +525,14 @@ static void initLLVM() {
 }
 
 static void compileBitcodeFiles() {
+  // FIXME: Remove this once LTO.cpp honors config->exportDynamic.
+  if (config->exportDynamic)
+    for (InputFile *file : inputFiles)
+      if (auto *bitcodeFile = dyn_cast<BitcodeFile>(file)) {
+        warn("the effect of -export_dynamic on LTO is not yet implemented");
+        break;
+      }
+
   TimeTraceScope timeScope("LTO");
   auto *lto = make<BitcodeCompiler>();
   for (InputFile *file : inputFiles)
@@ -538,23 +554,25 @@ static void replaceCommonSymbols() {
     if (common == nullptr)
       continue;
 
-    auto *isec = make<InputSection>();
-    isec->file = common->getFile();
-    isec->name = section_names::common;
-    isec->segname = segment_names::data;
-    isec->align = common->align;
     // Casting to size_t will truncate large values on 32-bit architectures,
     // but it's not really worth supporting the linking of 64-bit programs on
     // 32-bit archs.
-    isec->data = {nullptr, static_cast<size_t>(common->size)};
-    isec->flags = S_ZEROFILL;
+    ArrayRef<uint8_t> data = {nullptr, static_cast<size_t>(common->size)};
+    auto *isec = make<ConcatInputSection>(
+        segment_names::data, section_names::common, common->getFile(), data,
+        common->align, S_ZEROFILL);
     inputSections.push_back(isec);
 
-    replaceSymbol<Defined>(sym, sym->getName(), isec->file, isec, /*value=*/0,
+    // FIXME: CommonSymbol should store isReferencedDynamically, noDeadStrip
+    // and pass them on here.
+    replaceSymbol<Defined>(sym, sym->getName(), isec->getFile(), isec,
+                           /*value=*/0,
                            /*size=*/0,
                            /*isWeakDef=*/false,
                            /*isExternal=*/true, common->privateExtern,
-                           /*isThumb=*/false);
+                           /*isThumb=*/false,
+                           /*isReferencedDynamically=*/false,
+                           /*noDeadStrip=*/false);
   }
 }
 
@@ -691,6 +709,29 @@ getUndefinedSymbolTreatment(const ArgList &args) {
   return treatment;
 }
 
+static ICFLevel getICFLevel(const ArgList &args) {
+  bool noDeduplicate = args.hasArg(OPT_no_deduplicate);
+  StringRef icfLevelStr = args.getLastArgValue(OPT_icf_eq);
+  auto icfLevel = StringSwitch<ICFLevel>(icfLevelStr)
+                      .Cases("none", "", ICFLevel::none)
+                      .Case("safe", ICFLevel::safe)
+                      .Case("all", ICFLevel::all)
+                      .Default(ICFLevel::unknown);
+  if (icfLevel == ICFLevel::unknown) {
+    warn(Twine("unknown --icf=OPTION `") + icfLevelStr +
+         "', defaulting to `none'");
+    icfLevel = ICFLevel::none;
+  } else if (icfLevel != ICFLevel::none && noDeduplicate) {
+    warn(Twine("`--icf=" + icfLevelStr +
+               "' conflicts with -no_deduplicate, setting to `none'"));
+    icfLevel = ICFLevel::none;
+  } else if (icfLevel == ICFLevel::safe) {
+    warn(Twine("`--icf=safe' is not yet implemented, reverting to `none'"));
+    icfLevel = ICFLevel::none;
+  }
+  return icfLevel;
+}
+
 static void warnIfDeprecatedOption(const Option &opt) {
   if (!opt.getGroup().isValid())
     return;
@@ -784,7 +825,45 @@ static uint32_t parseProtection(StringRef protStr) {
   return prot;
 }
 
+static std::vector<SectionAlign> parseSectAlign(const opt::InputArgList &args) {
+  std::vector<SectionAlign> sectAligns;
+  for (const Arg *arg : args.filtered(OPT_sectalign)) {
+    StringRef segName = arg->getValue(0);
+    StringRef sectName = arg->getValue(1);
+    StringRef alignStr = arg->getValue(2);
+    if (alignStr.startswith("0x") || alignStr.startswith("0X"))
+      alignStr = alignStr.drop_front(2);
+    uint32_t align;
+    if (alignStr.getAsInteger(16, align)) {
+      error("-sectalign: failed to parse '" + StringRef(arg->getValue(2)) +
+            "' as number");
+      continue;
+    }
+    if (!isPowerOf2_32(align)) {
+      error("-sectalign: '" + StringRef(arg->getValue(2)) +
+            "' (in base 16) not a power of two");
+      continue;
+    }
+    sectAligns.push_back({segName, sectName, align});
+  }
+  return sectAligns;
+}
+
 static bool dataConstDefault(const InputArgList &args) {
+  static const std::map<PlatformKind, VersionTuple> minVersion = {
+      {PlatformKind::macOS, VersionTuple(10, 15)},
+      {PlatformKind::iOS, VersionTuple(13, 0)},
+      {PlatformKind::iOSSimulator, VersionTuple(13, 0)},
+      {PlatformKind::tvOS, VersionTuple(13, 0)},
+      {PlatformKind::tvOSSimulator, VersionTuple(13, 0)},
+      {PlatformKind::watchOS, VersionTuple(6, 0)},
+      {PlatformKind::watchOSSimulator, VersionTuple(6, 0)},
+      {PlatformKind::bridgeOS, VersionTuple(4, 0)}};
+  auto it = minVersion.find(config->platformInfo.target.Platform);
+  if (it != minVersion.end())
+    if (config->platformInfo.minimum < it->second)
+      return false;
+
   switch (config->outputType) {
   case MH_EXECUTE:
     return !args.hasArg(OPT_no_pie);
@@ -866,31 +945,93 @@ void createFiles(const InputArgList &args) {
 
     switch (opt.getID()) {
     case OPT_INPUT:
-      addFile(rerootPath(arg->getValue()), false);
+      addFile(rerootPath(arg->getValue()), /*forceLoadArchive=*/false);
+      break;
+    case OPT_needed_library:
+      if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
+              addFile(rerootPath(arg->getValue()), false)))
+        dylibFile->forceNeeded = true;
+      break;
+    case OPT_reexport_library:
+      if (auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(
+              rerootPath(arg->getValue()), /*forceLoadArchive=*/false))) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
       break;
     case OPT_weak_library:
       if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
-              addFile(rerootPath(arg->getValue()), false)))
+              addFile(rerootPath(arg->getValue()), /*forceLoadArchive=*/false)))
         dylibFile->forceWeakImport = true;
       break;
     case OPT_filelist:
       addFileList(arg->getValue());
       break;
     case OPT_force_load:
-      addFile(rerootPath(arg->getValue()), true);
+      addFile(rerootPath(arg->getValue()), /*forceLoadArchive=*/true);
       break;
     case OPT_l:
+    case OPT_needed_l:
+    case OPT_reexport_l:
     case OPT_weak_l:
-      addLibrary(arg->getValue(), opt.getID() == OPT_weak_l);
+      addLibrary(arg->getValue(), opt.getID() == OPT_needed_l,
+                 opt.getID() == OPT_weak_l, opt.getID() == OPT_reexport_l,
+                 /*isExplicit=*/true, /*forceLoad=*/false);
       break;
     case OPT_framework:
+    case OPT_needed_framework:
+    case OPT_reexport_framework:
     case OPT_weak_framework:
-      addFramework(arg->getValue(), opt.getID() == OPT_weak_framework);
+      addFramework(arg->getValue(), opt.getID() == OPT_needed_framework,
+                   opt.getID() == OPT_weak_framework,
+                   opt.getID() == OPT_reexport_framework, /*isExplicit=*/true);
       break;
     default:
       break;
     }
   }
+}
+
+static void gatherInputSections() {
+  TimeTraceScope timeScope("Gathering input sections");
+  int inputOrder = 0;
+  for (const InputFile *file : inputFiles) {
+    for (const SubsectionMap &map : file->subsections) {
+      for (const SubsectionEntry &entry : map) {
+        if (auto *isec = dyn_cast<ConcatInputSection>(entry.isec)) {
+          if (isec->isCoalescedWeak())
+            continue;
+          if (isec->getSegName() == segment_names::ld) {
+            assert(isec->getName() == section_names::compactUnwind);
+            in.unwindInfo->addInput(isec);
+            continue;
+          }
+          isec->outSecOff = inputOrder++;
+          inputSections.push_back(isec);
+        } else if (auto *isec = dyn_cast<CStringInputSection>(entry.isec)) {
+          if (in.cStringSection->inputOrder == UnspecifiedInputOrder)
+            in.cStringSection->inputOrder = inputOrder++;
+          in.cStringSection->addInput(isec);
+        } else if (auto *isec = dyn_cast<WordLiteralInputSection>(entry.isec)) {
+          if (in.wordLiteralSection->inputOrder == UnspecifiedInputOrder)
+            in.wordLiteralSection->inputOrder = inputOrder++;
+          in.wordLiteralSection->addInput(isec);
+        } else {
+          llvm_unreachable("unexpected input section kind");
+        }
+      }
+    }
+  }
+  assert(inputOrder <= UnspecifiedInputOrder);
+}
+
+static void foldIdenticalLiterals() {
+  // We always create a cStringSection, regardless of whether dedupLiterals is
+  // true. If it isn't, we simply create a non-deduplicating CStringSection.
+  // Either way, we must unconditionally finalize it here.
+  in.cStringSection->finalizeContents();
+  if (in.wordLiteralSection)
+    in.wordLiteralSection->finalizeContents();
 }
 
 bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
@@ -902,7 +1043,6 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
 
   errorHandler().logName = args::getFilenameWithoutExe(argsArr[0]);
   stderrOS.enable_colors(stderrOS.has_colors());
-  // TODO: Set up error handler properly, e.g. the errorLimitExceededMsg
 
   MachOOptTable parser;
   InputArgList args = parser.parse(argsArr.slice(1));
@@ -911,6 +1051,7 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
       "too many errors emitted, stopping now "
       "(use --error-limit=0 to see all errors)";
   errorHandler().errorLimit = args::getInteger(args, OPT_error_limit_eq, 20);
+  errorHandler().verbose = args.hasArg(OPT_verbose);
 
   if (args.hasArg(OPT_help_hidden)) {
     parser.printHelp(argsArr[0], /*showHidden=*/true);
@@ -925,6 +1066,16 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     return true;
   }
 
+  config = make<Configuration>();
+  symtab = make<SymbolTable>();
+  target = createTargetInfo(args);
+  depTracker =
+      make<DependencyTracker>(args.getLastArgValue(OPT_dependency_info));
+
+  // Must be set before any InputSections and Symbols are created.
+  config->deadStrip = args.hasArg(OPT_dead_strip);
+
+  config->systemLibraryRoots = getSystemLibraryRoots(args);
   if (const char *path = getReproduceOption(args)) {
     // Note that --reproduce is a debug option so you can ignore it
     // if you are trying to understand the whole picture of the code.
@@ -938,13 +1089,6 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
       error("--reproduce: " + toString(errOrWriter.takeError()));
     }
   }
-
-  config = make<Configuration>();
-  symtab = make<SymbolTable>();
-  target = createTargetInfo(args);
-
-  depTracker =
-      make<DependencyTracker>(args.getLastArgValue(OPT_dependency_info, ""));
 
   if (auto *arg = args.getLastArg(OPT_threads_eq)) {
     StringRef v(arg->getValue());
@@ -960,9 +1104,6 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
   if (!get_threadpool_strategy(config->thinLTOJobs))
     error("--thinlto-jobs: invalid job count: " + config->thinLTOJobs);
 
-  config->entry = symtab->addUndefined(args.getLastArgValue(OPT_e, "_main"),
-                                       /*file=*/nullptr,
-                                       /*isWeakRef=*/false);
   for (const Arg *arg : args.filtered(OPT_u)) {
     config->explicitUndefineds.push_back(symtab->addUndefined(
         arg->getValue(), /*file=*/nullptr, /*isWeakRef=*/false));
@@ -973,29 +1114,57 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
 
   config->mapFile = args.getLastArgValue(OPT_map);
   config->outputFile = args.getLastArgValue(OPT_o, "a.out");
+  if (const Arg *arg = args.getLastArg(OPT_final_output))
+    config->finalOutput = arg->getValue();
+  else
+    config->finalOutput = config->outputFile;
   config->astPaths = args.getAllArgValues(OPT_add_ast_path);
   config->headerPad = args::getHex(args, OPT_headerpad, /*Default=*/32);
   config->headerPadMaxInstallNames =
       args.hasArg(OPT_headerpad_max_install_names);
+  config->printDylibSearch =
+      args.hasArg(OPT_print_dylib_search) || getenv("RC_TRACE_DYLIB_SEARCHING");
   config->printEachFile = args.hasArg(OPT_t);
   config->printWhyLoad = args.hasArg(OPT_why_load);
   config->outputType = getOutputType(args);
   if (const Arg *arg = args.getLastArg(OPT_bundle_loader)) {
     if (config->outputType != MH_BUNDLE)
       error("-bundle_loader can only be used with MachO bundle output");
-    addFile(arg->getValue(), false, true);
+    addFile(arg->getValue(), /*forceLoadArchive=*/false, /*isExplicit=*/false,
+            /*isBundleLoader=*/true);
+  }
+  if (const Arg *arg = args.getLastArg(OPT_umbrella)) {
+    if (config->outputType != MH_DYLIB)
+      warn("-umbrella used, but not creating dylib");
+    config->umbrella = arg->getValue();
   }
   config->ltoObjPath = args.getLastArgValue(OPT_object_path_lto);
   config->ltoNewPassManager =
       args.hasFlag(OPT_no_lto_legacy_pass_manager, OPT_lto_legacy_pass_manager,
                    LLVM_ENABLE_NEW_PASS_MANAGER);
+  config->ltoo = args::getInteger(args, OPT_lto_O, 2);
+  if (config->ltoo > 3)
+    error("--lto-O: invalid optimization level: " + Twine(config->ltoo));
   config->runtimePaths = args::getStrings(args, OPT_rpath);
   config->allLoad = args.hasArg(OPT_all_load);
+  config->archMultiple = args.hasArg(OPT_arch_multiple);
+  config->exportDynamic = args.hasArg(OPT_export_dynamic);
   config->forceLoadObjC = args.hasArg(OPT_ObjC);
+  config->forceLoadSwift = args.hasArg(OPT_force_load_swift_libs);
+  config->deadStripDylibs = args.hasArg(OPT_dead_strip_dylibs);
   config->demangle = args.hasArg(OPT_demangle);
   config->implicitDylibs = !args.hasArg(OPT_no_implicit_dylibs);
-  config->emitFunctionStarts = !args.hasArg(OPT_no_function_starts);
+  config->emitFunctionStarts =
+      args.hasFlag(OPT_function_starts, OPT_no_function_starts, true);
   config->emitBitcodeBundle = args.hasArg(OPT_bitcode_bundle);
+  config->emitDataInCodeInfo =
+      args.hasFlag(OPT_data_in_code_info, OPT_no_data_in_code_info, true);
+  config->icfLevel = getICFLevel(args);
+  config->dedupLiterals = args.hasArg(OPT_deduplicate_literals) ||
+                          config->icfLevel != ICFLevel::none;
+
+  // FIXME: Add a commandline flag for this too.
+  config->zeroModTime = getenv("ZERO_AR_DATE");
 
   std::array<PlatformKind, 3> encryptablePlatforms{
       PlatformKind::iOS, PlatformKind::watchOS, PlatformKind::tvOS};
@@ -1003,7 +1172,7 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
       args.hasFlag(OPT_encryptable, OPT_no_encryption,
                    is_contained(encryptablePlatforms, config->platform()));
 
-#ifndef HAVE_LIBXAR
+#ifndef LLVM_HAVE_LIBXAR
   if (config->emitBitcodeBundle)
     error("-bitcode_bundle unsupported because LLD wasn't built with libxar");
 #endif
@@ -1014,7 +1183,7 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     else
       config->installName = arg->getValue();
   } else if (config->outputType == MH_DYLIB) {
-    config->installName = config->outputFile;
+    config->installName = config->finalOutput;
   }
 
   if (args.hasArg(OPT_mark_dead_strippable_dylib)) {
@@ -1035,7 +1204,11 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
 
   config->undefinedSymbolTreatment = getUndefinedSymbolTreatment(args);
 
-  config->systemLibraryRoots = getSystemLibraryRoots(args);
+  if (config->outputType == MH_EXECUTE)
+    config->entry = symtab->addUndefined(args.getLastArgValue(OPT_e, "_main"),
+                                         /*file=*/nullptr,
+                                         /*isWeakRef=*/false);
+
   config->librarySearchPaths =
       getLibrarySearchPaths(args, config->systemLibraryRoots);
   config->frameworkSearchPaths =
@@ -1072,6 +1245,8 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
         validName(arg->getValue(1));
   }
 
+  config->sectionAlignments = parseSectAlign(args);
+
   for (const Arg *arg : args.filtered(OPT_segprot)) {
     StringRef segName = arg->getValue(0);
     uint32_t maxProt = parseProtection(arg->getValue(1));
@@ -1093,6 +1268,12 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
           ">>> ignoring unexports");
     config->unexportedSymbols.clear();
   }
+  // Explicitly-exported literal symbols must be defined, but might
+  // languish in an archive if unreferenced elsewhere. Light a fire
+  // under those lazy symbols!
+  for (const CachedHashStringRef &cachedName : config->exportedSymbols.literals)
+    symtab->addUndefined(cachedName.val(), /*file=*/nullptr,
+                         /*isWeakRef=*/false);
 
   config->saveTemps = args.hasArg(OPT_save_temps);
 
@@ -1170,32 +1351,51 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     if (!orderFile.empty())
       parseOrderFile(orderFile);
 
-    if (config->outputType == MH_EXECUTE && isa<Undefined>(config->entry)) {
-      error("undefined symbol: " + toString(*config->entry));
-      return false;
-    }
+    if (config->entry)
+      if (auto *undefined = dyn_cast<Undefined>(config->entry))
+        treatUndefinedSymbol(*undefined, "the entry point");
+
     // FIXME: This prints symbols that are undefined both in input files and
     // via -u flag twice.
-    for (const Symbol *undefined : config->explicitUndefineds) {
-      if (isa<Undefined>(undefined)) {
-        error("undefined symbol: " + toString(*undefined) +
-              "\n>>> referenced by flag -u " + toString(*undefined));
-        return false;
-      }
+    for (const Symbol *sym : config->explicitUndefineds) {
+      if (const auto *undefined = dyn_cast<Undefined>(sym))
+        treatUndefinedSymbol(*undefined, "-u");
     }
     // Literal exported-symbol names must be defined, but glob
     // patterns need not match.
     for (const CachedHashStringRef &cachedName :
          config->exportedSymbols.literals) {
       if (const Symbol *sym = symtab->find(cachedName))
-        if (isa<Defined>(sym))
-          continue;
-      error("undefined symbol " + cachedName.val() +
-            "\n>>> referenced from option -exported_symbol(s_list)");
+        if (const auto *undefined = dyn_cast<Undefined>(sym))
+          treatUndefinedSymbol(*undefined, "-exported_symbol(s_list)");
     }
+
+    // FIXME: should terminate the link early based on errors encountered so
+    // far?
 
     createSyntheticSections();
     createSyntheticSymbols();
+
+    if (!config->exportedSymbols.empty()) {
+      for (Symbol *sym : symtab->getSymbols()) {
+        if (auto *defined = dyn_cast<Defined>(sym)) {
+          StringRef symbolName = defined->getName();
+          if (config->exportedSymbols.match(symbolName)) {
+            if (defined->privateExtern) {
+              error("cannot export hidden symbol " + symbolName +
+                    "\n>>> defined in " + toString(defined->getFile()));
+            }
+          } else {
+            defined->privateExtern = true;
+          }
+        }
+      }
+    } else if (!config->unexportedSymbols.empty()) {
+      for (Symbol *sym : symtab->getSymbols())
+        if (auto *defined = dyn_cast<Defined>(sym))
+          if (config->unexportedSymbols.match(defined->getName()))
+            defined->privateExtern = true;
+    }
 
     for (const Arg *arg : args.filtered(OPT_sectcreate)) {
       StringRef segName = arg->getValue(0);
@@ -1206,15 +1406,16 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
         inputFiles.insert(make<OpaqueFile>(*buffer, segName, sectName));
     }
 
-    {
-      TimeTraceScope timeScope("Gathering input sections");
-      // Gather all InputSections into one vector.
-      for (const InputFile *file : inputFiles) {
-        for (const SubsectionMap &map : file->subsections)
-          for (const SubsectionEntry &subsectionEntry : map)
-            inputSections.push_back(subsectionEntry.isec);
-      }
-    }
+    gatherInputSections();
+
+    if (config->deadStrip)
+      markLive();
+
+    // ICF assumes that all literals have been folded already, so we must run
+    // foldIdenticalLiterals before foldIdenticalSections.
+    foldIdenticalLiterals();
+    if (config->icfLevel != ICFLevel::none)
+      foldIdenticalSections();
 
     // Write to an output file.
     if (target->wordSize == 8)

@@ -1,5 +1,8 @@
 // RUN: %libomptarget-compilexx-run-and-check-generic
 
+// Currently hangs on amdgpu
+// UNSUPPORTED: amdgcn-amd-amdhsa
+
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -67,8 +70,8 @@ public:
   }
 };
 
-constexpr const int BS = 256;
-constexpr const int N = 1024;
+constexpr const int BS = 16;
+constexpr const int N = 256;
 
 int BlockMatMul_TargetNowait(BlockMatrix &A, BlockMatrix &B, BlockMatrix &C) {
 #pragma omp parallel

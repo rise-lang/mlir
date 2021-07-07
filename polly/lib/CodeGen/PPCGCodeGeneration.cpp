@@ -178,7 +178,7 @@ struct MustKillsInfo {
   /// [params] -> { Stmt_phantom[]  -> scalar_to_kill[] }
   isl::union_map MustKills;
 
-  MustKillsInfo() : KillsSchedule(nullptr) {}
+  MustKillsInfo() : KillsSchedule() {}
 };
 
 /// Check if SAI's uses are entirely contained within Scop S.
@@ -227,7 +227,7 @@ static MustKillsInfo computeMustKillsInfo(const Scop &S) {
   //     - filter: "[control] -> { }"
   // So, we choose to not create this to keep the output a little nicer,
   // at the cost of some code complexity.
-  Info.KillsSchedule = nullptr;
+  Info.KillsSchedule = {};
 
   for (isl::id &ToKillId : KillMemIds) {
     isl::id KillStmtId = isl::id::alloc(
@@ -278,7 +278,7 @@ static MustKillsInfo computeMustKillsInfo(const Scop &S) {
     isl::union_set KillStmtDomain = isl::set::universe(KillStmtSpace);
 
     isl::schedule KillSchedule = isl::schedule::from_domain(KillStmtDomain);
-    if (Info.KillsSchedule)
+    if (!Info.KillsSchedule.is_null())
       Info.KillsSchedule = isl::manage(
           isl_schedule_set(Info.KillsSchedule.release(), KillSchedule.copy()));
     else
@@ -1151,7 +1151,7 @@ Value *GPUNodeBuilder::getArrayOffset(gpu_array_info *Array) {
 
   isl::set ZeroSet = isl::set::universe(Min.get_space());
 
-  for (long i = 0, n = Min.dim(isl::dim::set); i < n; i++)
+  for (long i = 0, n = Min.tuple_dim(); i < n; i++)
     ZeroSet = ZeroSet.fix_si(isl::dim::set, i, 0);
 
   if (Min.is_subset(ZeroSet)) {
@@ -1160,7 +1160,7 @@ Value *GPUNodeBuilder::getArrayOffset(gpu_array_info *Array) {
 
   isl::ast_expr Result = isl::ast_expr::from_val(isl::val(Min.get_ctx(), 0));
 
-  for (long i = 0, n = Min.dim(isl::dim::set); i < n; i++) {
+  for (long i = 0, n = Min.tuple_dim(); i < n; i++) {
     if (i > 0) {
       isl::pw_aff Bound_I =
           isl::manage(isl_multi_pw_aff_get_pw_aff(Array->bound, i - 1));
@@ -1415,8 +1415,8 @@ const std::set<std::string> CUDALibDeviceFunctions = {
 const std::map<std::string, std::string> IntrinsicToLibdeviceFunc = {
     {"llvm.exp.f64", "exp"},
     {"llvm.exp.f32", "expf"},
-    {"llvm.powi.f64", "powi"},
-    {"llvm.powi.f32", "powif"}};
+    {"llvm.powi.f64.i32", "powi"},
+    {"llvm.powi.f32.i32", "powif"}};
 
 /// Return the corresponding CUDA libdevice function name @p Name.
 /// Note that this function will try to convert instrinsics in the list

@@ -8,8 +8,8 @@
 
 #include "lldb/Host/Config.h"
 
-#include <errno.h>
-#include <stdlib.h>
+#include <cerrno>
+#include <cstdlib>
 #if LLDB_ENABLE_POSIX
 #include <netinet/in.h>
 #include <sys/mman.h>
@@ -20,8 +20,8 @@
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #endif
+#include <ctime>
 #include <sys/types.h>
-#include <time.h>
 
 #include <algorithm>
 #include <csignal>
@@ -135,7 +135,7 @@ public:
     m_collection_sp->Initialize(g_processgdbremote_properties);
   }
 
-  ~PluginProperties() override {}
+  ~PluginProperties() override = default;
 
   uint64_t GetPacketTimeout() {
     const uint32_t idx = ePropertyPacketTimeout;
@@ -1832,8 +1832,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
               // If the current pc is a breakpoint site then the StopInfo
               // should be set to Breakpoint Otherwise, it will be set to
               // Trace.
-              if (bp_site_sp &&
-                  bp_site_sp->ValidForThisThread(thread_sp.get())) {
+              if (bp_site_sp && bp_site_sp->ValidForThisThread(*thread_sp)) {
                 thread_sp->SetStopInfo(
                     StopInfo::CreateStopReasonWithBreakpointSiteID(
                         *thread_sp, bp_site_sp->GetID()));
@@ -1853,7 +1852,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
                 // breakpoint here, that will be taken care of when the thread
                 // resumes and notices that there's a breakpoint under the pc.
                 handled = true;
-                if (bp_site_sp->ValidForThisThread(thread_sp.get())) {
+                if (bp_site_sp->ValidForThisThread(*thread_sp)) {
                   thread_sp->SetStopInfo(
                       StopInfo::CreateStopReasonWithBreakpointSiteID(
                           *thread_sp, bp_site_sp->GetID()));
@@ -1919,7 +1918,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
             // as such. This can happen when the thread is involuntarily
             // interrupted (e.g. due to stops on other threads) just as it is
             // about to execute the breakpoint instruction.
-            if (bp_site_sp && bp_site_sp->ValidForThisThread(thread_sp.get())) {
+            if (bp_site_sp && bp_site_sp->ValidForThisThread(*thread_sp)) {
               thread_sp->SetStopInfo(
                   StopInfo::CreateStopReasonWithBreakpointSiteID(
                       *thread_sp, bp_site_sp->GetID()));
@@ -1944,7 +1943,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
                 // reason.  We don't need to worry about stepping over the
                 // breakpoint here, that will be taken care of when the thread
                 // resumes and notices that there's a breakpoint under the pc.
-                if (bp_site_sp->ValidForThisThread(thread_sp.get())) {
+                if (bp_site_sp->ValidForThisThread(*thread_sp)) {
                   if (m_breakpoint_pc_offset != 0)
                     thread_sp->GetRegisterContext()->SetPC(pc);
                   thread_sp->SetStopInfo(
@@ -2766,6 +2765,29 @@ size_t ProcessGDBRemote::DoReadMemory(addr_t addr, void *buf, size_t size,
     error.SetErrorStringWithFormat("failed to send packet: '%s'", packet);
   }
   return 0;
+}
+
+bool ProcessGDBRemote::SupportsMemoryTagging() {
+  return m_gdb_comm.GetMemoryTaggingSupported();
+}
+
+llvm::Expected<std::vector<uint8_t>>
+ProcessGDBRemote::DoReadMemoryTags(lldb::addr_t addr, size_t len,
+                                   int32_t type) {
+  // By this point ReadMemoryTags has validated that tagging is enabled
+  // for this target/process/address.
+  DataBufferSP buffer_sp = m_gdb_comm.ReadMemoryTags(addr, len, type);
+  if (!buffer_sp) {
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "Error reading memory tags from remote");
+  }
+
+  // Return the raw tag data
+  llvm::ArrayRef<uint8_t> tag_data = buffer_sp->GetData();
+  std::vector<uint8_t> got;
+  got.reserve(tag_data.size());
+  std::copy(tag_data.begin(), tag_data.end(), std::back_inserter(got));
+  return got;
 }
 
 Status ProcessGDBRemote::WriteObjectFile(
@@ -3689,12 +3711,25 @@ thread_result_t ProcessGDBRemote::AsyncThread(void *arg) {
             __FUNCTION__, arg, process->GetID());
 
   EventSP event_sp;
+
+  // We need to ignore any packets that come in after we have
+  // have decided the process has exited.  There are some
+  // situations, for instance when we try to interrupt a running
+  // process and the interrupt fails, where another packet might
+  // get delivered after we've decided to give up on the process.
+  // But once we've decided we are done with the process we will
+  // not be in a state to do anything useful with new packets.
+  // So it is safer to simply ignore any remaining packets by
+  // explicitly checking for eStateExited before reentering the
+  // fetch loop.
+  
   bool done = false;
-  while (!done) {
+  while (!done && process->GetPrivateState() != eStateExited) {
     LLDB_LOGF(log,
               "ProcessGDBRemote::%s (arg = %p, pid = %" PRIu64
               ") listener.WaitForEvent (NULL, event_sp)...",
               __FUNCTION__, arg, process->GetID());
+
     if (process->m_async_listener_sp->GetEvent(event_sp, llvm::None)) {
       const uint32_t event_type = event_sp->GetType();
       if (event_sp->BroadcasterIs(&process->m_async_broadcaster)) {
@@ -3793,6 +3828,7 @@ thread_result_t ProcessGDBRemote::AsyncThread(void *arg) {
                 } else {
                   process->SetExitStatus(-1, "lost connection");
                 }
+                done = true;
                 break;
               }
 
@@ -5142,7 +5178,7 @@ public:
     m_option_group.Finalize();
   }
 
-  ~CommandObjectProcessGDBRemoteSpeedTest() override {}
+  ~CommandObjectProcessGDBRemoteSpeedTest() override = default;
 
   Options *GetOptions() override { return &m_option_group; }
 
@@ -5193,7 +5229,7 @@ public:
       : CommandObjectParsed(interpreter, "process plugin packet history",
                             "Dumps the packet history buffer. ", nullptr) {}
 
-  ~CommandObjectProcessGDBRemotePacketHistory() override {}
+  ~CommandObjectProcessGDBRemotePacketHistory() override = default;
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {
     const size_t argc = command.GetArgumentCount();
@@ -5224,7 +5260,7 @@ public:
             "Maximum size that lldb will try to read/write one one chunk.",
             nullptr) {}
 
-  ~CommandObjectProcessGDBRemotePacketXferSize() override {}
+  ~CommandObjectProcessGDBRemotePacketXferSize() override = default;
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {
     const size_t argc = command.GetArgumentCount();
@@ -5233,7 +5269,6 @@ public:
                                    "amount to be transferred when "
                                    "reading/writing",
                                    m_cmd_name.c_str());
-      result.SetStatus(eReturnStatusFailed);
       return false;
     }
 
@@ -5266,7 +5301,7 @@ public:
                             "stripped from the result.",
                             nullptr) {}
 
-  ~CommandObjectProcessGDBRemotePacketSend() override {}
+  ~CommandObjectProcessGDBRemotePacketSend() override = default;
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {
     const size_t argc = command.GetArgumentCount();
@@ -5274,7 +5309,6 @@ public:
       result.AppendErrorWithFormat(
           "'%s' takes a one or more packet content arguments",
           m_cmd_name.c_str());
-      result.SetStatus(eReturnStatusFailed);
       return false;
     }
 
@@ -5317,14 +5351,13 @@ public:
                          "encoded into a valid 'qRcmd' packet, sent and the "
                          "response will be printed.") {}
 
-  ~CommandObjectProcessGDBRemotePacketMonitor() override {}
+  ~CommandObjectProcessGDBRemotePacketMonitor() override = default;
 
   bool DoExecute(llvm::StringRef command,
                  CommandReturnObject &result) override {
     if (command.empty()) {
       result.AppendErrorWithFormat("'%s' takes a command string argument",
                                    m_cmd_name.c_str());
-      result.SetStatus(eReturnStatusFailed);
       return false;
     }
 
@@ -5381,7 +5414,7 @@ public:
                        interpreter)));
   }
 
-  ~CommandObjectProcessGDBRemotePacket() override {}
+  ~CommandObjectProcessGDBRemotePacket() override = default;
 };
 
 class CommandObjectMultiwordProcessGDBRemote : public CommandObjectMultiword {
@@ -5396,7 +5429,7 @@ public:
         CommandObjectSP(new CommandObjectProcessGDBRemotePacket(interpreter)));
   }
 
-  ~CommandObjectMultiwordProcessGDBRemote() override {}
+  ~CommandObjectMultiwordProcessGDBRemote() override = default;
 };
 
 CommandObject *ProcessGDBRemote::GetPluginCommandObject() {

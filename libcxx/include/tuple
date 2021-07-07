@@ -150,11 +150,16 @@ template <class... Types>
 */
 
 #include <__config>
+#include <__functional/unwrap_ref.h>
+#include <__functional_base>
+#include <__memory/allocator_arg_t.h>
+#include <__memory/uses_allocator.h>
 #include <__tuple>
+#include <__utility/forward.h>
+#include <__utility/move.h>
 #include <compare>
 #include <cstddef>
 #include <type_traits>
-#include <__functional_base>
 #include <utility>
 #include <version>
 
@@ -675,12 +680,12 @@ public:
     // tuple(const tuple<U...>&) constructors (including allocator_arg_t variants)
     template <class ..._Up>
     struct _EnableCopyFromOtherTuple : _And<
-        _Or<
+        _Not<is_same<tuple<_Tp...>, tuple<_Up...> > >,
+        _Lazy<_Or,
             _BoolConstant<sizeof...(_Tp) != 1>,
             // _Tp and _Up are 1-element packs - the pack expansions look
             // weird to avoid tripping up the type traits in degenerate cases
             _Lazy<_And,
-                _Not<is_same<_Tp, _Up> >...,
                 _Not<is_convertible<const tuple<_Up>&, _Tp> >...,
                 _Not<is_constructible<_Tp, const tuple<_Up>&> >...
             >
@@ -741,12 +746,12 @@ public:
     // tuple(tuple<U...>&&) constructors (including allocator_arg_t variants)
     template <class ..._Up>
     struct _EnableMoveFromOtherTuple : _And<
-        _Or<
+        _Not<is_same<tuple<_Tp...>, tuple<_Up...> > >,
+        _Lazy<_Or,
             _BoolConstant<sizeof...(_Tp) != 1>,
             // _Tp and _Up are 1-element packs - the pack expansions look
             // weird to avoid tripping up the type traits in degenerate cases
             _Lazy<_And,
-                _Not<is_same<_Tp, _Up> >...,
                 _Not<is_convertible<tuple<_Up>, _Tp> >...,
                 _Not<is_constructible<_Tp, tuple<_Up> > >...
             >

@@ -62,6 +62,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
@@ -1105,14 +1106,19 @@ void loadMainFilePreambleMacros(const Preprocessor &PP,
   ExternalPreprocessorSource *PreambleMacros = PP.getExternalSource();
   // As we have the names of the macros, we can look up their IdentifierInfo
   // and then use this to load just the macros we want.
+  const auto &ITable = PP.getIdentifierTable();
   IdentifierInfoLookup *PreambleIdentifiers =
-      PP.getIdentifierTable().getExternalIdentifierLookup();
+      ITable.getExternalIdentifierLookup();
+
   if (!PreambleIdentifiers || !PreambleMacros)
     return;
-  for (const auto &MacroName : Preamble.Macros.Names)
+  for (const auto &MacroName : Preamble.Macros.Names) {
+    if (ITable.find(MacroName.getKey()) != ITable.end())
+      continue;
     if (auto *II = PreambleIdentifiers->get(MacroName.getKey()))
       if (II->isOutOfDate())
         PreambleMacros->updateOutOfDateIdentifier(*II);
+  }
 }
 
 // Invokes Sema code completion on a file.
@@ -1674,7 +1680,7 @@ private:
           C.SemaResult->Kind == CodeCompletionResult::RK_Macro) ||
          (C.IndexResult &&
           C.IndexResult->SymInfo.Kind == index::SymbolKind::Macro)) &&
-        !C.Name.startswith_lower(Filter->pattern()))
+        !C.Name.startswith_insensitive(Filter->pattern()))
       return None;
     return Filter->match(C.Name);
   }
@@ -1903,6 +1909,13 @@ bool isIndexedForCodeCompletion(const NamedDecl &ND, ASTContext &ASTCtx) {
   // We only complete symbol's name, which is the same as the name of the
   // *primary* template in case of template specializations.
   if (isExplicitTemplateSpecialization(&ND))
+    return false;
+
+  // Category decls are not useful on their own outside the interface or
+  // implementation blocks. Moreover, sema already provides completion for
+  // these, even if it requires preamble deserialization. So by excluding them
+  // from the index, we reduce the noise in all the other completion scopes.
+  if (llvm::isa<ObjCCategoryDecl>(&ND) || llvm::isa<ObjCCategoryImplDecl>(&ND))
     return false;
 
   if (InTopLevelScope(ND))

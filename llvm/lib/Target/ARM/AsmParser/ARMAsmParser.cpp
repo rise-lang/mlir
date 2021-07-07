@@ -32,7 +32,6 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCParser/MCAsmParserExtension.h"
@@ -5013,7 +5012,7 @@ ARMAsmParser::parseTraceSyncBarrierOptOperand(OperandVector &Operands) {
   if (Tok.isNot(AsmToken::Identifier))
      return MatchOperand_NoMatch;
 
-  if (!Tok.getString().equals_lower("csync"))
+  if (!Tok.getString().equals_insensitive("csync"))
     return MatchOperand_NoMatch;
 
   Parser.Lex(); // Eat identifier token.
@@ -5033,7 +5032,7 @@ ARMAsmParser::parseInstSyncBarrierOptOperand(OperandVector &Operands) {
   if (Tok.is(AsmToken::Identifier)) {
     StringRef OptStr = Tok.getString();
 
-    if (OptStr.equals_lower("sy"))
+    if (OptStr.equals_insensitive("sy"))
       Opt = ARM_ISB::SY;
     else
       return MatchOperand_NoMatch;
@@ -6195,7 +6194,7 @@ bool ARMAsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
         return true;
       // If this is VMRS, check for the apsr_nzcv operand.
       if (Mnemonic == "vmrs" &&
-          Parser.getTok().getString().equals_lower("apsr_nzcv")) {
+          Parser.getTok().getString().equals_insensitive("apsr_nzcv")) {
         S = Parser.getTok().getLoc();
         Parser.Lex();
         Operands.push_back(ARMOperand::CreateToken("APSR_nzcv", S));
@@ -6331,10 +6330,10 @@ bool ARMAsmParser::parsePrefix(ARMMCExpr::VariantKind &RefKind) {
   }
 
   enum {
-    COFF = (1 << MCObjectFileInfo::IsCOFF),
-    ELF = (1 << MCObjectFileInfo::IsELF),
-    MACHO = (1 << MCObjectFileInfo::IsMachO),
-    WASM = (1 << MCObjectFileInfo::IsWasm),
+    COFF = (1 << MCContext::IsCOFF),
+    ELF = (1 << MCContext::IsELF),
+    MACHO = (1 << MCContext::IsMachO),
+    WASM = (1 << MCContext::IsWasm),
   };
   static const struct PrefixEntry {
     const char *Spelling;
@@ -6357,20 +6356,20 @@ bool ARMAsmParser::parsePrefix(ARMMCExpr::VariantKind &RefKind) {
   }
 
   uint8_t CurrentFormat;
-  switch (getContext().getObjectFileInfo()->getObjectFileType()) {
-  case MCObjectFileInfo::IsMachO:
+  switch (getContext().getObjectFileType()) {
+  case MCContext::IsMachO:
     CurrentFormat = MACHO;
     break;
-  case MCObjectFileInfo::IsELF:
+  case MCContext::IsELF:
     CurrentFormat = ELF;
     break;
-  case MCObjectFileInfo::IsCOFF:
+  case MCContext::IsCOFF:
     CurrentFormat = COFF;
     break;
-  case MCObjectFileInfo::IsWasm:
+  case MCContext::IsWasm:
     CurrentFormat = WASM;
     break;
-  case MCObjectFileInfo::IsXCOFF:
+  case MCContext::IsXCOFF:
     llvm_unreachable("unexpected object format");
     break;
   }
@@ -11002,10 +11001,9 @@ bool ARMAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
 
 /// parseDirective parses the arm specific directives
 bool ARMAsmParser::ParseDirective(AsmToken DirectiveID) {
-  const MCObjectFileInfo::Environment Format =
-    getContext().getObjectFileInfo()->getObjectFileType();
-  bool IsMachO = Format == MCObjectFileInfo::IsMachO;
-  bool IsCOFF = Format == MCObjectFileInfo::IsCOFF;
+  const MCContext::Environment Format = getContext().getObjectFileType();
+  bool IsMachO = Format == MCContext::IsMachO;
+  bool IsCOFF = Format == MCContext::IsCOFF;
 
   std::string IDVal = DirectiveID.getIdentifier().lower();
   if (IDVal == ".word")
@@ -11143,8 +11141,8 @@ void ARMAsmParser::onLabelParsed(MCSymbol *Symbol) {
 ///  ::= .thumbfunc symbol_name
 bool ARMAsmParser::parseDirectiveThumbFunc(SMLoc L) {
   MCAsmParser &Parser = getParser();
-  const auto Format = getContext().getObjectFileInfo()->getObjectFileType();
-  bool IsMachO = Format == MCObjectFileInfo::IsMachO;
+  const auto Format = getContext().getObjectFileType();
+  bool IsMachO = Format == MCContext::IsMachO;
 
   // Darwin asm has (optionally) function name after .thumb_func direction
   // ELF doesn't
@@ -11166,6 +11164,12 @@ bool ARMAsmParser::parseDirectiveThumbFunc(SMLoc L) {
   if (parseToken(AsmToken::EndOfStatement,
                  "unexpected token in '.thumb_func' directive"))
     return true;
+
+  // .thumb_func implies .thumb
+  if (!isThumb())
+    SwitchMode();
+
+  getParser().getStreamer().emitAssemblerFlag(MCAF_Code16);
 
   NextSymbolIsThumb = true;
   return false;
@@ -12274,7 +12278,7 @@ bool ARMAsmParser::enableArchExtFeature(StringRef Name, SMLoc &ExtLoc) {
       {ARM::AEK_XSCALE, {}, {}},
   };
   bool EnableFeature = true;
-  if (Name.startswith_lower("no")) {
+  if (Name.startswith_insensitive("no")) {
     EnableFeature = false;
     Name = Name.substr(2);
   }

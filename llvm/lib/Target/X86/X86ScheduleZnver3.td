@@ -35,7 +35,11 @@ def Znver3Model : SchedMachineModel {
   // The maximum capacity of the op cache is 4K ops.
   // Agner, 22.5 µop cache
   // The size of the µop cache is big enough for holding most critical loops.
-  let LoopMicroOpBufferSize = 4096;
+  // FIXME: PR50584: MachineScheduler/PostRAScheduler have quadradic complexity,
+  //        with large values here the compilation of certain loops
+  //        ends up taking way too long.
+  // let LoopMicroOpBufferSize = 4096;
+  let LoopMicroOpBufferSize = 512;
   // AMD SOG 19h, 2.6.2 L1 Data Cache
   // The L1 data cache has a 4- or 5- cycle integer load-to-use latency.
   // AMD SOG 19h, 2.12 L1 Data Cache
@@ -57,11 +61,7 @@ def Znver3Model : SchedMachineModel {
 
   let PostRAScheduler = 1; // Enable Post RegAlloc Scheduler pass.
 
-  // FIXME: This variable is required for incomplete model.
-  // We haven't catered all instructions.
-  // So, we reset the value of this variable so as to
-  // say that the model is incomplete.
-  let CompleteModel = 0;
+  let CompleteModel = 1;
 }
 
 let SchedModel = Znver3Model in {
@@ -158,7 +158,9 @@ def Zn3ALU12 : ProcResGroup<[Zn3ALU1, Zn3ALU2]>;
 
 // AMD SOG 19h, 2.10.3 Retire Control Unit
 // The integer physical register file (PRF) consists of 192 registers.
-def Zn3IntegerPRF : RegisterFile<192, [GR64, CCR]>;
+def Zn3IntegerPRF : RegisterFile<192, [GR64, CCR], [1, 1], [1, 0],
+                              6,  // Max moves that can be eliminated per cycle.
+                              0>; // Restrict move elimination to zero regs.
 
 // anandtech, The integer scheduler has a 4*24 entry macro op capacity.
 // AMD SOG 19h, 2.10.1 Schedulers
@@ -334,7 +336,9 @@ def Zn3FPCLM01 : ProcResGroup<[Zn3FPCLM0, Zn3FPCLM1]>;
 // The floating point register file has 160 vector registers
 // of 128 bits each in Zen 1 and 256 bits each in Zen 2.
 // anandtech also confirms this.
-def Zn3FpPRF : RegisterFile<160, [VR64, VR128, VR256], [1, 1, 1]>;
+def Zn3FpPRF : RegisterFile<160, [VR64, VR128, VR256], [1, 1, 1], [0, 1, 1],
+                            6,  // Max moves that can be eliminated per cycle.
+                            0>; // Restrict move elimination to zero regs.
 
 // AMD SOG 19h, 2.11 Floating-Point Unit
 // The floating-point scheduler has a 2*32 entry macro op capacity.
@@ -491,6 +495,10 @@ defm : Zn3WriteResInt<WriteRMW, [Zn3AGU012, Zn3Store], Znver3Model.StoreLatency,
 // Loads, stores, and moves, not folded with other operations.
 defm : Zn3WriteResInt<WriteLoad, [Zn3AGU012, Zn3Load], !add(Znver3Model.LoadLatency, 1), [1, 1], 1>;
 
+// Model the effect of clobbering the read-write mask operand of the GATHER operation.
+// Does not cost anything by itself, only has latency, matching that of the WriteLoad,
+defm : Zn3WriteResInt<WriteVecMaskedGatherWriteback, [], !add(Znver3Model.LoadLatency, 1), [], 0>;
+
 def Zn3WriteMOVSlow : SchedWriteRes<[Zn3AGU012, Zn3Load]> {
   let Latency = !add(Znver3Model.LoadLatency, 1);
   let ResourceCycles = [3, 1];
@@ -502,14 +510,8 @@ defm : Zn3WriteResInt<WriteStore, [Zn3AGU012, Zn3Store], Znver3Model.StoreLatenc
 defm : Zn3WriteResInt<WriteStoreNT, [Zn3AGU012, Zn3Store], Znver3Model.StoreLatency, [1, 2], 1>;
 defm : Zn3WriteResInt<WriteMove, [Zn3ALU0123], 1, [4], 1>;
 
-def Zn3WriteMoveRenameable : SchedWriteRes<[Zn3ALU0123]> {
-  let Latency = 0;
-  let ResourceCycles = [1];
-  let NumMicroOps = 1;
-}
-def : InstRW<[Zn3WriteMoveRenameable], (instrs MOV32rr, MOV32rr_REV,
-                                               MOV64rr, MOV64rr_REV,
-                                               MOVSX32rr32)>;
+// Treat misc copies as a move.
+def : InstRW<[WriteMove], (instrs COPY)>;
 
 def Zn3WriteMOVBE16rm : SchedWriteRes<[Zn3AGU012, Zn3Load, Zn3ALU0123]> {
   let Latency = Znver3Model.LoadLatency;
@@ -580,7 +582,7 @@ def Zn3Write3OpsLEA : SchedWriteRes<[Zn3ALU0123]> {
   let NumMicroOps = 2;
 }
 
-// On Piledriver, a slow LEA is either a 3Ops LEA (base, index, offset),
+// On Znver3, a slow LEA is either a 3Ops LEA (base, index, offset),
 // or an LEA with a `Scale` value different than 1.
 def Zn3SlowLEAPredicate : MCSchedPredicate<
   CheckAny<[
@@ -617,18 +619,18 @@ defm : Zn3WriteResIntPair<WriteIMul16Reg, [Zn3Multiplier], 3, [1], 1>; // Intege
 defm : Zn3WriteResIntPair<WriteIMul32, [Zn3Multiplier], 3, [3], 2>;    // Integer 32-bit multiplication.
 
 def Zn3MULX32rr : SchedWriteRes<[Zn3Multiplier]> {
-  let Latency = 3;
+  let Latency = 4;
   let ResourceCycles = [1];
   let NumMicroOps = 2;
 }
-def : InstRW<[Zn3MULX32rr], (instrs MULX32rr)>;
+def : InstRW<[Zn3MULX32rr, WriteIMulH], (instrs MULX32rr)>;
 
 def Zn3MULX32rm : SchedWriteRes<[Zn3AGU012, Zn3Load, Zn3Multiplier]> {
   let Latency = !add(Znver3Model.LoadLatency, Zn3MULX32rr.Latency);
   let ResourceCycles = [1, 1, 2];
   let NumMicroOps = Zn3MULX32rr.NumMicroOps;
 }
-def : InstRW<[Zn3MULX32rm], (instrs MULX32rm)>;
+def : InstRW<[Zn3MULX32rm, WriteIMulH], (instrs MULX32rm)>;
 
 defm : Zn3WriteResIntPair<WriteIMul32Imm, [Zn3Multiplier], 3, [1], 1>; // Integer 32-bit multiplication by immediate.
 defm : Zn3WriteResIntPair<WriteIMul32Reg, [Zn3Multiplier], 3, [1], 1>; // Integer 32-bit multiplication by register.
@@ -639,18 +641,18 @@ def Zn3MULX64rr : SchedWriteRes<[Zn3Multiplier]> {
   let ResourceCycles = [1];
   let NumMicroOps = 2;
 }
-def : InstRW<[Zn3MULX64rr], (instrs MULX64rr)>;
+def : InstRW<[Zn3MULX64rr, WriteIMulH], (instrs MULX64rr)>;
 
 def Zn3MULX64rm : SchedWriteRes<[Zn3AGU012, Zn3Load, Zn3Multiplier]> {
   let Latency = !add(Znver3Model.LoadLatency, Zn3MULX64rr.Latency);
   let ResourceCycles = [1, 1, 2];
   let NumMicroOps = Zn3MULX64rr.NumMicroOps;
 }
-def : InstRW<[Zn3MULX64rm], (instrs MULX64rm)>;
+def : InstRW<[Zn3MULX64rm, WriteIMulH], (instrs MULX64rm)>;
 
 defm : Zn3WriteResIntPair<WriteIMul64Imm, [Zn3Multiplier], 3, [1], 1>; // Integer 64-bit multiplication by immediate.
 defm : Zn3WriteResIntPair<WriteIMul64Reg, [Zn3Multiplier], 3, [1], 1>; // Integer 64-bit multiplication by register.
-defm : Zn3WriteResInt<WriteIMulH, [Zn3Multiplier], 2, [2], 2>;         // Integer multiplication, high part.
+defm : Zn3WriteResInt<WriteIMulH, [], 4, [], 0>;         // Integer multiplication, high part.
 
 defm : Zn3WriteResInt<WriteBSWAP32, [Zn3ALU0123], 1, [1], 1>; // Byte Order (Endianness) 32-bit Swap.
 defm : Zn3WriteResInt<WriteBSWAP64, [Zn3ALU0123], 1, [1], 1>; // Byte Order (Endianness) 64-bit Swap.
@@ -686,8 +688,6 @@ def Zn3WriteCMPXCHG16B_LCMPXCHG16B : SchedWriteRes<[Zn3ALU0123]> {
   let NumMicroOps = 28;
 }
 def : InstRW<[Zn3WriteCMPXCHG16B_LCMPXCHG16B], (instrs CMPXCHG16B, LCMPXCHG16B)>;
-
-defm : Zn3WriteResInt<WriteXCHG, [Zn3ALU0123], 0, [8], 2>;        // Compare+Exchange - TODO RMW support.
 
 def Zn3WriteWriteXCHGUnrenameable : SchedWriteRes<[Zn3ALU0123]> {
   let Latency = 1;
@@ -894,10 +894,6 @@ defm : Zn3WriteResXMM<WriteFMaskedStore64, [Zn3FPSt, Zn3Store], Znver3Model.Stor
 defm : Zn3WriteResYMM<WriteFMaskedStore32Y, [Zn3FPSt, Zn3Store], Znver3Model.StoreLatency, [12, 1], 42>;
 defm : Zn3WriteResYMM<WriteFMaskedStore64Y, [Zn3FPSt, Zn3Store], Znver3Model.StoreLatency, [6, 1], 18>;
 
-defm : Zn3WriteResXMM<WriteFMove, [Zn3FPVMisc0123], 0, [1], 1>;
-defm : Zn3WriteResXMM<WriteFMoveX, [Zn3FPVMisc0123], 0, [1], 1>;
-defm : Zn3WriteResYMM<WriteFMoveY, [Zn3FPVMisc0123], 0, [1], 1>;
-
 defm : Zn3WriteResXMMPair<WriteFAdd, [Zn3FPFAdd01], 3, [1], 1>;  // Floating point add/sub.
 
 def Zn3WriteX87Arith : SchedWriteRes<[Zn3AGU012, Zn3Load, Zn3FPU0123]> {
@@ -1047,9 +1043,7 @@ defm : Zn3WriteResXMM<WriteVecMaskedStore32, [Zn3FPSt, Zn3Store], Znver3Model.St
 defm : Zn3WriteResXMM<WriteVecMaskedStore64, [Zn3FPSt, Zn3Store], Znver3Model.StoreLatency, [4, 1], 10>;
 defm : Zn3WriteResYMM<WriteVecMaskedStore32Y, [Zn3FPSt, Zn3Store], Znver3Model.StoreLatency, [12, 1], 42>;
 defm : Zn3WriteResYMM<WriteVecMaskedStore64Y, [Zn3FPSt, Zn3Store], Znver3Model.StoreLatency, [6, 1], 18>;
-defm : Zn3WriteResXMM<WriteVecMove, [Zn3FPFMisc0123], 1, [1], 1>;
-defm : Zn3WriteResXMM<WriteVecMoveX, [Zn3FPFMisc0123], 0, [1], 1>;
-defm : Zn3WriteResYMM<WriteVecMoveY, [Zn3FPFMisc0123], 0, [1], 1>;
+
 defm : Zn3WriteResXMM<WriteVecMoveToGpr, [Zn3FPLd01], 1, [2], 1>;
 defm : Zn3WriteResXMM<WriteVecMoveFromGpr, [Zn3FPLd01], 1, [2], 1>;
 
@@ -1153,9 +1147,9 @@ defm : Zn3WriteResXMMPair<WriteShuffle, [Zn3FPVShuf01], 1, [1], 1>;  // Vector s
 defm : Zn3WriteResXMMPair<WriteShuffleX, [Zn3FPVShuf01], 1, [1], 1>; // Vector shuffles (XMM).
 defm : Zn3WriteResYMMPair<WriteShuffleY, [Zn3FPVShuf01], 1, [1], 1>; // Vector shuffles (YMM).
 defm : X86WriteResPairUnsupported<WriteShuffleZ>; // Vector shuffles (ZMM).
-defm : Zn3WriteResXMMPair<WriteVarShuffle, [Zn3FPVShift01], 1, [1], 1>;  // Vector variable shuffles.
-defm : Zn3WriteResXMMPair<WriteVarShuffleX, [Zn3FPVShift01], 1, [1], 1>; // Vector variable shuffles (XMM).
-defm : Zn3WriteResYMMPair<WriteVarShuffleY, [Zn3FPVShift01], 1, [1], 1>; // Vector variable shuffles (YMM).
+defm : Zn3WriteResXMMPair<WriteVarShuffle, [Zn3FPVShuf01], 1, [1], 1>;  // Vector variable shuffles.
+defm : Zn3WriteResXMMPair<WriteVarShuffleX, [Zn3FPVShuf01], 1, [1], 1>; // Vector variable shuffles (XMM).
+defm : Zn3WriteResYMMPair<WriteVarShuffleY, [Zn3FPVShuf01], 1, [1], 1>; // Vector variable shuffles (YMM).
 defm : X86WriteResPairUnsupported<WriteVarShuffleZ>; // Vector variable shuffles (ZMM).
 defm : Zn3WriteResXMMPair<WriteBlend, [Zn3FPVMisc0123], 1, [1], 1>; // Vector blends.
 defm : Zn3WriteResYMMPair<WriteBlendY, [Zn3FPVMisc0123], 1, [1], 1>; // Vector blends (YMM).
@@ -1424,7 +1418,7 @@ def Zn3WriteVPERMYm : SchedWriteRes<[Zn3AGU012, Zn3Load, Zn3FPVShuf]> {
 def : InstRW<[Zn3WriteVPERMYm], (instrs VPERMQYmi, VPERMDYrm)>;
 
 defm : Zn3WriteResYMMPair<WriteVPMOV256, [Zn3FPVShuf01], 4, [3], 2, /*LoadUOps=*/-1>; // 256-bit width packed vector width-changing move.
-defm : Zn3WriteResYMMPair<WriteVarShuffle256, [Zn3FPVShift01], 1, [1], 2>; // 256-bit width vector variable shuffles.
+defm : Zn3WriteResYMMPair<WriteVarShuffle256, [Zn3FPVShuf01], 1, [1], 2>; // 256-bit width vector variable shuffles.
 defm : Zn3WriteResXMMPair<WriteVarVecShift, [Zn3FPVShift01], 1, [1], 1>; // Variable vector shifts.
 defm : Zn3WriteResYMMPair<WriteVarVecShiftY, [Zn3FPVShift01], 1, [1], 1>; // Variable vector shifts (YMM).
 defm : X86WriteResPairUnsupported<WriteVarVecShiftZ>; // Variable vector shifts (ZMM).
@@ -1451,5 +1445,226 @@ def : InstRW<[Zn3WriteSFENCE], (instrs SFENCE)>;
 
 // Nop, not very useful expect it provides a model for nops!
 defm : Zn3WriteResInt<WriteNop, [Zn3ALU0123], 0, [1], 1>; // FIXME: latency not from llvm-exegesis
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Zero Cycle Move
+///////////////////////////////////////////////////////////////////////////////
+
+def Zn3WriteZeroLatency : SchedWriteRes<[]> {
+  let Latency = 0;
+  let ResourceCycles = [];
+  let NumMicroOps = 1;
+}
+def : InstRW<[Zn3WriteZeroLatency], (instrs MOV32rr, MOV32rr_REV,
+                                               MOV64rr, MOV64rr_REV,
+                                               MOVSX32rr32)>;
+
+def Zn3WriteSwapRenameable : SchedWriteRes<[]> {
+  let Latency = 0;
+  let ResourceCycles = [];
+  let NumMicroOps = 2;
+}
+def : InstRW<[Zn3WriteSwapRenameable], (instrs XCHG32rr, XCHG32ar,
+                                               XCHG64rr, XCHG64ar)>;
+
+defm : Zn3WriteResInt<WriteXCHG, [Zn3ALU0123], 0, [8], 2>;        // Compare+Exchange - TODO RMW support.
+
+defm : Zn3WriteResXMM<WriteFMove, [Zn3FPVMisc0123], 1, [1], 1>; // Empty sched class
+defm : Zn3WriteResXMM<WriteFMoveX, [], 0, [], 1>;
+defm : Zn3WriteResYMM<WriteFMoveY, [], 0, [], 1>;
+
+defm : Zn3WriteResXMM<WriteVecMove, [Zn3FPFMisc0123], 1, [1], 1>; // MMX
+defm : Zn3WriteResXMM<WriteVecMoveX, [], 0, [], 1>;
+defm : Zn3WriteResYMM<WriteVecMoveY, [], 0, [], 1>;
+
+def : IsOptimizableRegisterMove<[
+  InstructionEquivalenceClass<[
+    // GPR variants.
+    MOV32rr, MOV32rr_REV,
+    MOV64rr, MOV64rr_REV,
+    MOVSX32rr32,
+    XCHG32rr, XCHG32ar,
+    XCHG64rr, XCHG64ar,
+
+    // MMX variants.
+    // MMX moves are *NOT* eliminated.
+
+    // SSE variants.
+    MOVAPSrr, MOVAPSrr_REV,
+    MOVUPSrr, MOVUPSrr_REV,
+    MOVAPDrr, MOVAPDrr_REV,
+    MOVUPDrr, MOVUPDrr_REV,
+    MOVDQArr, MOVDQArr_REV,
+    MOVDQUrr, MOVDQUrr_REV,
+
+    // AVX variants.
+    VMOVAPSrr, VMOVAPSrr_REV,
+    VMOVUPSrr, VMOVUPSrr_REV,
+    VMOVAPDrr, VMOVAPDrr_REV,
+    VMOVUPDrr, VMOVUPDrr_REV,
+    VMOVDQArr, VMOVDQArr_REV,
+    VMOVDQUrr, VMOVDQUrr_REV,
+
+    // AVX YMM variants.
+    VMOVAPSYrr, VMOVAPSYrr_REV,
+    VMOVUPSYrr, VMOVUPSYrr_REV,
+    VMOVAPDYrr, VMOVAPDYrr_REV,
+    VMOVUPDYrr, VMOVUPDYrr_REV,
+    VMOVDQAYrr, VMOVDQAYrr_REV,
+    VMOVDQUYrr, VMOVDQUYrr_REV,
+  ], TruePred >
+]>;
+
+///////////////////////////////////////////////////////////////////////////////
+// Dependency breaking instructions.
+///////////////////////////////////////////////////////////////////////////////
+
+def Zn3WriteZeroIdiom : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteALU]>
+]>;
+def : InstRW<[Zn3WriteZeroIdiom], (instrs XOR32rr, XOR32rr_REV,
+                                          XOR64rr, XOR64rr_REV,
+                                          SUB32rr, SUB32rr_REV,
+                                          SUB64rr, SUB64rr_REV)>;
+
+def Zn3WriteZeroIdiomEFLAGS : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<CheckSameRegOperand<0, 1>>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                                 [WriteALU]>
+]>;
+def : InstRW<[Zn3WriteZeroIdiomEFLAGS], (instrs CMP8rr,  CMP8rr_REV,
+                                                CMP16rr, CMP16rr_REV,
+                                                CMP32rr, CMP32rr_REV,
+                                                CMP64rr, CMP64rr_REV)>;
+
+def Zn3WriteFZeroIdiom : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteFLogic]>
+]>;
+// NOTE: XORPSrr, XORPDrr are not zero-cycle!
+def : InstRW<[Zn3WriteFZeroIdiom], (instrs VXORPSrr, VXORPDrr,
+                                           VANDNPSrr, VANDNPDrr)>;
+
+def Zn3WriteFZeroIdiomY : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteFLogicY]>
+]>;
+def : InstRW<[Zn3WriteFZeroIdiomY], (instrs VXORPSYrr, VXORPDYrr,
+                                            VANDNPSYrr, VANDNPDYrr)>;
+
+def Zn3WriteVZeroIdiomLogicX : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteVecLogicX]>
+]>;
+// NOTE: PXORrr,PANDNrr are not zero-cycle!
+def : InstRW<[Zn3WriteVZeroIdiomLogicX], (instrs VPXORrr, VPANDNrr)>;
+
+def Zn3WriteVZeroIdiomLogicY : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteVecLogicY]>
+]>;
+def : InstRW<[Zn3WriteVZeroIdiomLogicY], (instrs VPXORYrr, VPANDNYrr)>;
+
+def Zn3WriteVZeroIdiomALUX : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteVecALUX]>
+]>;
+// NOTE: PSUBBrr, PSUBWrr, PSUBDrr, PSUBQrr,
+//       PCMPGTBrr, PCMPGTWrr, PCMPGTDrr, PCMPGTQrr are not zero-cycle!
+def : InstRW<[Zn3WriteVZeroIdiomALUX],
+             (instrs VPSUBBrr, VPSUBWrr, VPSUBDrr, VPSUBQrr,
+                     VPCMPGTBrr, VPCMPGTWrr, VPCMPGTDrr, VPCMPGTQrr)>;
+
+def Zn3WriteVZeroIdiomALUY : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn3WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteVecALUY]>
+]>;
+def : InstRW<[Zn3WriteVZeroIdiomALUY],
+             (instrs VPSUBBYrr, VPSUBWYrr, VPSUBDYrr, VPSUBQYrr,
+                     VPCMPGTBYrr, VPCMPGTWYrr, VPCMPGTDYrr, VPCMPGTQYrr)>;
+
+def : IsZeroIdiomFunction<[
+  // GPR Zero-idioms.
+  DepBreakingClass<[ XOR32rr, XOR32rr_REV,
+                     XOR64rr, XOR64rr_REV,
+                     SUB32rr, SUB32rr_REV,
+                     SUB64rr, SUB64rr_REV ], ZeroIdiomPredicate>,
+
+  // SSE XMM Zero-idioms.
+  DepBreakingClass<[
+    // fp variants.
+    XORPSrr, XORPDrr,
+    ANDNPSrr, ANDNPDrr,
+
+    // int variants.
+    PXORrr,
+    PANDNrr,
+    PSUBBrr, PSUBWrr, PSUBDrr, PSUBQrr,
+    PSUBSBrr, PSUBSWrr,
+    PSUBUSBrr, PSUBUSWrr,
+    PCMPGTBrr, PCMPGTWrr, PCMPGTDrr, PCMPGTQrr
+  ], ZeroIdiomPredicate>,
+
+  // AVX XMM Zero-idioms.
+  DepBreakingClass<[
+    // fp variants.
+    VXORPSrr, VXORPDrr,
+    VANDNPSrr, VANDNPDrr,
+
+    // int variants.
+    VPXORrr,
+    VPANDNrr,
+    VPSUBBrr, VPSUBWrr, VPSUBDrr, VPSUBQrr,
+    VPSUBSBrr, VPSUBSWrr,
+    VPSUBUSBrr, VPSUBUSWrr,
+    VPCMPGTBrr, VPCMPGTWrr, VPCMPGTDrr, VPCMPGTQrr,
+  ], ZeroIdiomPredicate>,
+
+  // AVX YMM Zero-idioms.
+  DepBreakingClass<[
+    // fp variants.
+    VXORPSYrr, VXORPDYrr,
+    VANDNPSYrr, VANDNPDYrr,
+
+    // int variants.
+    VPXORYrr,
+    VPANDNYrr,
+    VPSUBBYrr, VPSUBWYrr, VPSUBDYrr, VPSUBQYrr,
+    VPSUBSBYrr, VPSUBSWYrr,
+    VPSUBUSBYrr, VPSUBUSWYrr,
+    VPCMPGTBYrr, VPCMPGTWYrr, VPCMPGTDYrr, VPCMPGTQYrr
+  ], ZeroIdiomPredicate>,
+]>;
+
+def : IsDepBreakingFunction<[
+  // GPR
+  DepBreakingClass<[ SBB32rr, SBB32rr_REV,
+                     SBB64rr, SBB64rr_REV ], ZeroIdiomPredicate>,
+  DepBreakingClass<[ CMP8rr,  CMP8rr_REV,
+                     CMP16rr, CMP16rr_REV,
+                     CMP32rr, CMP32rr_REV,
+                     CMP64rr, CMP64rr_REV ], CheckSameRegOperand<0, 1> >,
+
+  // MMX
+  DepBreakingClass<[
+    MMX_PCMPEQBirr, MMX_PCMPEQWirr, MMX_PCMPEQDirr
+  ], ZeroIdiomPredicate>,
+
+  // SSE
+  DepBreakingClass<[
+    PCMPEQBrr, PCMPEQWrr, PCMPEQDrr, PCMPEQQrr
+  ], ZeroIdiomPredicate>,
+
+  // AVX XMM
+  DepBreakingClass<[
+    VPCMPEQBrr, VPCMPEQWrr, VPCMPEQDrr, VPCMPEQQrr
+  ], ZeroIdiomPredicate>,
+
+  // AVX YMM
+  DepBreakingClass<[
+    VPCMPEQBYrr, VPCMPEQWYrr, VPCMPEQDYrr, VPCMPEQQYrr
+  ], ZeroIdiomPredicate>,
+]>;
 
 } // SchedModel

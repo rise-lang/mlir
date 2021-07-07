@@ -1483,7 +1483,7 @@ def btihint_op : Operand<i32> {
     // "bti" is an alias to "hint" only for certain values of CRm:Op2 fields.
     if (!MCOp.isImm())
       return false;
-    return AArch64BTIHint::lookupBTIByEncoding((MCOp.getImm() ^ 32) >> 1) != nullptr;
+    return AArch64BTIHint::lookupBTIByEncoding(MCOp.getImm() ^ 32) != nullptr;
   }];
 }
 
@@ -1957,7 +1957,8 @@ class OneXRegData<bits<3> opc, string asm, SDPatternOperator node>
 }
 
 class SignAuthOneData<bits<3> opcode_prefix, bits<2> opcode, string asm>
-  : I<(outs GPR64:$Rd), (ins GPR64sp:$Rn), asm, "\t$Rd, $Rn", "",
+  : I<(outs GPR64:$Rd), (ins GPR64:$src, GPR64sp:$Rn), asm, "\t$Rd, $Rn",
+      "$Rd = $src",
       []>,
     Sched<[WriteI, ReadI]> {
   bits<5> Rd;
@@ -1970,7 +1971,8 @@ class SignAuthOneData<bits<3> opcode_prefix, bits<2> opcode, string asm>
 }
 
 class SignAuthZero<bits<3> opcode_prefix, bits<2> opcode, string asm>
-  : I<(outs GPR64:$Rd), (ins), asm, "\t$Rd", "", []>, Sched<[]> {
+  : I<(outs GPR64:$Rd), (ins GPR64:$src), asm, "\t$Rd", "$Rd = $src",
+      []>, Sched<[]> {
   bits<5> Rd;
   let Inst{31-15} = 0b11011010110000010;
   let Inst{14-12} = opcode_prefix;
@@ -3124,6 +3126,13 @@ def am_indexed16 : ComplexPattern<i64, 2, "SelectAddrModeIndexed16", []>;
 def am_indexed32 : ComplexPattern<i64, 2, "SelectAddrModeIndexed32", []>;
 def am_indexed64 : ComplexPattern<i64, 2, "SelectAddrModeIndexed64", []>;
 def am_indexed128 : ComplexPattern<i64, 2, "SelectAddrModeIndexed128", []>;
+
+// (unsigned immediate)
+// Indexed for 8-bit registers. offset is in range [0,63].
+def am_indexed8_6b : ComplexPattern<i64, 2, "SelectAddrModeIndexedUImm<1,63>", []>;
+def am_indexed16_6b : ComplexPattern<i64, 2, "SelectAddrModeIndexedUImm<2,63>", []>;
+def am_indexed32_6b : ComplexPattern<i64, 2, "SelectAddrModeIndexedUImm<4,63>", []>;
+def am_indexed64_6b : ComplexPattern<i64, 2, "SelectAddrModeIndexedUImm<8,63>", []>;
 
 def gi_am_indexed8 :
     GIComplexOperandMatcher<s64, "selectAddrModeIndexed<8>">,
@@ -8958,10 +8967,13 @@ multiclass SIMDScalarLShiftD<bit U, bits<5> opc, string asm,
                              SDPatternOperator OpNode> {
   def d : BaseSIMDScalarShift<U, opc, {1,?,?,?,?,?,?},
                               FPR64, FPR64, vecshiftL64, asm,
-    [(set (v1i64 FPR64:$Rd),
-       (OpNode (v1i64 FPR64:$Rn), (i32 vecshiftL64:$imm)))]> {
+    [(set (i64 FPR64:$Rd),
+       (OpNode (i64 FPR64:$Rn), (i32 vecshiftL64:$imm)))]> {
     let Inst{21-16} = imm{5-0};
   }
+
+  def : Pat<(v1i64 (OpNode (v1i64 FPR64:$Rn), (i32 vecshiftL64:$imm))),
+            (!cast<Instruction>(NAME # "d") FPR64:$Rn, vecshiftL64:$imm)>;
 }
 
 let mayStore = 0, mayLoad = 0, hasSideEffects = 0 in

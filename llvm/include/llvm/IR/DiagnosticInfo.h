@@ -220,7 +220,7 @@ public:
   DiagnosticInfoStackSize(const Function &Fn, uint64_t StackSize,
                           DiagnosticSeverity Severity = DS_Warning,
                           uint64_t StackLimit = 0)
-      : DiagnosticInfoResourceLimit(Fn, "stack size", StackSize, Severity,
+      : DiagnosticInfoResourceLimit(Fn, "stack frame size", StackSize, Severity,
                                     DK_StackSize, StackLimit) {}
 
   uint64_t getStackSize() const { return getResourceSize(); }
@@ -743,6 +743,11 @@ public:
   OptimizationRemarkMissed(const char *PassName, StringRef RemarkName,
                            const Instruction *Inst);
 
+  /// Same as above but \p F is used to derive code region and debug
+  /// location.
+  OptimizationRemarkMissed(const char *PassName, StringRef RemarkName,
+                           const Function *F);
+
   static bool classof(const DiagnosticInfo *DI) {
     return DI->getKind() == DK_OptimizationRemarkMissed;
   }
@@ -794,6 +799,11 @@ public:
   /// location.
   OptimizationRemarkAnalysis(const char *PassName, StringRef RemarkName,
                              const Instruction *Inst);
+
+  /// Same as above but \p F is used to derive code region and debug
+  /// location.
+  OptimizationRemarkAnalysis(const char *PassName, StringRef RemarkName,
+                             const Function *F);
 
   static bool classof(const DiagnosticInfo *DI) {
     return DI->getKind() == DK_OptimizationRemarkAnalysis;

@@ -20,6 +20,7 @@
 ; CHECK-NEXT:       Expand Atomic instructions
 ; CHECK-NEXT:       Lower AMX intrinsics
 ; CHECK-NEXT:       Lower AMX type for load/store
+; CHECK-NEXT:       Pre AMX Tile Config
 ; CHECK-NEXT:       Module Verifier
 ; CHECK-NEXT:       Lower Garbage Collection Instructions
 ; CHECK-NEXT:       Shadow Stack GC Lowering
@@ -29,8 +30,6 @@
 ; CHECK-NEXT:       Scalarize Masked Memory Intrinsics
 ; CHECK-NEXT:       Expand reduction intrinsics
 ; CHECK-NEXT:       Expand indirectbr instructions
-; CHECK-NEXT:     Rewrite Symbols
-; CHECK-NEXT:     FunctionPass Manager
 ; CHECK-NEXT:       Exception handling preparation
 ; CHECK-NEXT:       Safe Stack instrumentation pass
 ; CHECK-NEXT:       Insert stack protectors
@@ -46,6 +45,7 @@
 ; CHECK-NEXT:       Eliminate PHI nodes for register allocation
 ; CHECK-NEXT:       Two-Address instruction pass
 ; CHECK-NEXT:       Fast Register Allocator
+; CHECK-NEXT:       Fast Tile Register Configure
 ; CHECK-NEXT:       X86 Lower Tile Copy
 ; CHECK-NEXT:       Bundle Machine CFG Edges
 ; CHECK-NEXT:       X86 FP Stackifier

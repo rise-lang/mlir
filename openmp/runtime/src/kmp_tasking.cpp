@@ -436,10 +436,12 @@ static kmp_int32 __kmp_push_task(kmp_int32 gtid, kmp_task_t *task) {
                 gtid, taskdata, thread_data->td.td_deque_ntasks,
                 thread_data->td.td_deque_head, thread_data->td.td_deque_tail));
 
+  auto hidden_helper = taskdata->td_flags.hidden_helper;
+
   __kmp_release_bootstrap_lock(&thread_data->td.td_deque_lock);
 
   // Signal one worker thread to execute the task
-  if (taskdata->td_flags.hidden_helper) {
+  if (UNLIKELY(hidden_helper)) {
     // Wake hidden helper threads up if they're sleeping
     __kmp_hidden_helper_worker_thread_signal();
   }
@@ -1603,6 +1605,11 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
       __ompt_task_start(task, current_task, gtid);
 #endif
 
+#if OMPD_SUPPORT
+    if (ompd_state & OMPD_ENABLE_BP)
+      ompd_bp_task_begin();
+#endif
+
 #if USE_ITT_BUILD && USE_ITT_NOTIFY
     kmp_uint64 cur_time;
     kmp_int32 kmp_itt_count_task =
@@ -1638,6 +1645,11 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
     KMP_FSYNC_RELEASING(taskdata->td_parent); // releasing parent
 #endif
   }
+
+#if OMPD_SUPPORT
+  if (ompd_state & OMPD_ENABLE_BP)
+    ompd_bp_task_end();
+#endif
 
   // Proxy tasks are not handled by the runtime
   if (taskdata->td_flags.proxy != TASK_PROXY) {

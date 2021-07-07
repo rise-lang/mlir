@@ -23,6 +23,7 @@
 #include "lldb/Host/Terminal.h"
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
+#include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionValue.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/OptionValueSInt64.h"
@@ -64,13 +65,13 @@
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <set>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <string>
 #include <system_error>
 
@@ -603,6 +604,17 @@ DebuggerSP Debugger::CreateInstance(lldb::LogOutputCallback log_callback,
 void Debugger::Destroy(DebuggerSP &debugger_sp) {
   if (!debugger_sp)
     return;
+
+  CommandInterpreter &cmd_interpreter = debugger_sp->GetCommandInterpreter();
+
+  if (cmd_interpreter.GetSaveSessionOnQuit()) {
+    CommandReturnObject result(debugger_sp->GetUseColor());
+    cmd_interpreter.SaveTranscript(result);
+    if (result.Succeeded())
+      debugger_sp->GetOutputStream() << result.GetOutputData() << '\n';
+    else
+      debugger_sp->GetErrorStream() << result.GetErrorData() << '\n';
+  }
 
   debugger_sp->Clear();
 

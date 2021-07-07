@@ -75,6 +75,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
           shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts())) {
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
+  EHStack.setCGF(this);
 
   SetFastMathFlags(CurFPFeatures);
   SetFPModel();
@@ -733,8 +734,10 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   } while (0);
 
   if (D) {
-    // Apply the no_sanitize* attributes to SanOpts.
+    bool NoSanitizeCoverage = false;
+
     for (auto Attr : D->specific_attrs<NoSanitizeAttr>()) {
+      // Apply the no_sanitize* attributes to SanOpts.
       SanitizerMask mask = Attr->getMask();
       SanOpts.Mask &= ~mask;
       if (mask & SanitizerKind::Address)
@@ -745,7 +748,14 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
         SanOpts.set(SanitizerKind::KernelHWAddress, false);
       if (mask & SanitizerKind::KernelHWAddress)
         SanOpts.set(SanitizerKind::HWAddress, false);
+
+      // SanitizeCoverage is not handled by SanOpts.
+      if (Attr->hasCoverage())
+        NoSanitizeCoverage = true;
     }
+
+    if (NoSanitizeCoverage && CGM.getCodeGenOpts().hasSanitizeCoverage())
+      Fn->addFnAttr(llvm::Attribute::NoSanitizeCoverage);
   }
 
   // Apply sanitizer attributes to the function.
@@ -882,6 +892,9 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   if (D && D->hasAttr<CFICanonicalJumpTableAttr>())
     Fn->addFnAttr("cfi-canonical-jump-table");
+
+  if (D && D->hasAttr<NoProfileFunctionAttr>())
+    Fn->addFnAttr(llvm::Attribute::NoProfile);
 
   if (getLangOpts().OpenCL) {
     // Add metadata for a kernel function.
@@ -1039,6 +1052,10 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
         << "-mpacked-stack";
     Fn->addFnAttr("packed-stack");
   }
+
+  if (CGM.getCodeGenOpts().WarnStackSize != UINT_MAX)
+    Fn->addFnAttr("warn-stack-size",
+                  std::to_string(CGM.getCodeGenOpts().WarnStackSize));
 
   if (RetTy->isVoidType()) {
     // Void type; nothing to return.
@@ -1287,8 +1304,14 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
   QualType ResTy = BuildFunctionArgList(GD, Args);
 
   // Check if we should generate debug info for this function.
-  if (FD->hasAttr<NoDebugAttr>())
-    DebugInfo = nullptr; // disable debug info indefinitely for this function
+  if (FD->hasAttr<NoDebugAttr>()) {
+    // Clear non-distinct debug info that was possibly attached to the function
+    // due to an earlier declaration without the nodebug attribute
+    if (Fn)
+      Fn->setSubprogram(nullptr);
+    // Disable debug info indefinitely for this function
+    DebugInfo = nullptr;
+  }
 
   // The function might not have a body if we're generating thunks for a
   // function declaration.

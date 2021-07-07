@@ -464,7 +464,7 @@ TEST_F(TargetDeclTest, Concept) {
   )cpp";
   EXPECT_DECLS(
       "ConceptSpecializationExpr",
-      {"template <typename T> concept Fooable = requires (T t) { t.foo(); };"});
+      {"template <typename T> concept Fooable = requires (T t) { t.foo(); }"});
 
   // trailing requires clause
   Code = R"cpp(
@@ -475,7 +475,7 @@ TEST_F(TargetDeclTest, Concept) {
       void foo() requires [[Fooable]]<T>;
   )cpp";
   EXPECT_DECLS("ConceptSpecializationExpr",
-               {"template <typename T> concept Fooable = true;"});
+               {"template <typename T> concept Fooable = true"});
 
   // constrained-parameter
   Code = R"cpp(
@@ -486,7 +486,7 @@ TEST_F(TargetDeclTest, Concept) {
     void bar(T t);
   )cpp";
   EXPECT_DECLS("ConceptSpecializationExpr",
-               {"template <typename T> concept Fooable = true;"});
+               {"template <typename T> concept Fooable = true"});
 
   // partial-concept-id
   Code = R"cpp(
@@ -497,7 +497,7 @@ TEST_F(TargetDeclTest, Concept) {
     void bar(T t);
   )cpp";
   EXPECT_DECLS("ConceptSpecializationExpr",
-               {"template <typename T, typename U> concept Fooable = true;"});
+               {"template <typename T, typename U> concept Fooable = true"});
 }
 
 TEST_F(TargetDeclTest, FunctionTemplate) {
@@ -981,8 +981,7 @@ TEST_F(TargetDeclTest, ObjC) {
       id value = [[Foo]].sharedInstance;
     }
   )cpp";
-  // FIXME: We currently can't identify the interface here.
-  EXPECT_DECLS("ObjCPropertyRefExpr", "+ (id)sharedInstance");
+  EXPECT_DECLS("ObjCInterfaceTypeLoc", "@interface Foo");
 
   Code = R"cpp(
     @interface Foo
@@ -1607,6 +1606,21 @@ TEST_F(FindExplicitReferencesTest, All) {
            "5: targets = {t}, decl\n"
            "6: targets = {t}\n"
            "7: targets = {}\n"},
+       // Objective-C: instance variables
+       {
+           R"cpp(
+            @interface I {
+            @public
+              I *_z;
+            }
+            @end
+            I *f;
+            void foo() {
+              $0^f->$1^_z = 0;
+            }
+          )cpp",
+           "0: targets = {f}\n"
+           "1: targets = {I::_z}\n"},
        // Objective-C: properties
        {
            R"cpp(

@@ -68,6 +68,7 @@ list(APPEND CLANG_TEST_DEPS
   clang-import-test
   clang-rename
   clang-refactor
+  clang-repl
   clang-diff
   clang-scan-deps
   diagtool
@@ -107,6 +108,7 @@ if( NOT CLANG_BUILT_STANDALONE )
     llvm-config
     FileCheck count not
     llc
+    llvm-ar
     llvm-as
     llvm-bcanalyzer
     llvm-cat

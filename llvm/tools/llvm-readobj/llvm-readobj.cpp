@@ -72,7 +72,7 @@ namespace opts {
           cl::desc("Equivalent to setting: --file-headers, --program-headers, "
                    "--section-headers"));
   cl::alias HeadersShort("e", cl::desc("Alias for --headers"),
-     cl::aliasopt(Headers));
+                         cl::aliasopt(Headers), cl::NotHidden);
 
   // --wide, -W
   cl::opt<bool>
@@ -131,7 +131,8 @@ namespace opts {
 
   // --notes, -n
   cl::opt<bool> Notes("notes", cl::desc("Display the ELF notes in the file"));
-  cl::alias NotesShort("n", cl::desc("Alias for --notes"), cl::aliasopt(Notes));
+  cl::alias NotesShort("n", cl::desc("Alias for --notes"), cl::aliasopt(Notes),
+                       cl::NotHidden);
 
   // --dyn-relocations
   cl::opt<bool> DynRelocs("dyn-relocations",
@@ -141,6 +142,10 @@ namespace opts {
   // Also -t in llvm-readelf mode.
   cl::opt<bool> SectionDetails("section-details",
                                cl::desc("Display the section details"));
+  static cl::alias SectionDetailsShort("t",
+                                       cl::desc("Alias for --section-details"),
+                                       cl::aliasopt(SectionDetails),
+                                       cl::NotHidden);
 
   // --symbols
   // Also -s in llvm-readelf mode, or -t in llvm-readobj mode.
@@ -150,6 +155,9 @@ namespace opts {
                        "symbol table when using GNU output style for ELF"));
   cl::alias SymbolsGNU("syms", cl::desc("Alias for --symbols"),
                        cl::aliasopt(Symbols));
+  static cl::alias SymbolsShort("s", cl::desc("Alias for --symbols"),
+                                cl::aliasopt(Symbols), cl::NotHidden,
+                                cl::Grouping);
 
   // --dyn-symbols, --dyn-syms
   // Also --dt in llvm-readobj mode.
@@ -166,9 +174,8 @@ namespace opts {
   // --unwind, -u
   cl::opt<bool> UnwindInfo("unwind",
     cl::desc("Display unwind information"));
-  cl::alias UnwindInfoShort("u",
-    cl::desc("Alias for --unwind"),
-    cl::aliasopt(UnwindInfo));
+  cl::alias UnwindInfoShort("u", cl::desc("Alias for --unwind"),
+                            cl::aliasopt(UnwindInfo), cl::NotHidden);
 
   // --dynamic-table, --dynamic, -d
   cl::opt<bool> DynamicTable("dynamic-table",
@@ -196,7 +203,13 @@ namespace opts {
       cl::desc("Display the specified section(s) as a list of strings"),
       cl::ZeroOrMore);
   cl::alias StringDumpShort("p", cl::desc("Alias for --string-dump"),
-                            cl::aliasopt(StringDump), cl::Prefix);
+                            cl::aliasopt(StringDump), cl::Prefix,
+                            cl::NotHidden);
+
+  // --string-table
+  cl::opt<bool>
+      StringTable("string-table",
+                  cl::desc("Display the string table (only for XCOFF now)"));
 
   // --hex-dump, -x
   cl::list<std::string>
@@ -204,7 +217,7 @@ namespace opts {
               cl::desc("Display the specified section(s) as hexadecimal bytes"),
               cl::ZeroOrMore);
   cl::alias HexDumpShort("x", cl::desc("Alias for --hex-dump"),
-                         cl::aliasopt(HexDump), cl::Prefix);
+                         cl::aliasopt(HexDump), cl::Prefix, cl::NotHidden);
 
   // --demangle, -C
   cl::opt<bool> Demangle("demangle",
@@ -340,7 +353,7 @@ namespace opts {
       VersionInfo("version-info",
                   cl::desc("Display ELF version sections (if present)"));
   cl::alias VersionInfoShort("V", cl::desc("Alias for -version-info"),
-                             cl::aliasopt(VersionInfo));
+                             cl::aliasopt(VersionInfo), cl::NotHidden);
 
   // --elf-section-groups, --section-groups, -g
   cl::opt<bool> SectionGroups("elf-section-groups",
@@ -349,14 +362,14 @@ namespace opts {
                                cl::desc("Alias for -elf-sections-groups"),
                                cl::aliasopt(SectionGroups));
   cl::alias SectionGroupsShort("g", cl::desc("Alias for -elf-sections-groups"),
-                               cl::aliasopt(SectionGroups));
+                               cl::aliasopt(SectionGroups), cl::NotHidden);
 
   // --elf-hash-histogram, --histogram, -I
   cl::opt<bool> HashHistogram(
       "elf-hash-histogram",
       cl::desc("Display bucket list histogram for hash sections"));
   cl::alias HashHistogramShort("I", cl::desc("Alias for -elf-hash-histogram"),
-                               cl::aliasopt(HashHistogram));
+                               cl::aliasopt(HashHistogram), cl::NotHidden);
   cl::alias HistogramAlias("histogram",
                            cl::desc("Alias for --elf-hash-histogram"),
                            cl::aliasopt(HashHistogram));
@@ -533,6 +546,8 @@ static void dumpObject(ObjectFile &Obj, ScopedPrinter &Writer,
     Dumper->printGnuHashTable();
   if (opts::VersionInfo)
     Dumper->printVersionInfo();
+  if (opts::StringTable)
+    Dumper->printStringTable();
   if (Obj.isELF()) {
     if (opts::DependentLibraries)
       Dumper->printDependentLibs();
@@ -693,16 +708,6 @@ static void dumpInput(StringRef File, ScopedPrinter &Writer) {
 
 /// Registers aliases that should only be allowed by readobj.
 static void registerReadobjAliases() {
-  // -s has meant --sections for a very long time in llvm-readobj despite
-  // meaning --symbols in readelf.
-  static cl::alias SectionsShort("s", cl::desc("Alias for --section-headers"),
-                                 cl::aliasopt(opts::SectionHeaders),
-                                 cl::NotHidden);
-
-  // llvm-readelf reserves it for --section-details.
-  static cl::alias SymbolsShort("t", cl::desc("Alias for --symbols"),
-                                cl::aliasopt(opts::Symbols), cl::NotHidden);
-
   // The following two-letter aliases are only provided for readobj, as readelf
   // allows single-letter args to be grouped together.
   static cl::alias SectionRelocationsShort(
@@ -720,16 +725,6 @@ static void registerReadobjAliases() {
 
 /// Registers aliases that should only be allowed by readelf.
 static void registerReadelfAliases() {
-  // -s is here because for readobj it means --sections.
-  static cl::alias SymbolsShort("s", cl::desc("Alias for --symbols"),
-                                cl::aliasopt(opts::Symbols), cl::NotHidden,
-                                cl::Grouping);
-
-  // -t is here because for readobj it is an alias for --symbols.
-  static cl::alias SectionDetailsShort(
-      "t", cl::desc("Alias for --section-details"),
-      cl::aliasopt(opts::SectionDetails), cl::NotHidden);
-
   // Allow all single letter flags to be grouped together.
   for (auto &OptEntry : cl::getRegisteredOptions()) {
     StringRef ArgName = OptEntry.getKey();

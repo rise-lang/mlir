@@ -29,12 +29,10 @@
 #include <utility>
 #include <vector>
 
-namespace llvm {
-namespace objcopy {
-namespace elf {
-
-using namespace object;
-using namespace ELF;
+using namespace llvm;
+using namespace llvm::ELF;
+using namespace llvm::objcopy::elf;
+using namespace llvm::object;
 
 template <class ELFT> void ELFWriter<ELFT>::writePhdr(const Segment &Seg) {
   uint8_t *B = reinterpret_cast<uint8_t *>(Buf->getBufferStart()) +
@@ -192,7 +190,7 @@ template <class T> static T checkedGetHex(StringRef S) {
 // Fills exactly Len bytes of buffer with hexadecimal characters
 // representing value 'X'
 template <class T, class Iterator>
-static Iterator utohexstr(T X, Iterator It, size_t Len) {
+static Iterator toHexStr(T X, Iterator It, size_t Len) {
   // Fill range with '0'
   std::fill(It, It + Len, '0');
 
@@ -221,13 +219,13 @@ IHexLineData IHexRecord::getLine(uint8_t Type, uint16_t Addr,
   assert(Line.size());
   auto Iter = Line.begin();
   *Iter++ = ':';
-  Iter = utohexstr(Data.size(), Iter, 2);
-  Iter = utohexstr(Addr, Iter, 4);
-  Iter = utohexstr(Type, Iter, 2);
+  Iter = toHexStr(Data.size(), Iter, 2);
+  Iter = toHexStr(Addr, Iter, 4);
+  Iter = toHexStr(Type, Iter, 2);
   for (uint8_t X : Data)
-    Iter = utohexstr(X, Iter, 2);
+    Iter = toHexStr(X, Iter, 2);
   StringRef S(Line.data() + 1, std::distance(Line.begin() + 1, Iter));
-  Iter = utohexstr(getChecksum(S), Iter, 2);
+  Iter = toHexStr(getChecksum(S), Iter, 2);
   *Iter++ = '\r';
   *Iter++ = '\n';
   assert(Iter == Line.end());
@@ -1205,6 +1203,10 @@ static bool sectionWithinSegment(const SectionBase &Sec, const Segment &Seg) {
   // not the first.
   uint64_t SecSize = Sec.Size ? Sec.Size : 1;
 
+  // Ignore just added sections.
+  if (Sec.OriginalOffset == std::numeric_limits<uint64_t>::max())
+    return false;
+
   if (Sec.Type == SHT_NOBITS) {
     if (!(Sec.Flags & SHF_ALLOC))
       return false;
@@ -1782,7 +1784,7 @@ template <class ELFT> Error ELFBuilder<ELFT>::readSectionHeaders() {
     Sec->OriginalIndex = Sec->Index;
     Sec->OriginalData =
         ArrayRef<uint8_t>(ElfFile.base() + Shdr.sh_offset,
-                          (Shdr.sh_type == SHT_NOBITS) ? 0 : Shdr.sh_size);
+                          (Shdr.sh_type == SHT_NOBITS) ? (size_t)0 : Shdr.sh_size);
   }
 
   return Error::success();
@@ -2315,18 +2317,19 @@ static uint64_t layoutSegmentsForOnlyKeepDebug(std::vector<Segment *> &Segments,
                                                uint64_t HdrEnd) {
   uint64_t MaxOffset = 0;
   for (Segment *Seg : Segments) {
-    // An empty segment contains no section (see sectionWithinSegment). If it
-    // has a parent segment, copy the parent segment's offset field. This works
-    // for empty PT_TLS. We don't handle empty segments without a parent for
-    // now.
-    if (Seg->ParentSegment != nullptr && Seg->MemSize == 0)
-      Seg->Offset = Seg->ParentSegment->Offset;
-
-    const SectionBase *FirstSec = Seg->firstSection();
-    if (Seg->Type == PT_PHDR || !FirstSec)
+    if (Seg->Type == PT_PHDR)
       continue;
 
-    uint64_t Offset = FirstSec->Offset;
+    // The segment offset is generally the offset of the first section.
+    //
+    // For a segment containing no section (see sectionWithinSegment), if it has
+    // a parent segment, copy the parent segment's offset field. This works for
+    // empty PT_TLS. If no parent segment, use 0: the segment is not useful for
+    // debugging anyway.
+    const SectionBase *FirstSec = Seg->firstSection();
+    uint64_t Offset =
+        FirstSec ? FirstSec->Offset
+                 : (Seg->ParentSegment ? Seg->ParentSegment->Offset : 0);
     uint64_t FileSize = 0;
     for (const SectionBase *Sec : Seg->Sections) {
       uint64_t Size = Sec->Type == SHT_NOBITS ? 0 : Sec->Size;
@@ -2661,31 +2664,15 @@ Error IHexWriter::checkSection(const SectionBase &Sec) {
 }
 
 Error IHexWriter::finalize() {
-  bool UseSegments = false;
-  auto ShouldWrite = [](const SectionBase &Sec) {
-    return (Sec.Flags & ELF::SHF_ALLOC) && (Sec.Type != ELF::SHT_NOBITS);
-  };
-  auto IsInPtLoad = [](const SectionBase &Sec) {
-    return Sec.ParentSegment && Sec.ParentSegment->Type == ELF::PT_LOAD;
-  };
-
   // We can't write 64-bit addresses.
   if (addressOverflows32bit(Obj.Entry))
     return createStringError(errc::invalid_argument,
                              "Entry point address 0x%llx overflows 32 bits",
                              Obj.Entry);
 
-  // If any section we're to write has segment then we
-  // switch to using physical addresses. Otherwise we
-  // use section virtual address.
   for (const SectionBase &Sec : Obj.sections())
-    if (ShouldWrite(Sec) && IsInPtLoad(Sec)) {
-      UseSegments = true;
-      break;
-    }
-
-  for (const SectionBase &Sec : Obj.sections())
-    if (ShouldWrite(Sec) && (!UseSegments || IsInPtLoad(Sec))) {
+    if ((Sec.Flags & ELF::SHF_ALLOC) && Sec.Type != ELF::SHT_NOBITS &&
+        Sec.Size > 0) {
       if (Error E = checkSection(Sec))
         return E;
       Sections.insert(&Sec);
@@ -2716,6 +2703,10 @@ Error IHexWriter::finalize() {
 
   return Error::success();
 }
+
+namespace llvm {
+namespace objcopy {
+namespace elf {
 
 template class ELFBuilder<ELF64LE>;
 template class ELFBuilder<ELF64BE>;

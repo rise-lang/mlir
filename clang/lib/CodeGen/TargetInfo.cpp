@@ -2610,7 +2610,7 @@ static std::string qualifyWindowsLibrary(llvm::StringRef Lib) {
   bool Quote = (Lib.find(' ') != StringRef::npos);
   std::string ArgStr = Quote ? "\"" : "";
   ArgStr += Lib;
-  if (!Lib.endswith_lower(".lib") && !Lib.endswith_lower(".a"))
+  if (!Lib.endswith_insensitive(".lib") && !Lib.endswith_insensitive(".a"))
     ArgStr += ".lib";
   ArgStr += Quote ? "\"" : "";
   return ArgStr;
@@ -4161,7 +4161,12 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
 Address X86_64ABIInfo::EmitMSVAArg(CodeGenFunction &CGF, Address VAListAddr,
                                    QualType Ty) const {
-  return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*indirect*/ false,
+  // MS x64 ABI requirement: "Any argument that doesn't fit in 8 bytes, or is
+  // not 1, 2, 4, or 8 bytes, must be passed by reference."
+  uint64_t Width = getContext().getTypeSize(Ty);
+  bool IsIndirect = Width > 64 || !llvm::isPowerOf2_64(Width);
+
+  return emitVoidPtrVAArg(CGF, VAListAddr, Ty, IsIndirect,
                           CGF.getContext().getTypeInfoInChars(Ty),
                           CharUnits::fromQuantity(8),
                           /*allowHigherAlign*/ false);
@@ -4358,15 +4363,10 @@ void WinX86_64ABIInfo::computeInfo(CGFunctionInfo &FI) const {
 
 Address WinX86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
                                     QualType Ty) const {
-
-  bool IsIndirect = false;
-
   // MS x64 ABI requirement: "Any argument that doesn't fit in 8 bytes, or is
   // not 1, 2, 4, or 8 bytes, must be passed by reference."
-  if (isAggregateTypeForABI(Ty) || Ty->isMemberPointerType()) {
-    uint64_t Width = getContext().getTypeSize(Ty);
-    IsIndirect = Width > 64 || !llvm::isPowerOf2_64(Width);
-  }
+  uint64_t Width = getContext().getTypeSize(Ty);
+  bool IsIndirect = Width > 64 || !llvm::isPowerOf2_64(Width);
 
   return emitVoidPtrVAArg(CGF, VAListAddr, Ty, IsIndirect,
                           CGF.getContext().getTypeInfoInChars(Ty),
@@ -5781,6 +5781,18 @@ ABIArgInfo AArch64ABIInfo::classifyReturnType(QualType RetTy,
     if (getTarget().isRenderScriptTarget()) {
       return coerceToIntArray(RetTy, getContext(), getVMContext());
     }
+
+    if (Size <= 64 && getDataLayout().isLittleEndian()) {
+      // Composite types are returned in lower bits of a 64-bit register for LE,
+      // and in higher bits for BE. However, integer types are always returned
+      // in lower bits for both LE and BE, and they are not rounded up to
+      // 64-bits. We can skip rounding up of composite types for LE, but not for
+      // BE, otherwise composite types will be indistinguishable from integer
+      // types.
+      return ABIArgInfo::getDirect(
+          llvm::IntegerType::get(getVMContext(), Size));
+    }
+
     unsigned Alignment = getContext().getTypeAlign(RetTy);
     Size = llvm::alignTo(Size, 64); // round up to multiple of 8 bytes
 
@@ -6428,7 +6440,16 @@ ABIArgInfo ARMABIInfo::classifyHomogeneousAggregate(QualType Ty,
       return ABIArgInfo::getDirect(Ty, 0, nullptr, false);
     }
   }
-  return ABIArgInfo::getDirect(nullptr, 0, nullptr, false);
+  unsigned Align = 0;
+  if (getABIKind() == ARMABIInfo::AAPCS ||
+      getABIKind() == ARMABIInfo::AAPCS_VFP) {
+    // For alignment adjusted HFAs, cap the argument alignment to 8, leave it
+    // default otherwise.
+    Align = getContext().getTypeUnadjustedAlignInChars(Ty).getQuantity();
+    unsigned BaseAlign = getContext().getTypeAlignInChars(Base).getQuantity();
+    Align = (Align > BaseAlign && Align >= 8) ? 8 : 0;
+  }
+  return ABIArgInfo::getDirect(nullptr, 0, nullptr, false, Align);
 }
 
 ABIArgInfo ARMABIInfo::classifyArgumentType(QualType Ty, bool isVariadic,
@@ -8133,14 +8154,39 @@ void M68kTargetCodeGenInfo::setTargetAttributes(
 }
 
 //===----------------------------------------------------------------------===//
-// AVR ABI Implementation.
+// AVR ABI Implementation. Documented at
+// https://gcc.gnu.org/wiki/avr-gcc#Calling_Convention
+// https://gcc.gnu.org/wiki/avr-gcc#Reduced_Tiny
 //===----------------------------------------------------------------------===//
 
 namespace {
+class AVRABIInfo : public DefaultABIInfo {
+public:
+  AVRABIInfo(CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+
+  ABIArgInfo classifyReturnType(QualType Ty) const {
+    // A return struct with size less than or equal to 8 bytes is returned
+    // directly via registers R18-R25.
+    if (isAggregateTypeForABI(Ty) && getContext().getTypeSize(Ty) <= 64)
+      return ABIArgInfo::getDirect();
+    else
+      return DefaultABIInfo::classifyReturnType(Ty);
+  }
+
+  // Just copy the original implementation of DefaultABIInfo::computeInfo(),
+  // since DefaultABIInfo::classify{Return,Argument}Type() are not virtual.
+  void computeInfo(CGFunctionInfo &FI) const override {
+    if (!getCXXABI().classifyReturnType(FI))
+      FI.getReturnInfo() = classifyReturnType(FI.getReturnType());
+    for (auto &I : FI.arguments())
+      I.info = classifyArgumentType(I.type);
+  }
+};
+
 class AVRTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   AVRTargetCodeGenInfo(CodeGenTypes &CGT)
-      : TargetCodeGenInfo(std::make_unique<DefaultABIInfo>(CGT)) {}
+      : TargetCodeGenInfo(std::make_unique<AVRABIInfo>(CGT)) {}
 
   LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
                                   const VarDecl *D) const override {

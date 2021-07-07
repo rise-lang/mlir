@@ -13,36 +13,42 @@ include "mlir/Dialect/SparseTensor/IR/SparseTensorAttrDefs.td"
 include "mlir/Dialect/SparseTensor/IR/SparseTensorBase.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+//===----------------------------------------------------------------------===//
 // Base class.
+//===----------------------------------------------------------------------===//
+
 class SparseTensor_Op<string mnemonic, list<OpTrait> traits = []>
   : Op<SparseTensor_Dialect, mnemonic, traits> {
   let printer = [{ return ::print(p, *this); }];
-  let verifier = ?;
+  let verifier = [{ return ::verify(*this); }];
   let parser = [{ return ::parse$cppClass(parser, result); }];
 }
 
-// TODO: remove me
-def SparseTensor_FromPointerOp : SparseTensor_Op<"fromPtr">,
-    Arguments<(ins AnyType:$ptr)>,
-    Results<(outs AnyTensor:$result)> {
-  let summary = "Views an opaque sparse tensor pointer as a tensor";
-  let description = [{
-     Lacking a first class citizen type for sparse tensors, this operation
-     forms the glue between a sparse storage scheme (behind an opaque
-     pointer) and the (dense) tensors used in the kernel definitions.
-     This operation merely provides a way to assign a proper tensor
-     type and shape to the incoming opaque pointer. It disappears
-     completely during lowering.
+//===----------------------------------------------------------------------===//
+// Operations.
+//===----------------------------------------------------------------------===//
 
-     Example:
+def SparseTensor_NewOp : SparseTensor_Op<"new", []>,
+    Arguments<(ins AnyType:$source)>,
+    Results<(outs TensorOf<[AnyType]>:$result)> {
+  string summary = "Constructs a new sparse tensor";
+  string description = [{
+    Constructs a sparse tensor value with contents taken from an opaque
+    pointer provided by `source`. For targets that have access to a file
+    system, for example, this pointer may be a filename (or file) of a sparse
+    tensor in a particular external storage format. The form of the operation
+    is kept deliberately very general to allow for alternative implementations
+    in the future, such as pointers to buffers or runnable initialization
+    code. The operation is provided as an anchor that materializes a fully
+    typed sparse tensor values into a computation.
+
+    Example:
 
     ```mlir
-     !SparseTensor = type !llvm.ptr<i8>
-
-     %0 = sparse_tensor.fromPtr %arg0 : !SparseTensor to tensor<64x64xf64>
+    sparse_tensor.new %source : !Source to tensor<1024x1024xf64, #CSR>
     ```
   }];
-  let assemblyFormat = "$ptr attr-dict `:` type($ptr) `to` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `to` type($result)";
 }
 
 def SparseTensor_ToPointersOp : SparseTensor_Op<"pointers", [NoSideEffect]>,
@@ -51,17 +57,18 @@ def SparseTensor_ToPointersOp : SparseTensor_Op<"pointers", [NoSideEffect]>,
   let summary = "Extract pointers array at given dimension from a tensor";
   let description = [{
      Returns the pointers array of the sparse storage scheme at the
-     given dimension for the given tensor. This is similar to the
-     `buffer_cast` operation in the sense that it provides a bridge
+     given dimension for the given sparse tensor. This is similar to the
+     `memref.buffer_cast` operation in the sense that it provides a bridge
      between a tensor world view and a bufferized world view. Unlike the
-     `buffer_cast` operation, however, this sparse operation actually
+     `memref.buffer_cast` operation, however, this sparse operation actually
      lowers into a call into a support library to obtain access to the
      pointers array.
 
      Example:
 
     ```mlir
-    %1 = sparse_tensor.pointers %0, %c1 : tensor<64x64xf64> to memref<?xindex>
+    %1 = sparse_tensor.pointers %0, %c1
+       : tensor<64x64xf64, #CSR> to memref<?xindex>
     ```
   }];
   let assemblyFormat = "$tensor `,` $dim attr-dict `:` type($tensor)"
@@ -74,17 +81,18 @@ def SparseTensor_ToIndicesOp : SparseTensor_Op<"indices", [NoSideEffect]>,
   let summary = "Extract indices array at given dimension from a tensor";
   let description = [{
      Returns the indices array of the sparse storage scheme at the
-     given dimension for the given tensor. This is similar to the
-     `buffer_cast` operation in the sense that it provides a bridge
+     given dimension for the given sparse tensor. This is similar to the
+     `memref.buffer_cast` operation in the sense that it provides a bridge
      between a tensor world view and a bufferized world view. Unlike the
-     `buffer_cast` operation, however, this sparse operation actually
+     `memref.buffer_cast` operation, however, this sparse operation actually
      lowers into a call into a support library to obtain access to the
      indices array.
 
      Example:
 
     ```mlir
-    %1 = sparse_tensor.indices %0, %c1 : tensor<64x64xf64> to memref<?xindex>
+    %1 = sparse_tensor.indices %0, %c1
+       : tensor<64x64xf64, #CSR> to memref<?xindex>
     ```
   }];
   let assemblyFormat = "$tensor `,` $dim attr-dict `:` type($tensor)"
@@ -97,20 +105,49 @@ def SparseTensor_ToValuesOp : SparseTensor_Op<"values", [NoSideEffect]>,
   let summary = "Extract numerical values array from a tensor";
   let description = [{
      Returns the values array of the sparse storage scheme for the given
-     tensor, independent of the actual dimension. This is similar to the
-     `buffer_cast` operation in the sense that it provides a bridge
+     sparse tensor, independent of the actual dimension. This is similar to
+     the `memref.buffer_cast` operation in the sense that it provides a bridge
      between a tensor world view and a bufferized world view. Unlike the
-     `buffer_cast` operation, however, this sparse operation actually
+     `memref.buffer_cast` operation, however, this sparse operation actually
      lowers into a call into a support library to obtain access to the
      values array.
 
      Example:
 
     ```mlir
-    %1 = sparse_tensor.values %0 : tensor<64x64xf64> to memref<?xf64>
+    %1 = sparse_tensor.values %0 : tensor<64x64xf64, #CSR> to memref<?xf64>
     ```
   }];
   let assemblyFormat = "$tensor attr-dict `:` type($tensor) `to` type($result)";
+}
+
+def SparseTensor_ToTensorOp : SparseTensor_Op<"tensor", [NoSideEffect]>,
+    Arguments<(ins Variadic<AnyStridedMemRefOfRank<1>>:$memrefs)>,
+    Results<(outs AnyTensor:$result)> {
+  let summary = "Reconstructs tensor from arrays(s)";
+  let description = [{
+    Reconstructs the sparse tensor from the sparse storage scheme array(s).
+    This is similar to the `memref.load` operation in the sense that it
+    provides a bridge between a bufferized world view and a tensor world
+    view. Unlike the `memref.load` operation, however, this sparse operation
+    is used only temporarily to maintain a correctly typed intermediate
+    representation during progressive bufferization. Eventually the operation
+    is folded away.
+
+    The input arrays are defined unambigously by the sparsity annotations
+    (pointers and indices for overhead storage in every compressed dimension,
+    followed by one final values array).
+
+    Examples:
+
+    ```mlir
+    %1 = sparse_tensor.tensor %0 : memref<?xf64> to tensor<64x64xf64, #Dense>
+
+    %3 = sparse_tensor.tensor %0, %1, %2 :
+       memref<?xindex>, memref<?xindex>, memref<?xf32> to tensor<10x10xf32, #CSR>
+    ```
+  }];
+  let assemblyFormat = "$memrefs attr-dict `:` type($memrefs) `to` type($result)";
 }
 
 #endif // SPARSETENSOR_OPS

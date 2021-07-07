@@ -18,11 +18,7 @@
 // However, support for that was broken prior to Clang 8 and AppleClang 11.
 // UNSUPPORTED: apple-clang-9, apple-clang-10
 // UNSUPPORTED: clang-5, clang-6, clang-7
-// XFAIL: with_system_cxx_lib=macosx10.13
-// XFAIL: with_system_cxx_lib=macosx10.12
-// XFAIL: with_system_cxx_lib=macosx10.11
-// XFAIL: with_system_cxx_lib=macosx10.10
-// XFAIL: with_system_cxx_lib=macosx10.9
+// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13}}
 
 // On Windows libc++ doesn't provide its own definitions for new/delete
 // but instead depends on the ones in VCRuntime. However VCRuntime does not

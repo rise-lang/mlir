@@ -208,13 +208,24 @@ LLVMErrorRef LLVMOrcLLJITAddLLVMIRModuleWithRT(LLVMOrcLLJITRef J,
  * This operation does not take ownership of the Name argument.
  */
 LLVMErrorRef LLVMOrcLLJITLookup(LLVMOrcLLJITRef J,
-                                LLVMOrcJITTargetAddress *Result,
+                                LLVMOrcExecutorAddress *Result,
                                 const char *Name);
 
 /**
  * Returns a non-owning reference to the LLJIT instance's object linking layer.
  */
 LLVMOrcObjectLayerRef LLVMOrcLLJITGetObjLinkingLayer(LLVMOrcLLJITRef J);
+
+/**
+ * Returns a non-owning reference to the LLJIT instance's object linking layer.
+ */
+LLVMOrcObjectTransformLayerRef
+LLVMOrcLLJITGetObjTransformLayer(LLVMOrcLLJITRef J);
+
+/**
+ * Returns a non-owning reference to the LLJIT instance's IR transform layer.
+ */
+LLVMOrcIRTransformLayerRef LLVMOrcLLJITGetIRTransformLayer(LLVMOrcLLJITRef J);
 
 LLVM_C_EXTERN_C_END
 

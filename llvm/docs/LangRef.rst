@@ -432,10 +432,6 @@ added in the future:
 
     - On X86-64 the callee preserves all general purpose registers, except for
       RDI and RAX.
-"``swiftcc``" - This calling convention is used for Swift language.
-    - On X86-64 RCX and R8 are available for additional integer returns, and
-      XMM2 and XMM3 are available for additional FP/vector returns.
-    - On iOS platforms, we use AAPCS-VFP calling convention.
 "``tailcc``" - Tail callable calling convention
     This calling convention ensures that calls in tail position will always be
     tail call optimized. This calling convention is equivalent to fastcc,
@@ -444,6 +440,14 @@ added in the future:
     the GHC or the HiPE convention is used. <CodeGenerator.html#id80>`_ This
     calling convention does not support varargs and requires the prototype of
     all callees to exactly match the prototype of the function definition.
+"``swiftcc``" - This calling convention is used for Swift language.
+    - On X86-64 RCX and R8 are available for additional integer returns, and
+      XMM2 and XMM3 are available for additional FP/vector returns.
+    - On iOS platforms, we use AAPCS-VFP calling convention.
+"``swifttailcc``"
+    This calling convention is like ``swiftcc`` in most respects, but also the
+    callee pops the argument area of the stack so that mandatory tail calls are 
+    possible as in ``tailcc``.
 "``cfguard_checkcc``" - Windows Control Flow Guard (Check mechanism)
     This calling convention is used for the Control Flow Guard check function,
     calls to which can be inserted before indirect calls to check that the call
@@ -597,10 +601,11 @@ Non-integral pointer types represent pointers that have an *unspecified* bitwise
 representation; that is, the integral representation may be target dependent or
 unstable (not backed by a fixed integer).
 
-``inttoptr`` instructions converting integers to non-integral pointer types are
-ill-typed, and so are ``ptrtoint`` instructions converting values of
-non-integral pointer types to integers.  Vector versions of said instructions
-are ill-typed as well.
+``inttoptr`` and ``ptrtoint`` instructions converting integers to non-integral
+pointer types or vice versa are implementation defined, and subject to likely
+future revision in semantics. Vector versions of said instructions are as well.
+Users of non-integral-pointer types are advised not to design around current
+semantics as they may very well change in the nearish future.
 
 .. _globalvars:
 
@@ -1278,6 +1283,12 @@ Currently, only the following parameter attributes are defined:
     a valid attribute for return values and can only be applied to one
     parameter.
 
+``swiftasync``
+    This indicates that the parameter is the asynchronous context parameter and
+    triggers the creation of a target-specific extended frame record to store
+    this pointer. This is not a valid attribute for return values and can only
+    be applied to one parameter.
+
 ``swifterror``
     This attribute is motivated to model and optimize Swift error handling. It
     can be applied to a parameter with pointer to pointer type or a
@@ -1624,7 +1635,11 @@ example:
     memory on it's behalf.  As a result, perhaps surprisingly, a ``nofree``
     function can return a pointer to a previously deallocated memory object.
 ``noimplicitfloat``
-    This attributes disables implicit floating-point instructions.
+    Disallows implicit floating-point code. This inhibits optimizations that
+    use floating-point code and floating-point/SIMD/vector registers for
+    operations that are not nominally floating-point. LLVM instructions that
+    perform floating-point operations or require access to floating-point
+    registers may still cause floating-point code to be generated.
 ``noinline``
     This attribute indicates that the inliner should never inline this
     function in any situation. This attribute may not be used together
@@ -1641,6 +1656,10 @@ example:
     This attribute suppresses lazy symbol binding for the function. This
     may make calls to the function faster, at the cost of extra program
     startup time if the function is not called during program startup.
+``noprofile``
+    This function attribute prevents instrumentation based profiling, used for
+    coverage or profile based optimization, from being added to a function,
+    even when inlined.
 ``noredzone``
     This attribute indicates that the code generator should not use a
     red zone, even if the target-specific ABI normally permits it.
@@ -1681,6 +1700,9 @@ example:
     trap or generate asynchronous exceptions. Exception handling schemes
     that are recognized by LLVM to handle asynchronous exceptions, such
     as SEH, will still provide their implementation defined semantics.
+``nosanitize_coverage``
+    This attribute indicates that SanitizerCoverage instrumentation is disabled
+    for this function.
 ``null_pointer_is_valid``
    If ``null_pointer_is_valid`` is set, then the ``null`` address
    in address-space 0 is considered to be a valid address for memory loads and
@@ -1904,7 +1926,8 @@ example:
     A function with the ``ssp`` attribute but without the ``alwaysinline``
     attribute cannot be inlined into a function without a
     ``ssp/sspreq/sspstrong`` attribute. If inlined, the caller will get the
-    ``ssp`` attribute.
+    ``ssp`` attribute. ``call``, ``invoke``, and ``callbr`` instructions with
+    the ``alwaysinline`` attribute force inlining.
 ``sspstrong``
     This attribute indicates that the function should emit a stack smashing
     protector. This attribute causes a strong heuristic to be used when
@@ -1932,7 +1955,9 @@ example:
     A function with the ``sspstrong`` attribute but without the
     ``alwaysinline`` attribute cannot be inlined into a function without a
     ``ssp/sspstrong/sspreq`` attribute. If inlined, the caller will get the
-    ``sspstrong`` attribute unless the ``sspreq`` attribute exists.
+    ``sspstrong`` attribute unless the ``sspreq`` attribute exists.  ``call``,
+    ``invoke``, and ``callbr`` instructions with the ``alwaysinline`` attribute
+    force inlining.
 ``sspreq``
     This attribute indicates that the function should *always* emit a stack
     smashing protector. This overrides the ``ssp`` and ``sspstrong`` function
@@ -1952,7 +1977,8 @@ example:
     A function with the ``sspreq`` attribute but without the ``alwaysinline``
     attribute cannot be inlined into a function without a
     ``ssp/sspstrong/sspreq`` attribute. If inlined, the caller will get the
-    ``sspreq`` attribute.
+    ``sspreq`` attribute.  ``call``, ``invoke``, and ``callbr`` instructions
+    with the ``alwaysinline`` attribute force inlining.
 
 ``strictfp``
     This attribute indicates that the function was called from a scope that
@@ -2034,6 +2060,12 @@ example:
     function does not satisfy this contract, the behavior is undefined.  This
     attribute does not apply transitively to callees, but does apply to call
     sites within the function. Note that `willreturn` implies `mustprogress`.
+``"warn-stack-size"="<threshold>"``
+    This attribute sets a threshold to emit diagnostics once the frame size is
+    known should the frame size exceed the specified value.  It takes one
+    required integer value, which should be a non-negative integer, and less
+    than `UINT_MAX`.  It's unspecified which threshold will be used when
+    duplicate definitions are linked together with differing values.
 ``vscale_range(<min>[, <max>])``
     This attribute indicates the minimum and maximum vscale value for the given
     function. A value of 0 means unbounded. If the optional max value is omitted
@@ -2074,7 +2106,7 @@ attributes are supported:
     determined by the rules of the Vector Function ABI (VFABI)
     specifications of the target. For Arm and X86, the VFABI can be
     found at https://github.com/ARM-software/abi-aa and
-    https://software.intel.com/en-us/articles/vector-simd-function-abi,
+    https://software.intel.com/content/www/us/en/develop/download/vector-simd-function-abi.html,
     respectively.
 
     For X86 and Arm targets, the values of the tokens in the standard
@@ -2382,8 +2414,10 @@ A ``"clang.arc.attachedcall`` operand bundle on a call indicates the call is
 implicitly followed by a marker instruction and a call to an ObjC runtime
 function that uses the result of the call. If the argument passed to the operand
 bundle is 0, ``@objc_retainAutoreleasedReturnValue`` is called. If 1 is passed,
-``@objc_unsafeClaimAutoreleasedReturnValue`` is called. A call with this bundle
-implicitly uses its return value.
+``@objc_unsafeClaimAutoreleasedReturnValue`` is called. The return value of a
+call with this bundle is used by a call to ``@llvm.objc.clang.arc.noop.use``
+unless the called function's return type is void, in which case the operand
+bundle is ignored.
 
 The operand bundle is needed to ensure the call is immediately followed by the
 marker instruction or the ObjC runtime call in the final output.
@@ -3307,11 +3341,19 @@ are target-specific.
 Note that LLVM does not permit pointers to void (``void*``) nor does it
 permit pointers to labels (``label*``). Use ``i8*`` instead.
 
+LLVM is in the process of transitioning to
+`opaque pointers <OpaquePointers.html#opaque-pointers>`_.
+Opaque pointers do not have a pointee type. Rather, instructions
+interacting through pointers specify the type of the underlying memory
+they are interacting with. Opaque pointers are still in the process of
+being worked on and are not complete.
+
 :Syntax:
 
 ::
 
       <type> *
+      ptr
 
 :Examples:
 
@@ -3320,7 +3362,11 @@ permit pointers to labels (``label*``). Use ``i8*`` instead.
 +-------------------------+--------------------------------------------------------------------------------------------------------------+
 | ``i32 (i32*) *``        | A :ref:`pointer <t_pointer>` to a :ref:`function <t_function>` that takes an ``i32*``, returning an ``i32``. |
 +-------------------------+--------------------------------------------------------------------------------------------------------------+
-| ``i32 addrspace(5)*``   | A :ref:`pointer <t_pointer>` to an ``i32`` value that resides in address space #5.                           |
+| ``i32 addrspace(5)*``   | A :ref:`pointer <t_pointer>` to an ``i32`` value that resides in address space 5.                            |
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+| ``ptr``                 | An opaque pointer type to a value that resides in address space 0.                                           |
++-------------------------+--------------------------------------------------------------------------------------------------------------+
+| ``ptr addrspace(5)``    | An opaque pointer type to a value that resides in address space 5.                                           |
 +-------------------------+--------------------------------------------------------------------------------------------------------------+
 
 .. _t_vector:
@@ -3341,7 +3387,7 @@ vector length is unknown at compile time. Vector types are considered
 :Memory Layout:
 
 In general vector elements are laid out in memory in the same way as
-:ref:`array types <t_array>`. Such an anology works fine as long as the vector
+:ref:`array types <t_array>`. Such an analogy works fine as long as the vector
 elements are byte sized. However, when the elements of the vector aren't byte
 sized it gets a bit more complicated. One way to describe the layout is by
 describing what happens when a vector such as <N x iM> is bitcasted to an
@@ -3802,7 +3848,7 @@ cleared low bit. However, in the ``%C`` example, the optimizer is
 allowed to assume that the '``undef``' operand could be the same as
 ``%Y``, allowing the whole '``select``' to be eliminated.
 
-.. code-block:: text
+.. code-block:: llvm
 
       %A = xor undef, undef
 
@@ -3877,7 +3923,7 @@ predicates, such as Correlated Value Propagation and Global Value Numbering.
 In case of switch instruction, the branch condition should be frozen, otherwise
 it is undefined behavior.
 
-.. code-block:: text
+.. code-block:: llvm
 
     Unsafe:
       br undef, BB1, BB2 ; UB
@@ -4032,7 +4078,11 @@ Addresses of Basic Blocks
 ``blockaddress(@function, %block)``
 
 The '``blockaddress``' constant computes the address of the specified
-basic block in the specified function, and always has an ``i8*`` type.
+basic block in the specified function.
+
+It always has an ``i8 addrspace(P)*`` type, where ``P`` is the address space
+of the function containing ``%block`` (usually ``addrspace(0)``).
+
 Taking the address of the entry block is illegal.
 
 This value only has defined behavior when used as an operand to the
@@ -4280,9 +4330,20 @@ the only supported dialects. An example is:
 
     call void asm inteldialect "eieio", ""()
 
-If multiple keywords appear the '``sideeffect``' keyword must come
-first, the '``alignstack``' keyword second and the '``inteldialect``'
-keyword last.
+In the case that the inline asm might unwind the stack,
+the '``unwind``' keyword must be used, so that the compiler emits
+unwinding information:
+
+.. code-block:: llvm
+
+    call void asm unwind "call func", ""()
+
+If the inline asm unwinds the stack and isn't marked with
+the '``unwind``' keyword, the behavior is undefined.
+
+If multiple keywords appear, the '``sideeffect``' keyword must come
+first, the '``alignstack``' keyword second, the '``inteldialect``' keyword
+third and the '``unwind``' keyword last.
 
 Inline Asm Constraint String
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -9551,8 +9612,9 @@ Overview:
 
 The '``alloca``' instruction allocates memory on the stack frame of the
 currently executing function, to be automatically released when this
-function returns to its caller. The object is always allocated in the
-address space for allocas indicated in the datalayout.
+function returns to its caller.  If the address space is not explicitly
+specified, the object is allocated in the alloca address space from the
+:ref:`datalayout string<langref_datalayout>`.
 
 Arguments:
 """"""""""
@@ -9582,6 +9644,10 @@ the function returns (either with the ``ret`` or ``resume`` instructions),
 the memory is reclaimed. Allocating zero bytes is legal, but the returned
 pointer may not be unique. The order in which memory is allocated (ie.,
 which way the stack grows) is not specified.
+
+Note that '``alloca``' outside of the alloca address space from the
+:ref:`datalayout string<langref_datalayout>` is meaningful only if the
+target has assigned it a semantics.
 
 If the returned pointer is used by :ref:`llvm.lifetime.start <int_lifestart>`,
 the returned object is initially dead.
@@ -11316,16 +11382,25 @@ This instruction requires several arguments:
    - The call must immediately precede a :ref:`ret <i_ret>` instruction,
      or a pointer bitcast followed by a ret instruction.
    - The ret instruction must return the (possibly bitcasted) value
-     produced by the call or void.
-   - The caller and callee prototypes must match. Pointer types of
-     parameters or return types may differ in pointee type, but not
-     in address space.
+     produced by the call, undef, or void.
    - The calling conventions of the caller and callee must match.
-   - All ABI-impacting function attributes, such as sret, byval, inreg,
-     returned, and inalloca, must match.
    - The callee must be varargs iff the caller is varargs. Bitcasting a
      non-varargs function to the appropriate varargs type is legal so
      long as the non-varargs prefixes obey the other rules.
+   - The return type must not undergo automatic conversion to an `sret` pointer.
+
+  In addition, if the calling convention is not `swifttailcc` or `tailcc`:
+
+   - All ABI-impacting function attributes, such as sret, byval, inreg,
+     returned, and inalloca, must match.
+   - The caller and callee prototypes must match. Pointer types of parameters
+     or return types may differ in pointee type, but not in address space.
+
+  On the other hand, if the calling convention is `swifttailcc` or `swiftcc`:
+
+   - Only these ABI-impacting attributes attributes are allowed: sret, byval,
+     swiftself, and swiftasync.
+   - Prototypes are not required to match.
 
    Tail call optimization for calls marked ``tail`` is guaranteed to occur if
    the following conditions are met:
@@ -12222,6 +12297,88 @@ A ``gc.relocate`` is modeled as a ``readnone`` pure function.  It has no
 side effects since it is just a way to extract information about work
 done during the actual call modeled by the ``gc.statepoint``.
 
+.. _gc.get.pointer.base:
+
+'llvm.experimental.gc.get.pointer.base' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <pointer type>
+        @llvm.experimental.gc.get.pointer.base(
+          <pointer type> readnone nocapture %derived_ptr)
+          nounwind readnone willreturn
+
+Overview:
+"""""""""
+
+``gc.get.pointer.base`` for a derived pointer returns its base pointer.
+
+Operands:
+"""""""""
+
+The only argument is a pointer which is based on some object with
+an unknown offset from the base of said object.
+
+Semantics:
+""""""""""
+
+This intrinsic is used in the abstract machine model for GC to represent
+the base pointer for an arbitrary derived pointer.
+
+This intrinsic is inlined by the :ref:`RewriteStatepointsForGC` pass by
+replacing all uses of this callsite with the offset of a derived pointer from
+its base pointer value. The replacement is done as part of the lowering to the
+explicit statepoint model.
+
+The return pointer type must be the same as the type of the parameter.
+
+
+'llvm.experimental.gc.get.pointer.offset' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare i64
+        @llvm.experimental.gc.get.pointer.offset(
+          <pointer type> readnone nocapture %derived_ptr)
+          nounwind readnone willreturn
+
+Overview:
+"""""""""
+
+``gc.get.pointer.offset`` for a derived pointer returns the offset from its
+base pointer.
+
+Operands:
+"""""""""
+
+The only argument is a pointer which is based on some object with
+an unknown offset from the base of said object.
+
+Semantics:
+""""""""""
+
+This intrinsic is used in the abstract machine model for GC to represent
+the offset of an arbitrary derived pointer from its base pointer.
+
+This intrinsic is inlined by the :ref:`RewriteStatepointsForGC` pass by
+replacing all uses of this callsite with the offset of a derived pointer from
+its base pointer value. The replacement is done as part of the lowering to the
+explicit statepoint model.
+
+Basically this call calculates difference between the derived pointer and its
+base pointer (see :ref:`gc.get.pointer.base`) both ptrtoint casted. But
+this cast done outside the :ref:`RewriteStatepointsForGC` pass could result
+in the pointers lost for further lowering from the abstract model to the
+explicit physical one.
+
 Code Generator Intrinsics
 -------------------------
 
@@ -12350,6 +12507,29 @@ Note that calling this intrinsic does not prevent function inlining or
 other aggressive transformations, so the value returned may not be that
 of the obvious source-language caller.
 
+'``llvm.swift.async.context.addr``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare i8** @llvm.swift.async.context.addr()
+
+Overview:
+"""""""""
+
+The '``llvm.swift.async.context.addr``' intrinsic returns a pointer to
+the part of the extended frame record containing the asynchronous
+context of a Swift execution.
+
+Semantics:
+""""""""""
+
+If the caller has a ``swiftasync`` parameter, that argument will initially
+be stored at the returned address. If not, it will be initialized to null.
+
 '``llvm.localescape``' and '``llvm.localrecover``' Intrinsics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -12400,13 +12580,74 @@ The '``llvm.localescape``' intrinsic blocks inlining, as inlining changes where
 the escaped allocas are allocated, which would break attempts to use
 '``llvm.localrecover``'.
 
+'``llvm.seh.try.begin``' and '``llvm.seh.try.end``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare void @llvm.seh.try.begin()
+      declare void @llvm.seh.try.end()
+
+Overview:
+"""""""""
+
+The '``llvm.seh.try.begin``' and '``llvm.seh.try.end``' intrinsics mark
+the boundary of a _try region for Windows SEH Asynchrous Exception Handling.
+
+Semantics:
+""""""""""
+
+When a C-function is compiled with Windows SEH Asynchrous Exception option,
+-feh_asynch (aka MSVC -EHa), these two intrinsics are injected to mark _try
+boundary and to prevent potential exceptions from being moved across boundary.
+Any set of operations can then be confined to the region by reading their leaf
+inputs via volatile loads and writing their root outputs via volatile stores.
+
+'``llvm.seh.scope.begin``' and '``llvm.seh.scope.end``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare void @llvm.seh.scope.begin()
+      declare void @llvm.seh.scope.end()
+
+Overview:
+"""""""""
+
+The '``llvm.seh.scope.begin``' and '``llvm.seh.scope.end``' intrinsics mark
+the boundary of a CPP object lifetime for Windows SEH Asynchrous Exception
+Handling (MSVC option -EHa).
+
+Semantics:
+""""""""""
+
+LLVM's ordinary exception-handling representation associates EH cleanups and
+handlers only with ``invoke``s, which normally correspond only to call sites.  To
+support arbitrary faulting instructions, it must be possible to recover the current
+EH scope for any instruction.  Turning every operation in LLVM that could fault
+into an ``invoke`` of a new, potentially-throwing intrinsic would require adding a
+large number of intrinsics, impede optimization of those operations, and make
+compilation slower by introducing many extra basic blocks.  These intrinsics can
+be used instead to mark the region protected by a cleanup, such as for a local
+C++ object with a non-trivial destructor.  ``llvm.seh.scope.begin`` is used to mark
+the start of the region; it is always called with ``invoke``, with the unwind block
+being the desired unwind destination for any potentially-throwing instructions
+within the region.  `llvm.seh.scope.end` is used to mark when the scope ends
+and the EH cleanup is no longer required (e.g. because the destructor is being
+called).
+
 .. _int_read_register:
 .. _int_read_volatile_register:
 .. _int_write_register:
 
-'``llvm.read_register``', '``llvm.read_volatile_register``', and
-'``llvm.write_register``' Intrinsics
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.read_register``', '``llvm.read_volatile_register``', and '``llvm.write_register``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
@@ -13430,13 +13671,16 @@ This is an overloaded intrinsic. You can use ``llvm.powi`` on any
 floating-point or vector of floating-point type. Not all targets support
 all types however.
 
+Generally, the only supported type for the exponent is the one matching
+with the C type ``int``.
+
 ::
 
-      declare float     @llvm.powi.f32(float  %Val, i32 %power)
-      declare double    @llvm.powi.f64(double %Val, i32 %power)
-      declare x86_fp80  @llvm.powi.f80(x86_fp80  %Val, i32 %power)
-      declare fp128     @llvm.powi.f128(fp128 %Val, i32 %power)
-      declare ppc_fp128 @llvm.powi.ppcf128(ppc_fp128  %Val, i32 %power)
+      declare float     @llvm.powi.f32.i32(float  %Val, i32 %power)
+      declare double    @llvm.powi.f64.i16(double %Val, i16 %power)
+      declare x86_fp80  @llvm.powi.f80.i32(x86_fp80  %Val, i32 %power)
+      declare fp128     @llvm.powi.f128.i32(fp128 %Val, i32 %power)
+      declare ppc_fp128 @llvm.powi.ppcf128.i32(ppc_fp128  %Val, i32 %power)
 
 Overview:
 """""""""
@@ -17575,7 +17819,7 @@ Examples:
       ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
 
       %t = sdiv <4 x i32> %a, %b
-      %also.r = select <4 x ii> %mask, <4 x i32> %t, <4 x i32> undef
+      %also.r = select <4 x i1> %mask, <4 x i32> %t, <4 x i32> undef
 
 
 .. _int_vp_udiv:
@@ -17620,7 +17864,7 @@ Examples:
       ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
 
       %t = udiv <4 x i32> %a, %b
-      %also.r = select <4 x ii> %mask, <4 x i32> %t, <4 x i32> undef
+      %also.r = select <4 x i1> %mask, <4 x i32> %t, <4 x i32> undef
 
 
 
@@ -18008,6 +18252,252 @@ Examples:
 
       %t = xor <4 x i32> %a, %b
       %also.r = select <4 x i1> %mask, <4 x i32> %t, <4 x i32> undef
+
+
+.. _int_vp_fadd:
+
+'``llvm.vp.fadd.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x float>  @llvm.vp.fadd.v16f32 (<16 x float> <left_op>, <16 x float> <right_op>, <16 x i1> <mask>, i32 <vector_length>)
+      declare <vscale x 4 x float>  @llvm.vp.fadd.nxv4f32 (<vscale x 4 x float> <left_op>, <vscale x 4 x float> <right_op>, <vscale x 4 x i1> <mask>, i32 <vector_length>)
+      declare <256 x double>  @llvm.vp.fadd.v256f64 (<256 x double> <left_op>, <256 x double> <right_op>, <256 x i1> <mask>, i32 <vector_length>)
+
+Overview:
+"""""""""
+
+Predicated floating-point addition of two vectors of floating-point values.
+
+
+Arguments:
+""""""""""
+
+The first two operands and the result have the same vector of floating-point type. The
+third operand is the vector mask and has the same number of elements as the
+result vector type. The fourth operand is the explicit vector length of the
+operation.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.fadd``' intrinsic performs floating-point addition (:ref:`add <i_fadd>`)
+of the first and second vector operand on each enabled lane.  The result on
+disabled lanes is undefined.  The operation is performed in the default
+floating-point environment.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x float> @llvm.vp.fadd.v4f32(<4 x float> %a, <4 x float> %b, <4 x i1> %mask, i32 %evl)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = fadd <4 x float> %a, %b
+      %also.r = select <4 x i1> %mask, <4 x float> %t, <4 x float> undef
+
+
+.. _int_vp_fsub:
+
+'``llvm.vp.fsub.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x float>  @llvm.vp.fsub.v16f32 (<16 x float> <left_op>, <16 x float> <right_op>, <16 x i1> <mask>, i32 <vector_length>)
+      declare <vscale x 4 x float>  @llvm.vp.fsub.nxv4f32 (<vscale x 4 x float> <left_op>, <vscale x 4 x float> <right_op>, <vscale x 4 x i1> <mask>, i32 <vector_length>)
+      declare <256 x double>  @llvm.vp.fsub.v256f64 (<256 x double> <left_op>, <256 x double> <right_op>, <256 x i1> <mask>, i32 <vector_length>)
+
+Overview:
+"""""""""
+
+Predicated floating-point subtraction of two vectors of floating-point values.
+
+
+Arguments:
+""""""""""
+
+The first two operands and the result have the same vector of floating-point type. The
+third operand is the vector mask and has the same number of elements as the
+result vector type. The fourth operand is the explicit vector length of the
+operation.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.fsub``' intrinsic performs floating-point subtraction (:ref:`add <i_fsub>`)
+of the first and second vector operand on each enabled lane.  The result on
+disabled lanes is undefined.  The operation is performed in the default
+floating-point environment.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x float> @llvm.vp.fsub.v4f32(<4 x float> %a, <4 x float> %b, <4 x i1> %mask, i32 %evl)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = fsub <4 x float> %a, %b
+      %also.r = select <4 x i1> %mask, <4 x float> %t, <4 x float> undef
+
+
+.. _int_vp_fmul:
+
+'``llvm.vp.fmul.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x float>  @llvm.vp.fmul.v16f32 (<16 x float> <left_op>, <16 x float> <right_op>, <16 x i1> <mask>, i32 <vector_length>)
+      declare <vscale x 4 x float>  @llvm.vp.fmul.nxv4f32 (<vscale x 4 x float> <left_op>, <vscale x 4 x float> <right_op>, <vscale x 4 x i1> <mask>, i32 <vector_length>)
+      declare <256 x double>  @llvm.vp.fmul.v256f64 (<256 x double> <left_op>, <256 x double> <right_op>, <256 x i1> <mask>, i32 <vector_length>)
+
+Overview:
+"""""""""
+
+Predicated floating-point multiplication of two vectors of floating-point values.
+
+
+Arguments:
+""""""""""
+
+The first two operands and the result have the same vector of floating-point type. The
+third operand is the vector mask and has the same number of elements as the
+result vector type. The fourth operand is the explicit vector length of the
+operation.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.fmul``' intrinsic performs floating-point multiplication (:ref:`add <i_fmul>`)
+of the first and second vector operand on each enabled lane.  The result on
+disabled lanes is undefined.  The operation is performed in the default
+floating-point environment.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x float> @llvm.vp.fmul.v4f32(<4 x float> %a, <4 x float> %b, <4 x i1> %mask, i32 %evl)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = fmul <4 x float> %a, %b
+      %also.r = select <4 x i1> %mask, <4 x float> %t, <4 x float> undef
+
+
+.. _int_vp_fdiv:
+
+'``llvm.vp.fdiv.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x float>  @llvm.vp.fdiv.v16f32 (<16 x float> <left_op>, <16 x float> <right_op>, <16 x i1> <mask>, i32 <vector_length>)
+      declare <vscale x 4 x float>  @llvm.vp.fdiv.nxv4f32 (<vscale x 4 x float> <left_op>, <vscale x 4 x float> <right_op>, <vscale x 4 x i1> <mask>, i32 <vector_length>)
+      declare <256 x double>  @llvm.vp.fdiv.v256f64 (<256 x double> <left_op>, <256 x double> <right_op>, <256 x i1> <mask>, i32 <vector_length>)
+
+Overview:
+"""""""""
+
+Predicated floating-point division of two vectors of floating-point values.
+
+
+Arguments:
+""""""""""
+
+The first two operands and the result have the same vector of floating-point type. The
+third operand is the vector mask and has the same number of elements as the
+result vector type. The fourth operand is the explicit vector length of the
+operation.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.fdiv``' intrinsic performs floating-point division (:ref:`add <i_fdiv>`)
+of the first and second vector operand on each enabled lane.  The result on
+disabled lanes is undefined.  The operation is performed in the default
+floating-point environment.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x float> @llvm.vp.fdiv.v4f32(<4 x float> %a, <4 x float> %b, <4 x i1> %mask, i32 %evl)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = fdiv <4 x float> %a, %b
+      %also.r = select <4 x i1> %mask, <4 x float> %t, <4 x float> undef
+
+
+.. _int_vp_frem:
+
+'``llvm.vp.frem.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x float>  @llvm.vp.frem.v16f32 (<16 x float> <left_op>, <16 x float> <right_op>, <16 x i1> <mask>, i32 <vector_length>)
+      declare <vscale x 4 x float>  @llvm.vp.frem.nxv4f32 (<vscale x 4 x float> <left_op>, <vscale x 4 x float> <right_op>, <vscale x 4 x i1> <mask>, i32 <vector_length>)
+      declare <256 x double>  @llvm.vp.frem.v256f64 (<256 x double> <left_op>, <256 x double> <right_op>, <256 x i1> <mask>, i32 <vector_length>)
+
+Overview:
+"""""""""
+
+Predicated floating-point remainder of two vectors of floating-point values.
+
+
+Arguments:
+""""""""""
+
+The first two operands and the result have the same vector of floating-point type. The
+third operand is the vector mask and has the same number of elements as the
+result vector type. The fourth operand is the explicit vector length of the
+operation.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.frem``' intrinsic performs floating-point remainder (:ref:`add <i_frem>`)
+of the first and second vector operand on each enabled lane.  The result on
+disabled lanes is undefined.  The operation is performed in the default
+floating-point environment.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x float> @llvm.vp.frem.v4f32(<4 x float> %a, <4 x float> %b, <4 x i1> %mask, i32 %evl)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = frem <4 x float> %a, %b
+      %also.r = select <4 x i1> %mask, <4 x float> %t, <4 x float> undef
+
 
 
 .. _int_get_active_lane_mask:
@@ -20975,6 +21465,42 @@ element is true, the following rules apply to the first element:
 
 If the function's return value's second element is false, the value of the
 first element is undefined.
+
+
+'``llvm.arithmetic.fence``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type>
+      @llvm.arithmetic.fence(<type> <op>)
+
+Overview:
+"""""""""
+
+The purpose of the ``llvm.arithmetic.fence`` intrinsic
+is to prevent the optimizer from performaing fast-math optimizations,
+particularly reassociation,
+between the argument and the expression that contains the argument.
+It can be used to preserve the parentheses in the source language.
+
+Arguments:
+""""""""""
+
+The ``llvm.arithmetic.fence`` intrinsic takes only one argument.
+The argument and the return value are floating-point numbers,
+or vector floating-point numbers, of the same type.
+
+Semantics:
+""""""""""
+
+This intrinsic returns the value of its operand. The optimizer can optimize
+the argument, but the optimizer cannot hoist any component of the operand
+to the containing context, and the optimizer cannot move the calculation of
+any expression in the containing context into the operand.
 
 
 '``llvm.donothing``' Intrinsic

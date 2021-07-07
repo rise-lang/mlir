@@ -342,6 +342,10 @@ class TestParameter(SetupConfigs):
     def test_empty_choices_should_blow_up(self):
         self.assertRaises(ValueError, lambda: dsl.Parameter(name='std', choices=[], type=str, help='', actions=lambda _: []))
 
+    def test_no_choices_is_ok(self):
+        param = dsl.Parameter(name='triple', type=str, help='', actions=lambda _: [])
+        self.assertEqual(param.name, 'triple')
+
     def test_name_is_set_correctly(self):
         param = dsl.Parameter(name='std', choices=['c++03'], type=str, help='', actions=lambda _: [])
         self.assertEqual(param.name, 'std')
@@ -430,6 +434,26 @@ class TestParameter(SetupConfigs):
         for a in param.getActions(self.config, self.litConfig.params):
             a.applyTo(self.config)
         self.assertIn('-fno-exceptions', self.config.available_features)
+
+    def test_list_parsed_from_comma_delimited_string_empty(self):
+        self.litConfig.params['additional_features'] = ""
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), [])
+
+    def test_list_parsed_from_comma_delimited_string_1(self):
+        self.litConfig.params['additional_features'] = "feature1"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1'])
+
+    def test_list_parsed_from_comma_delimited_string_2(self):
+        self.litConfig.params['additional_features'] = "feature1,feature2"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1', 'feature2'])
+
+    def test_list_parsed_from_comma_delimited_string_3(self):
+        self.litConfig.params['additional_features'] = "feature1,feature2, feature3"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1', 'feature2', 'feature3'])
 
 
 if __name__ == '__main__':

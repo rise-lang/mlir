@@ -34,9 +34,14 @@
 LLVM_C_EXTERN_C_BEGIN
 
 /**
- * Represents an address in the target process.
+ * Represents an address in the executor process.
  */
 typedef uint64_t LLVMOrcJITTargetAddress;
+
+/**
+ * Represents an address in the executor process.
+ */
+typedef uint64_t LLVMOrcExecutorAddress;
 
 /**
  * Represents generic linkage flags for a symbol definition.
@@ -65,7 +70,7 @@ typedef struct {
  * Represents an evaluated symbol address and flags.
  */
 typedef struct {
-  LLVMOrcJITTargetAddress Address;
+  LLVMOrcExecutorAddress Address;
   LLVMJITSymbolFlags Flags;
 } LLVMJITEvaluatedSymbol;
 
@@ -117,6 +122,28 @@ typedef struct {
  * used to construct a SymbolMap.
  */
 typedef LLVMJITCSymbolMapPair *LLVMOrcCSymbolMapPairs;
+
+/**
+ * Represents a SymbolAliasMapEntry
+ */
+typedef struct {
+  LLVMOrcSymbolStringPoolEntryRef Name;
+  LLVMJITSymbolFlags Flags;
+} LLVMOrcCSymbolAliasMapEntry;
+
+/**
+ * Represents a pair of a symbol name and SymbolAliasMapEntry.
+ */
+typedef struct {
+  LLVMOrcSymbolStringPoolEntryRef Name;
+  LLVMOrcCSymbolAliasMapEntry Entry;
+} LLVMOrcCSymbolAliasMapPair;
+
+/**
+ * Represents a list of (SymbolStringPtr, (SymbolStringPtr, JITSymbolFlags))
+ * pairs that can be used to construct a SymbolFlagsMap.
+ */
+typedef LLVMOrcCSymbolAliasMapPair *LLVMOrcCSymbolAliasMapPairs;
 
 /**
  * Lookup kind. This can be used by definition generators when deciding whether
@@ -300,6 +327,13 @@ typedef struct LLVMOrcOpaqueThreadSafeContext *LLVMOrcThreadSafeContextRef;
 typedef struct LLVMOrcOpaqueThreadSafeModule *LLVMOrcThreadSafeModuleRef;
 
 /**
+ * A function for inspecting/mutating IR modules, suitable for use with
+ * LLVMOrcThreadSafeModuleWithModuleDo.
+ */
+typedef LLVMErrorRef (*LLVMOrcGenericIRModuleOperationFunction)(
+    void *Ctx, LLVMModuleRef M);
+
+/**
  * A reference to an orc::JITTargetMachineBuilder instance.
  */
 typedef struct LLVMOrcOpaqueJITTargetMachineBuilder
@@ -314,6 +348,72 @@ typedef struct LLVMOrcOpaqueObjectLayer *LLVMOrcObjectLayerRef;
  * A reference to an orc::ObjectLinkingLayer instance.
  */
 typedef struct LLVMOrcOpaqueObjectLinkingLayer *LLVMOrcObjectLinkingLayerRef;
+
+/**
+ * A reference to an orc::IRTransformLayer instance.
+ */
+typedef struct LLVMOrcOpaqueIRTransformLayer *LLVMOrcIRTransformLayerRef;
+
+/**
+ * A function for applying transformations as part of an transform layer.
+ *
+ * Implementations of this type are responsible for managing the lifetime
+ * of the Module pointed to by ModInOut: If the LLVMModuleRef value is
+ * overwritten then the function is responsible for disposing of the incoming
+ * module. If the module is simply accessed/mutated in-place then ownership
+ * returns to the caller and the function does not need to do any lifetime
+ * management.
+ *
+ * Clients can call LLVMOrcLLJITGetIRTransformLayer to obtain the transform
+ * layer of a LLJIT instance, and use LLVMOrcIRTransformLayerSetTransform
+ * to set the function. This can be used to override the default transform
+ * layer.
+ */
+typedef LLVMErrorRef (*LLVMOrcIRTransformLayerTransformFunction)(
+    void *Ctx, LLVMOrcThreadSafeModuleRef *ModInOut,
+    LLVMOrcMaterializationResponsibilityRef MR);
+
+/**
+ * A reference to an orc::ObjectTransformLayer instance.
+ */
+typedef struct LLVMOrcOpaqueObjectTransformLayer
+    *LLVMOrcObjectTransformLayerRef;
+
+/**
+ * A function for applying transformations to an object file buffer.
+ *
+ * Implementations of this type are responsible for managing the lifetime
+ * of the memory buffer pointed to by ObjInOut: If the LLVMMemoryBufferRef
+ * value is overwritten then the function is responsible for disposing of the
+ * incoming buffer. If the buffer is simply accessed/mutated in-place then
+ * ownership returns to the caller and the function does not need to do any
+ * lifetime management.
+ *
+ * The transform is allowed to return an error, in which case the ObjInOut
+ * buffer should be disposed of and set to null.
+ */
+typedef LLVMErrorRef (*LLVMOrcObjectTransformLayerTransformFunction)(
+    void *Ctx, LLVMMemoryBufferRef *ObjInOut);
+
+/**
+ * A reference to an orc::IndirectStubsManager instance.
+ */
+typedef struct LLVMOrcOpaqueIndirectStubsManager
+    *LLVMOrcIndirectStubsManagerRef;
+
+/**
+ * A reference to an orc::LazyCallThroughManager instance.
+ */
+typedef struct LLVMOrcOpaqueLazyCallThroughManager
+    *LLVMOrcLazyCallThroughManagerRef;
+
+/**
+ * A reference to an orc::DumpObjects object.
+ *
+ * Can be used to dump object files to disk with unique names. Useful as an
+ * ObjectTransformLayer transform.
+ */
+typedef struct LLVMOrcOpaqueDumpObjects *LLVMOrcDumpObjectsRef;
 
 /**
  * Attach a custom error reporter function to the ExecutionSession.
@@ -471,6 +571,33 @@ LLVMOrcMaterializationUnitRef
 LLVMOrcAbsoluteSymbols(LLVMOrcCSymbolMapPairs Syms, size_t NumPairs);
 
 /**
+ * Create a MaterializationUnit to define lazy re-expots. These are callable
+ * entry points that call through to the given symbols.
+ *
+ * This function takes ownership of the CallableAliases array. The Name
+ * fields of the array elements are taken to have been retained for this
+ * function. This allows the following pattern...
+ *
+ *   size_t NumPairs;
+ *   LLVMOrcCSymbolAliasMapPairs CallableAliases;
+ *   -- Build CallableAliases array --
+ *   LLVMOrcMaterializationUnitRef MU =
+ *      LLVMOrcLazyReexports(LCTM, ISM, JD, CallableAliases, NumPairs);
+ *
+ * ... without requiring cleanup of the elements of the CallableAliases array afterwards.
+ *
+ * The client is still responsible for deleting the CallableAliases array itself.
+ *
+ * If a client wishes to reuse elements of the CallableAliases array after this call they
+ * must explicitly retain each of the elements for themselves.
+ */
+LLVMOrcMaterializationUnitRef LLVMOrcLazyReexports(
+    LLVMOrcLazyCallThroughManagerRef LCTM, LLVMOrcIndirectStubsManagerRef ISM,
+    LLVMOrcJITDylibRef SourceRef, LLVMOrcCSymbolAliasMapPairs CallableAliases,
+    size_t NumPairs);
+// TODO: ImplSymbolMad SrcJDLoc
+
+/**
  * Create a "bare" JITDylib.
  *
  * The client is responsible for ensuring that the JITDylib's name is unique,
@@ -620,6 +747,14 @@ LLVMOrcCreateNewThreadSafeModule(LLVMModuleRef M,
 void LLVMOrcDisposeThreadSafeModule(LLVMOrcThreadSafeModuleRef TSM);
 
 /**
+ * Apply the given function to the module contained in this ThreadSafeModule.
+ */
+LLVMErrorRef
+LLVMOrcThreadSafeModuleWithModuleDo(LLVMOrcThreadSafeModuleRef TSM,
+                                    LLVMOrcGenericIRModuleOperationFunction F,
+                                    void *Ctx);
+
+/**
  * Create a JITTargetMachineBuilder by detecting the host.
  *
  * On success the client owns the resulting JITTargetMachineBuilder. It must be
@@ -652,7 +787,7 @@ void LLVMOrcDisposeJITTargetMachineBuilder(
  * Returns the target triple for the given JITTargetMachineBuilder as a string.
  *
  * The caller owns the resulting string as must dispose of it by calling
- * LLVMOrcJITTargetMachineBuilderDisposeTargetTriple.
+ * LLVMDisposeMessage
  */
 char *LLVMOrcJITTargetMachineBuilderGetTargetTriple(
     LLVMOrcJITTargetMachineBuilderRef JTMB);
@@ -665,11 +800,35 @@ void LLVMOrcJITTargetMachineBuilderSetTargetTriple(
     LLVMOrcJITTargetMachineBuilderRef JTMB, const char *TargetTriple);
 
 /**
- * Destroy a triple string returned by
- * LLVMOrcJITTargetMachineBuilderGetTargetTriple.
+ * Add an object to an ObjectLayer to the given JITDylib.
+ *
+ * Adds a buffer representing an object file to the given JITDylib using the
+ * given ObjectLayer instance. This operation transfers ownership of the buffer
+ * to the ObjectLayer instance. The buffer should not be disposed of or
+ * referenced once this function returns.
+ *
+ * Resources associated with the given object will be tracked by the given
+ * JITDylib's default ResourceTracker.
  */
-void LLVMOrcJITTargetMachineBuilderDisposeTargetTriple(
-    LLVMOrcJITTargetMachineBuilderRef JTMB, char *TargetTriple);
+LLVMErrorRef LLVMOrcObjectLayerAddObjectFile(LLVMOrcObjectLayerRef ObjLayer,
+                                             LLVMOrcJITDylibRef JD,
+                                             LLVMMemoryBufferRef ObjBuffer);
+
+/**
+ * Add an object to an ObjectLayer using the given ResourceTracker.
+ *
+ * Adds a buffer representing an object file to the given ResourceTracker's
+ * JITDylib using the given ObjectLayer instance. This operation transfers
+ * ownership of the buffer to the ObjectLayer instance. The buffer should not
+ * be disposed of or referenced once this function returns.
+ *
+ * Resources associated with the given object will be tracked by
+ * ResourceTracker RT.
+ */
+LLVMErrorRef
+LLVMOrcObjectLayerAddObjectFileWithRT(LLVMOrcObjectLayerRef ObjLayer,
+                                      LLVMOrcResourceTrackerRef RT,
+                                      LLVMMemoryBufferRef ObjBuffer);
 
 /**
  * Emit an object buffer to an ObjectLayer.
@@ -685,6 +844,74 @@ void LLVMOrcObjectLayerEmit(LLVMOrcObjectLayerRef ObjLayer,
  * Dispose of an ObjectLayer.
  */
 void LLVMOrcDisposeObjectLayer(LLVMOrcObjectLayerRef ObjLayer);
+
+/**
+ * Set the transform function of the provided transform layer, passing through a
+ * pointer to user provided context.
+ */
+void LLVMOrcIRTransformLayerSetTransform(
+    LLVMOrcIRTransformLayerRef IRTransformLayer,
+    LLVMOrcIRTransformLayerTransformFunction TransformFunction, void *Ctx);
+
+/**
+ * Set the transform function on an LLVMOrcObjectTransformLayer.
+ */
+void LLVMOrcObjectTransformLayerSetTransform(
+    LLVMOrcObjectTransformLayerRef ObjTransformLayer,
+    LLVMOrcObjectTransformLayerTransformFunction TransformFunction, void *Ctx);
+
+/**
+ * Create a LocalIndirectStubsManager from the given target triple.
+ *
+ * The resulting IndirectStubsManager is owned by the client
+ * and must be disposed of by calling LLVMOrcDisposeDisposeIndirectStubsManager.
+ */
+LLVMOrcIndirectStubsManagerRef
+LLVMOrcCreateLocalIndirectStubsManager(const char *TargetTriple);
+
+/**
+ * Dispose of an IndirectStubsManager.
+ */
+void LLVMOrcDisposeIndirectStubsManager(LLVMOrcIndirectStubsManagerRef ISM);
+
+LLVMErrorRef LLVMOrcCreateLocalLazyCallThroughManager(
+    const char *TargetTriple, LLVMOrcExecutionSessionRef ES,
+    LLVMOrcJITTargetAddress ErrorHandlerAddr,
+    LLVMOrcLazyCallThroughManagerRef *LCTM);
+
+/**
+ * Dispose of an LazyCallThroughManager.
+ */
+void LLVMOrcDisposeLazyCallThroughManager(
+    LLVMOrcLazyCallThroughManagerRef LCTM);
+
+/**
+ * Create a DumpObjects instance.
+ *
+ * DumpDir specifies the path to write dumped objects to. DumpDir may be empty
+ * in which case files will be dumped to the working directory.
+ *
+ * IdentifierOverride specifies a file name stem to use when dumping objects.
+ * If empty then each MemoryBuffer's identifier will be used (with a .o suffix
+ * added if not already present). If an identifier override is supplied it will
+ * be used instead, along with an incrementing counter (since all buffers will
+ * use the same identifier, the resulting files will be named <ident>.o,
+ * <ident>.2.o, <ident>.3.o, and so on). IdentifierOverride should not contain
+ * an extension, as a .o suffix will be added by DumpObjects.
+ */
+LLVMOrcDumpObjectsRef LLVMOrcCreateDumpObjects(const char *DumpDir,
+                                               const char *IdentifierOverride);
+
+/**
+ * Dispose of a DumpObjects instance.
+ */
+void LLVMOrcDisposeDumpObjects(LLVMOrcDumpObjectsRef DumpObjects);
+
+/**
+ * Dump the contents of the given MemoryBuffer.
+ */
+LLVMErrorRef LLVMOrcDumpObjects_CallOperator(LLVMOrcDumpObjectsRef DumpObjects,
+                                             LLVMMemoryBufferRef *ObjBuffer);
 
 LLVM_C_EXTERN_C_END
 

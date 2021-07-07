@@ -332,9 +332,10 @@ void ProfiledBinary::setUpDisassembler(const ELFObjectFileBase *Obj) {
   if (!MII)
     exitWithError("no instruction info for target " + TripleName, FileName);
 
-  MCObjectFileInfo MOFI;
-  MCContext Ctx(AsmInfo.get(), MRI.get(), &MOFI);
-  MOFI.InitMCObjectFileInfo(Triple(TripleName), false, Ctx);
+  MCContext Ctx(Triple(TripleName), AsmInfo.get(), MRI.get(), STI.get());
+  std::unique_ptr<MCObjectFileInfo> MOFI(
+      TheTarget->createMCObjectFileInfo(Ctx, /*PIC=*/false));
+  Ctx.setObjectFileInfo(MOFI.get());
   DisAsm.reset(TheTarget->createMCDisassembler(*STI, Ctx));
   if (!DisAsm)
     exitWithError("no disassembler for target " + TripleName, FileName);
@@ -439,7 +440,8 @@ FrameLocationStack ProfiledBinary::symbolize(const InstructionPointer &IP,
       FunctionName = FunctionSamples::getCanonicalFnName(FunctionName);
     LineLocation Line(CallerFrame.Line - CallerFrame.StartLine,
                       DILocation::getBaseDiscriminatorFromDiscriminator(
-                          CallerFrame.Discriminator));
+                          CallerFrame.Discriminator,
+                          /* IsFSDiscriminator */ false));
     FrameLocation Callsite(FunctionName.str(), Line);
     CallStack.push_back(Callsite);
   }

@@ -2357,14 +2357,15 @@ private:
                          bool ReadAnyTokensBeforeDirective);
   void HandleEndifDirective(Token &EndifToken);
   void HandleElseDirective(Token &Result, const Token &HashToken);
-  void HandleElifDirective(Token &ElifToken, const Token &HashToken);
+  void HandleElifFamilyDirective(Token &ElifToken, const Token &HashToken,
+                                 tok::PPKeywordKind Kind);
 
   // Pragmas.
   void HandlePragmaDirective(PragmaIntroducer Introducer);
 
 public:
   void HandlePragmaOnce(Token &OnceTok);
-  void HandlePragmaMark();
+  void HandlePragmaMark(Token &MarkTok);
   void HandlePragmaPoison();
   void HandlePragmaSystemHeader(Token &SysHeaderTok);
   void HandlePragmaDependency(Token &DependencyTok);

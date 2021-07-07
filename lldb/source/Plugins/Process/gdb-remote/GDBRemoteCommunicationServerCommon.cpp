@@ -8,7 +8,7 @@
 
 #include "GDBRemoteCommunicationServerCommon.h"
 
-#include <errno.h>
+#include <cerrno>
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -168,7 +168,8 @@ GDBRemoteCommunicationServerCommon::GDBRemoteCommunicationServerCommon(
 }
 
 // Destructor
-GDBRemoteCommunicationServerCommon::~GDBRemoteCommunicationServerCommon() {}
+GDBRemoteCommunicationServerCommon::~GDBRemoteCommunicationServerCommon() =
+    default;
 
 GDBRemoteCommunication::PacketResult
 GDBRemoteCommunicationServerCommon::Handle_qHostInfo(

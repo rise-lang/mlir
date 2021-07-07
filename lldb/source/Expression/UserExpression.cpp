@@ -8,7 +8,7 @@
 
 #include "lldb/Host/Config.h"
 
-#include <stdio.h>
+#include <cstdio>
 #if HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -57,7 +57,7 @@ UserExpression::UserExpression(ExecutionContextScope &exe_scope,
       m_expr_prefix(std::string(prefix)), m_language(language),
       m_desired_type(desired_type), m_options(options) {}
 
-UserExpression::~UserExpression() {}
+UserExpression::~UserExpression() = default;
 
 void UserExpression::InstallContext(ExecutionContext &exe_ctx) {
   m_jit_process_wp = exe_ctx.GetProcessSP();

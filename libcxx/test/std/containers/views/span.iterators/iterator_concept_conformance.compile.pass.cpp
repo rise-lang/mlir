@@ -20,9 +20,12 @@ using iterator = std::span<int>::iterator;
 using reverse_iterator = std::span<int>::reverse_iterator;
 using value_type = int;
 
-static_assert(std::bidirectional_iterator<iterator>);
+static_assert(std::contiguous_iterator<iterator>);
 static_assert(std::indirectly_writable<iterator, value_type>);
 static_assert(std::sentinel_for<iterator, iterator>);
 static_assert(!std::sentinel_for<iterator, reverse_iterator>);
 static_assert(std::sized_sentinel_for<iterator, iterator>);
 static_assert(!std::sized_sentinel_for<iterator, reverse_iterator>);
+static_assert(std::indirectly_movable<iterator, int*>);
+static_assert(std::indirectly_movable_storable<iterator, int*>);
+static_assert(std::indirectly_swappable<iterator, iterator>);

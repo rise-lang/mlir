@@ -703,7 +703,7 @@ Register SIRegisterInfo::materializeFrameBaseRegister(MachineBasicBlock *MBB,
     .addFrameIndex(FrameIdx);
 
   if (ST.enableFlatScratch() ) {
-    BuildMI(*MBB, Ins, DL, TII->get(AMDGPU::S_ADD_U32), BaseReg)
+    BuildMI(*MBB, Ins, DL, TII->get(AMDGPU::S_ADD_I32), BaseReg)
         .addReg(OffsetReg, RegState::Kill)
         .addReg(FIReg);
     return BaseReg;
@@ -814,6 +814,13 @@ static unsigned getNumSubRegsForSpillOp(unsigned Op) {
   case AMDGPU::SI_SPILL_A256_SAVE:
   case AMDGPU::SI_SPILL_A256_RESTORE:
     return 8;
+  case AMDGPU::SI_SPILL_S224_SAVE:
+  case AMDGPU::SI_SPILL_S224_RESTORE:
+  case AMDGPU::SI_SPILL_V224_SAVE:
+  case AMDGPU::SI_SPILL_V224_RESTORE:
+  case AMDGPU::SI_SPILL_A224_SAVE:
+  case AMDGPU::SI_SPILL_A224_RESTORE:
+    return 7;
   case AMDGPU::SI_SPILL_S192_SAVE:
   case AMDGPU::SI_SPILL_S192_RESTORE:
   case AMDGPU::SI_SPILL_V192_SAVE:
@@ -1113,7 +1120,7 @@ void SIRegisterInfo::buildSpillLoadStore(
     if (ScratchOffsetReg == AMDGPU::NoRegister) {
       BuildMI(MBB, MI, DL, TII->get(AMDGPU::S_MOV_B32), SOffset).addImm(Offset);
     } else {
-      BuildMI(MBB, MI, DL, TII->get(AMDGPU::S_ADD_U32), SOffset)
+      BuildMI(MBB, MI, DL, TII->get(AMDGPU::S_ADD_I32), SOffset)
           .addReg(ScratchOffsetReg)
           .addImm(Offset);
     }
@@ -1262,9 +1269,9 @@ void SIRegisterInfo::buildSpillLoadStore(
 
   if (ScratchOffsetRegDelta != 0) {
     // Subtract the offset we added to the ScratchOffset register.
-    BuildMI(MBB, MI, DL, TII->get(AMDGPU::S_SUB_U32), SOffset)
+    BuildMI(MBB, MI, DL, TII->get(AMDGPU::S_ADD_I32), SOffset)
         .addReg(SOffset)
-        .addImm(ScratchOffsetRegDelta);
+        .addImm(-ScratchOffsetRegDelta);
   }
 }
 
@@ -1473,6 +1480,7 @@ bool SIRegisterInfo::eliminateSGPRToVGPRSpillFrameIndex(
   case AMDGPU::SI_SPILL_S1024_SAVE:
   case AMDGPU::SI_SPILL_S512_SAVE:
   case AMDGPU::SI_SPILL_S256_SAVE:
+  case AMDGPU::SI_SPILL_S224_SAVE:
   case AMDGPU::SI_SPILL_S192_SAVE:
   case AMDGPU::SI_SPILL_S160_SAVE:
   case AMDGPU::SI_SPILL_S128_SAVE:
@@ -1483,6 +1491,7 @@ bool SIRegisterInfo::eliminateSGPRToVGPRSpillFrameIndex(
   case AMDGPU::SI_SPILL_S1024_RESTORE:
   case AMDGPU::SI_SPILL_S512_RESTORE:
   case AMDGPU::SI_SPILL_S256_RESTORE:
+  case AMDGPU::SI_SPILL_S224_RESTORE:
   case AMDGPU::SI_SPILL_S192_RESTORE:
   case AMDGPU::SI_SPILL_S160_RESTORE:
   case AMDGPU::SI_SPILL_S128_RESTORE:
@@ -1519,6 +1528,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_S1024_SAVE:
     case AMDGPU::SI_SPILL_S512_SAVE:
     case AMDGPU::SI_SPILL_S256_SAVE:
+    case AMDGPU::SI_SPILL_S224_SAVE:
     case AMDGPU::SI_SPILL_S192_SAVE:
     case AMDGPU::SI_SPILL_S160_SAVE:
     case AMDGPU::SI_SPILL_S128_SAVE:
@@ -1533,6 +1543,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_S1024_RESTORE:
     case AMDGPU::SI_SPILL_S512_RESTORE:
     case AMDGPU::SI_SPILL_S256_RESTORE:
+    case AMDGPU::SI_SPILL_S224_RESTORE:
     case AMDGPU::SI_SPILL_S192_RESTORE:
     case AMDGPU::SI_SPILL_S160_RESTORE:
     case AMDGPU::SI_SPILL_S128_RESTORE:
@@ -1547,6 +1558,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_V1024_SAVE:
     case AMDGPU::SI_SPILL_V512_SAVE:
     case AMDGPU::SI_SPILL_V256_SAVE:
+    case AMDGPU::SI_SPILL_V224_SAVE:
     case AMDGPU::SI_SPILL_V192_SAVE:
     case AMDGPU::SI_SPILL_V160_SAVE:
     case AMDGPU::SI_SPILL_V128_SAVE:
@@ -1556,6 +1568,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_A1024_SAVE:
     case AMDGPU::SI_SPILL_A512_SAVE:
     case AMDGPU::SI_SPILL_A256_SAVE:
+    case AMDGPU::SI_SPILL_A224_SAVE:
     case AMDGPU::SI_SPILL_A192_SAVE:
     case AMDGPU::SI_SPILL_A160_SAVE:
     case AMDGPU::SI_SPILL_A128_SAVE:
@@ -1584,6 +1597,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_V128_RESTORE:
     case AMDGPU::SI_SPILL_V160_RESTORE:
     case AMDGPU::SI_SPILL_V192_RESTORE:
+    case AMDGPU::SI_SPILL_V224_RESTORE:
     case AMDGPU::SI_SPILL_V256_RESTORE:
     case AMDGPU::SI_SPILL_V512_RESTORE:
     case AMDGPU::SI_SPILL_V1024_RESTORE:
@@ -1593,6 +1607,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_A128_RESTORE:
     case AMDGPU::SI_SPILL_A160_RESTORE:
     case AMDGPU::SI_SPILL_A192_RESTORE:
+    case AMDGPU::SI_SPILL_A224_RESTORE:
     case AMDGPU::SI_SPILL_A256_RESTORE:
     case AMDGPU::SI_SPILL_A512_RESTORE:
     case AMDGPU::SI_SPILL_A1024_RESTORE: {
@@ -1707,9 +1722,9 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
           FIOp.setIsKill(false);
         }
 
-        BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_ADD_U32), TmpSReg)
-          .addReg(FrameReg)
-          .addImm(Offset);
+        BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_ADD_I32), TmpSReg)
+            .addReg(FrameReg)
+            .addImm(Offset);
 
         if (!UseSGPR)
           BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_MOV_B32_e32), TmpReg)
@@ -1717,10 +1732,10 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 
         if (TmpSReg == FrameReg) {
           // Undo frame register modification.
-          BuildMI(*MBB, std::next(MI), DL, TII->get(AMDGPU::S_SUB_U32),
+          BuildMI(*MBB, std::next(MI), DL, TII->get(AMDGPU::S_ADD_I32),
                   FrameReg)
-            .addReg(FrameReg)
-            .addImm(Offset);
+              .addReg(FrameReg)
+              .addImm(-Offset);
         }
 
         return;
@@ -1794,17 +1809,17 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
             BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_LSHR_B32), ScaledReg)
               .addReg(FrameReg)
               .addImm(ST.getWavefrontSizeLog2());
-            BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_ADD_U32), ScaledReg)
-              .addReg(ScaledReg, RegState::Kill)
-              .addImm(Offset);
+            BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_ADD_I32), ScaledReg)
+                .addReg(ScaledReg, RegState::Kill)
+                .addImm(Offset);
             BuildMI(*MBB, MI, DL, TII->get(AMDGPU::COPY), ResultReg)
               .addReg(ScaledReg, RegState::Kill);
 
             // If there were truly no free SGPRs, we need to undo everything.
             if (!TmpScaledReg.isValid()) {
-              BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_SUB_U32), ScaledReg)
-                .addReg(ScaledReg, RegState::Kill)
-                .addImm(Offset);
+              BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_ADD_I32), ScaledReg)
+                  .addReg(ScaledReg, RegState::Kill)
+                  .addImm(-Offset);
               BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_LSHL_B32), ScaledReg)
                 .addReg(FrameReg)
                 .addImm(ST.getWavefrontSizeLog2());
@@ -1874,6 +1889,8 @@ getAnyVGPRClassForBitWidth(unsigned BitWidth) {
     return &AMDGPU::VReg_160RegClass;
   if (BitWidth <= 192)
     return &AMDGPU::VReg_192RegClass;
+  if (BitWidth <= 224)
+    return &AMDGPU::VReg_224RegClass;
   if (BitWidth <= 256)
     return &AMDGPU::VReg_256RegClass;
   if (BitWidth <= 512)
@@ -1896,6 +1913,8 @@ getAlignedVGPRClassForBitWidth(unsigned BitWidth) {
     return &AMDGPU::VReg_160_Align2RegClass;
   if (BitWidth <= 192)
     return &AMDGPU::VReg_192_Align2RegClass;
+  if (BitWidth <= 224)
+    return &AMDGPU::VReg_224_Align2RegClass;
   if (BitWidth <= 256)
     return &AMDGPU::VReg_256_Align2RegClass;
   if (BitWidth <= 512)
@@ -2036,6 +2055,11 @@ SIRegisterInfo::getPhysRegClass(MCRegister Reg) const {
     &AMDGPU::SReg_192RegClass,
     &AMDGPU::AReg_192_Align2RegClass,
     &AMDGPU::AReg_192RegClass,
+    &AMDGPU::VReg_224_Align2RegClass,
+    &AMDGPU::VReg_224RegClass,
+    &AMDGPU::SReg_224RegClass,
+    &AMDGPU::AReg_224_Align2RegClass,
+    &AMDGPU::AReg_224RegClass,
     &AMDGPU::VReg_256_Align2RegClass,
     &AMDGPU::VReg_256RegClass,
     &AMDGPU::SReg_256RegClass,

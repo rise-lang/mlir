@@ -742,7 +742,8 @@ namespace llvm {
     /// then the VPERM for the shuffle. All in all a very slow sequence.
     TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(MVT VT)
       const override {
-      if (VT.getVectorNumElements() != 1 && VT.getScalarSizeInBits() % 8 == 0)
+      if (!VT.isScalableVector() && VT.getVectorNumElements() != 1 &&
+          VT.getScalarSizeInBits() % 8 == 0)
         return TypeWidenVector;
       return TargetLoweringBase::getPreferredVectorAction(VT);
     }
@@ -870,9 +871,9 @@ namespace llvm {
       return true;
     }
 
-    Instruction *emitLeadingFence(IRBuilder<> &Builder, Instruction *Inst,
+    Instruction *emitLeadingFence(IRBuilderBase &Builder, Instruction *Inst,
                                   AtomicOrdering Ord) const override;
-    Instruction *emitTrailingFence(IRBuilder<> &Builder, Instruction *Inst,
+    Instruction *emitTrailingFence(IRBuilderBase &Builder, Instruction *Inst,
                                    AtomicOrdering Ord) const override;
 
     MachineBasicBlock *
@@ -1048,7 +1049,8 @@ namespace llvm {
     /// Returns true if an argument of type Ty needs to be passed in a
     /// contiguous block of registers in calling convention CallConv.
     bool functionArgumentNeedsConsecutiveRegisters(
-      Type *Ty, CallingConv::ID CallConv, bool isVarArg) const override {
+        Type *Ty, CallingConv::ID CallConv, bool isVarArg,
+        const DataLayout &DL) const override {
       // We support any array type as "consecutive" block in the parameter
       // save area.  The element type defines the alignment requirement and
       // whether the argument should go in GPRs, FPRs, or VRs if available.
@@ -1072,6 +1074,7 @@ namespace llvm {
     /// Override to support customized stack guard loading.
     bool useLoadStackGuardNode() const override;
     void insertSSPDeclarations(Module &M) const override;
+    Value *getSDagStackGuard(const Module &M) const override;
 
     bool isFPImmLegal(const APFloat &Imm, EVT VT,
                       bool ForCodeSize) const override;
@@ -1113,6 +1116,9 @@ namespace llvm {
             IsPatchPoint(IsPatchPoint), IsIndirect(IsIndirect),
             HasNest(HasNest), NoMerge(NoMerge) {}
     };
+
+    CCAssignFn *ccAssignFnForCall(CallingConv::ID CC, bool Return,
+                                  bool IsVarArg) const;
 
   private:
     struct ReuseLoadInfo {
@@ -1196,6 +1202,7 @@ namespace llvm {
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerADJUST_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;

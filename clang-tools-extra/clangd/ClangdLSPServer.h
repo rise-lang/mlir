@@ -11,7 +11,6 @@
 
 #include "ClangdServer.h"
 #include "DraftStore.h"
-#include "Features.inc"
 #include "FindSymbols.h"
 #include "GlobalCompilationDatabase.h"
 #include "LSPBinder.h"
@@ -65,6 +64,9 @@ public:
 
     /// Enable preview of InlayHints feature.
     bool InlayHints = false;
+
+    /// Limit the number of references returned (0 means no limit).
+    size_t ReferencesLimit = 0;
   };
 
   ClangdLSPServer(Transport &Transp, const ThreadsafeFS &TFS,

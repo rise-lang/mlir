@@ -186,10 +186,18 @@ Extract a register of the specified size, starting from the block given by
 index. This will almost certainly be mapped to sub-register COPYs after
 register banks have been selected.
 
+.. code-block:: none
+
+  %3:_(s32) = G_EXTRACT %2:_(s64), 32
+
 G_INSERT
 ^^^^^^^^
 
 Insert a smaller register into a larger one at the specified bit-index.
+
+.. code-block:: none
+
+  %2:_(s64) = G_INSERT %0:(_s64), %1:_(s32), 0
 
 G_MERGE_VALUES
 ^^^^^^^^^^^^^^
@@ -243,6 +251,12 @@ The source operands are registers as follows:
 - Source
 - The least-significant bit for the extraction
 - The width of the extraction
+
+The least-significant bit (lsb) and width operands are in the range:
+
+::
+
+      0 <= lsb < lsb + width <= source bitwidth, where all values are unsigned
 
 G_SBFX sign-extends the result, while G_UBFX zero-extends the result.
 
@@ -700,6 +714,36 @@ G_FENCE
 .. caution::
 
   I couldn't find any documentation on this at the time of writing.
+
+G_MEMCPY
+^^^^^^^^
+
+Generic memcpy. Expects two MachineMemOperands covering the store and load
+respectively, in addition to explicit operands.
+
+G_MEMCPY_INLINE
+^^^^^^^^^^^^^^^
+
+Generic inlined memcpy. Like G_MEMCPY, but it is guaranteed that this version
+will not be lowered as a call to an external function. Currently the size
+operand is required to evaluate as a constant (not an immediate), though that is
+expected to change when llvm.memcpy.inline is taught to support dynamic sizes.
+
+G_MEMMOVE
+^^^^^^^^^
+
+Generic memmove. Similar to G_MEMCPY, but the source and destination memory
+ranges are allowed to overlap.
+
+G_MEMSET
+^^^^^^^^
+
+Generic memset. Expects a MachineMemOperand in addition to explicit operands.
+
+G_BZERO
+^^^^^^^
+
+Generic bzero. Expects a MachineMemOperand in addition to explicit operands.
 
 Control Flow
 ------------
