@@ -293,6 +293,14 @@ public:
       detail::walk<Order>(&op, callback);
   }
 
+  /// Walk the operations in this block in postorder, calling the callback for
+  /// each operation without entering the regions of nested ops.
+  /// See Operation::walk for more details.
+  template <typename FnT, typename RetT = detail::walkResultType<FnT>>
+  RetT walk_shallow(FnT &&callback) {
+    return walk_shallow(begin(), end(), std::forward<FnT>(callback));
+  }
+
   /// Walk the operations in the specified [begin, end) range of this block. The
   /// callback method is called for each nested region, block or operation,
   /// depending on the callback provided. Regions, blocks and operations at the
@@ -312,6 +320,17 @@ public:
       if (detail::walk<Order>(&op, callback).wasInterrupted())
         return WalkResult::interrupt();
     return WalkResult::advance();
+  }
+
+  /// Walk the operations in the specified [begin, end) range of this block in
+  /// postorder, calling the callback for each operation without entering the
+  /// regions of nested ops. This method is invoked for void return callbacks.
+  /// See Operation::walk for more details.
+  template <typename FnT, typename RetT = detail::walkResultType<FnT>>
+  typename std::enable_if<std::is_same<RetT, void>::value, RetT>::type
+  walk_shallow(Block::iterator begin, Block::iterator end, FnT &&callback) {
+    for (auto &op : llvm::make_early_inc_range(llvm::make_range(begin, end)))
+      callback(&op);
   }
 
   //===--------------------------------------------------------------------===//

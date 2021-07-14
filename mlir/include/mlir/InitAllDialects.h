@@ -64,6 +64,7 @@ inline void registerAllDialects(DialectRegistry &registry) {
                   linalg::LinalgDialect,
                   math::MathDialect,
                   memref::MemRefDialect,
+                  rise::RiseDialect,
                   scf::SCFDialect,
                   omp::OpenMPDialect,
                   pdl::PDLDialect,

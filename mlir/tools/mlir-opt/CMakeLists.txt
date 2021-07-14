@@ -26,6 +26,7 @@ if(MLIR_INCLUDE_TESTS)
     MLIRTestAnalysis
     MLIRTestDialect
     MLIRTestIR
+    MLIRTestMLOpt
     MLIRTestPass
     MLIRTestReducer
     MLIRTestRewrite

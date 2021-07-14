@@ -121,6 +121,7 @@ endif()
 
 include_directories( "include")
 include_directories( ${MLIR_INCLUDE_DIR})
+include_directories( ${ML_OPT_INCLUDE_DIR})
 
 # Adding tools/mlir-tblgen here as calling add_tablegen sets some variables like
 # MLIR_TABLEGEN_EXE in PARENT_SCOPE which gets lost if that folder is included
@@ -130,6 +131,7 @@ add_subdirectory(tools/mlir-linalg-ods-gen)
 
 add_subdirectory(include/mlir)
 add_subdirectory(lib)
+add_subdirectory( ${ML_OPT_DIR}/lib build)
 # C API needs all dialects for registration, but should be built before tests.
 add_subdirectory(lib/CAPI)
 if (MLIR_INCLUDE_TESTS)

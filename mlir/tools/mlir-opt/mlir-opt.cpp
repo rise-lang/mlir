@@ -103,6 +103,7 @@ void registerTestPreparationPassWithAllowedMemrefResults();
 void registerTestRecursiveTypesPass();
 void registerTestSCFUtilsPass();
 void registerTestVectorConversions();
+void registerTestMLOptPass();
 } // namespace test
 } // namespace mlir
 
@@ -183,6 +184,7 @@ void registerTestPasses() {
   test::registerTestRecursiveTypesPass();
   test::registerTestSCFUtilsPass();
   test::registerTestVectorConversions();
+  test::registerTestMLOptPass();
 }
 #endif
 
