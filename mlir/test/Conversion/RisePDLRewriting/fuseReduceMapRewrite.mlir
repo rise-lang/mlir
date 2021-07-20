@@ -43,11 +43,11 @@ module @pdl_patterns {
       %tT = pdl.apply_native_rewrite "typeFromAttr"(%t : !pdl.attribute) : !pdl.type
       %t2T = pdl.apply_native_rewrite "typeFromAttr"(%t2 : !pdl.attribute) : !pdl.type
 
-      %reduceLambdaT_0 = pdl.apply_native_rewrite "rise.fun"(%sT, %t2T : !pdl.type, !pdl.type) : !pdl.type
-      %reduceLambdaT = pdl.apply_native_rewrite "rise.fun"(%reduceLambdaT_0, %t2T : !pdl.type, !pdl.type) : !pdl.type     // reduceLambdaT: fun<s -> fun<t2 -> t2>>
-      %reduceLambdaOp = pdl.operation "rise.tmp" -> (%reduceLambdaT : !pdl.type)
+      %reduceLambdaT_0 = pdl.apply_native_rewrite "rise_fun"(%sT, %t2T : !pdl.type, !pdl.type) : !pdl.type
+      %reduceLambdaT = pdl.apply_native_rewrite "rise_fun"(%reduceLambdaT_0, %t2T : !pdl.type, !pdl.type) : !pdl.type     // reduceLambdaT: fun<s -> fun<t2 -> t2>>
 
       // To enable parsing of this rewrite comment out the lambda and its return below and remove the following comments
+//      %reduceLambdaOp = pdl.operation "rise.tmp" -> (%reduceLambdaT : !pdl.type)
 //      %reduceLambda = pdl.result 0 of %reduceLambdaOp
 //      %xOp = pdl.operation "rise.tmp" -> (%xT : !pdl.type)
 //      %x = pdl.result 0 of %xOp
@@ -76,11 +76,11 @@ module @pdl_patterns {
       }
 
       // building funType from back:
-      %arrayT = pdl.apply_native_rewrite "rise.array"(%n, %sT : !pdl.attribute, !pdl.type) : !pdl.type // can't get the type from %array above bcs we don't want to restrict the op that creates that value
-      %newApplyReduceResT = pdl.apply_native_rewrite "rise.array"(%n, %t2T : !pdl.attribute, !pdl.type) : !pdl.type
-      %reduceT_0 = pdl.apply_native_rewrite "rise.fun"(%arrayT, %newApplyReduceResT : !pdl.type, !pdl.type) : !pdl.type
-      %reduceT_1 = pdl.apply_native_rewrite "rise.fun"(%t2T, %reduceT_0 : !pdl.type, !pdl.type) : !pdl.type
-      %reduceT = pdl.apply_native_rewrite "rise.fun"(%reduceLambdaT, %reduceT_1 : !pdl.type, !pdl.type) : !pdl.type
+      %arrayT = pdl.apply_native_rewrite "rise_array"(%n, %sT : !pdl.attribute, !pdl.type) : !pdl.type // can't get the type from %array above bcs we don't want to restrict the op that creates that value
+      %newApplyReduceResT = pdl.apply_native_rewrite "rise_array"(%n, %t2T : !pdl.attribute, !pdl.type) : !pdl.type
+      %reduceT_0 = pdl.apply_native_rewrite "rise_fun"(%arrayT, %newApplyReduceResT : !pdl.type, !pdl.type) : !pdl.type
+      %reduceT_1 = pdl.apply_native_rewrite "rise_fun"(%t2T, %reduceT_0 : !pdl.type, !pdl.type) : !pdl.type
+      %reduceT = pdl.apply_native_rewrite "rise_fun"(%reduceLambdaT, %reduceT_1 : !pdl.type, !pdl.type) : !pdl.type
 
       %newReduce = pdl.operation "rise.reduceSeq"{"n" = %n, "s" = %t, "t" = %t2} -> (%reduceT : !pdl.type)
       %newReduceRes = pdl.result 0 of %newReduce
